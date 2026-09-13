@@ -1,0 +1,47 @@
+services:
+  database-departamentos:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${DEPARTAMENTOS_DB_NAME:-gestion_departamentos}
+      POSTGRES_USER: ${DEPARTAMENTOS_DB_USER:-postgres}
+      POSTGRES_PASSWORD: ${DEPARTAMENTOS_DB_PASSWORD:-postgres}
+    volumes:
+      - departamentos_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DEPARTAMENTOS_DB_USER:-postgres} -d ${DEPARTAMENTOS_DB_NAME:-gestion_departamentos}"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 10s
+    networks:
+      - microservices-network
+
+  database-empleados:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${EMPLEADOS_DB_NAME:-gestion_empleados}
+      POSTGRES_USER: ${EMPLEADOS_DB_USER:-postgres}
+      POSTGRES_PASSWORD: ${EMPLEADOS_DB_PASSWORD:-postgres}
+    volumes:
+      - empleados_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${EMPLEADOS_DB_USER:-postgres} -d ${EMPLEADOS_DB_NAME:-gestion_empleados}"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 10s
+    networks:
+      - microservices-network
+
+networks:
+  microservices-network:
+    name: sistema_rrhh_network
+
+volumes:
+  departamentos_data:
+    name: gestion-departamentos_postgres_data
+
+  empleados_data:
+    name: gestion-empleados_postgres_data

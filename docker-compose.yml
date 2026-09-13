@@ -1,0 +1,59 @@
+include:
+  - ./infrastructure/databases/docker-compose.yml
+
+services:
+  departments-service:
+    build:
+      context: ./services/departments-service
+      dockerfile: Dockerfile
+    depends_on:
+      database-departamentos:
+        condition: service_healthy
+    environment:
+      NODE_ENV: production
+      PORT: ${DEPARTAMENTOS_PORT:-8081}
+      DATABASE_URL: postgresql://${DEPARTAMENTOS_DB_USER:-postgres}:${DEPARTAMENTOS_DB_PASSWORD:-postgres}@database-departamentos:5432/${DEPARTAMENTOS_DB_NAME:-gestion_departamentos}
+    ports:
+      - "${DEPARTAMENTOS_PORT:-8081}:${DEPARTAMENTOS_PORT:-8081}"
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f --silent http://localhost:$${PORT:-8081}/health"]
+      interval: 30s
+      timeout: 5s
+      start_period: 20s
+      retries: 3
+    networks:
+      - microservices-network
+
+  employees-service:
+    build:
+      context: ./services/employees-service
+      dockerfile: Dockerfile
+    environment:
+      SERVER_PORT: ${EMPLEADOS_PORT:-8080}
+      SPRING_DATASOURCE_URL: jdbc:postgresql://database-empleados:5432/${EMPLEADOS_DB_NAME:-gestion_empleados}
+      SPRING_DATASOURCE_USERNAME: ${EMPLEADOS_DB_USER:-postgres}
+      SPRING_DATASOURCE_PASSWORD: ${EMPLEADOS_DB_PASSWORD:-postgres}
+      SPRING_JPA_DDL_AUTO: validate
+      DEPARTMENTS_SERVICE_URL: ${DEPARTMENTS_SERVICE_URL:-http://departments-service:8081}
+    depends_on:
+      database-empleados:
+        condition: service_healthy
+      departments-service:
+        condition: service_healthy
+    ports:
+      - "${EMPLEADOS_PORT:-8080}:${EMPLEADOS_PORT:-8080}"
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f --silent http://localhost:$${SERVER_PORT:-8080}/empleados/health"]
+      interval: 30s
+      timeout: 5s
+      start_period: 20s
+      retries: 3
+    networks:
+      - microservices-network
+
+networks:
+  microservices-network:
+    name: sistema_rrhh_network
+

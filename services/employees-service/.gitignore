@@ -1,0 +1,60 @@
+### Compilados y salida de build ###
+target/
+build/
+*.class
+*.jar
+*.war
+*.ear
+# Excepción: el JAR del Maven Wrapper sí se versiona (permite compilar sin Maven instalado)
+!.mvn/wrapper/maven-wrapper.jar
+# Excepción: carpetas de código fuente que casualmente se llamen target/build
+!**/src/main/**/target/
+!**/src/test/**/target/
+!**/src/main/**/build/
+!**/src/test/**/build/
+
+### Logs y volcados ###
+*.log
+logs/
+hs_err_pid*
+replay_pid*
+*.dumpstream
+
+### IntelliJ IDEA ###
+.idea/
+*.iws
+*.iml
+*.ipr
+out/
+
+### Eclipse / STS ###
+.apt_generated
+.classpath
+.factorypath
+.project
+.settings/
+.springBeans
+.sts4-cache
+
+### VS Code ###
+.vscode/
+
+### NetBeans ###
+/nbproject/private/
+/nbbuild/
+/dist/
+/nbdist/
+/.nb-gradle/
+
+### Sistema operativo ###
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+$RECYCLE.BIN/
+.DS_Store
+
+### Configuración local y secretos ###
+application-local.properties
+application-local.yml
+*.env
+.env
