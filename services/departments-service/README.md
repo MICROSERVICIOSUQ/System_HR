@@ -95,6 +95,10 @@ model Departamento {
 
 Base URL por defecto: `http://localhost:8081`
 
+### Documentación Interactiva (Swagger UI)
+* **Swagger UI:** [http://localhost:8081/docs](http://localhost:8081/docs)
+* **Especificación OpenAPI 3.0 (JSON):** [http://localhost:8081/docs/openapi.json](http://localhost:8081/docs/openapi.json)
+
 ### Resumen
 
 | Método | Ruta | Descripción | Éxito | Errores |

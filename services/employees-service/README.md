@@ -114,12 +114,18 @@ curl -s http://localhost:8080/empleados/health
 
 Base URL por defecto: `http://localhost:8080`
 
+### Documentación Interactiva (Swagger UI)
+* **Swagger UI:** [http://localhost:8080/swagger-ui.html](http://localhost:8080/swagger-ui.html)
+* **Especificación OpenAPI 3.0 (JSON):** [http://localhost:8080/v3/api-docs](http://localhost:8080/v3/api-docs)
+
 ### Resumen
 
 | Método | Ruta | Descripción | Éxito | Errores |
 |---|---|---|---|---|
-| `POST` | `/empleados` | Registrar un empleado | `200` | `400` · `409` |
-| `GET` | `/empleados/{id}` | Consultar por id | `200` | `404` |
+| `GET` | `/empleados/health` | Verificar disponibilidad del servicio | `200` | — |
+| `POST` | `/empleados` | Registrar un empleado asociado a un departamento | `201` | `400` · `409` · `503` |
+| `GET` | `/empleados` | Listar todos los empleados registrados | `200` | `503` |
+| `GET` | `/empleados/{id}` | Consultar empleado por identificador | `200` | `404` · `503` |
 | *(cualquiera)* | *(cualquier otra ruta)* | — | — | `404` |
 
 Éxitos y errores se devuelven en `application/json`.
@@ -486,19 +492,24 @@ employees-service/
 
 ---
 
+## Resiliencia ante fallos de dependencias
+
+El microservicio se comunica vía HTTP con `departments-service` para verificar la existencia del `departamentoId` antes de registrar a un empleado. Para proteger el servicio ante problemas de red o caída de la dependencia:
+
+1. **Timeouts explícitos:** `DepartmentClient` configura un tiempo de conexión de 3s y de lectura de 5s vía `SimpleClientHttpRequestFactory`. Si la dependencia no responde a tiempo, la llamada falla de inmediato liberando el hilo.
+2. **Reintentos con retroceso exponencial:** Utilizando Spring Retry (`@Retryable`), las excepciones de conexión (`ResourceAccessException`) o errores 5xx del servidor remoto (`HttpServerErrorException`) disparan hasta 3 intentos con una espera creciente:
+   $$\text{1s} \longrightarrow \text{2s} \longrightarrow \text{4s}$$
+3. **Decisión al agotar reintentos (Fail-Fast):**
+   * Se rechaza la solicitud retornando `503 Service Unavailable` con el mensaje:
+     `"El servicio de departamentos no está disponible temporalmente"`.
+   * **¿Por qué no se marca como pendiente?:** Aceptar al empleado como "pendiente de validación" comprometería la consistencia de los datos en PostgreSQL (creando posibles registros huérfanos con departamentos inválidos) y violaría el modelo canónico donde el estado debe ser `ACTIVO`. Además, no existe aún una infraestructura de colas asíncronas para reconciliar el estado más adelante.
+
+---
+
 ## Limitaciones conocidas
 
-**Los datos persisten en PostgreSQL.** El volumen Docker `gestion-empleados_postgres_data`
-mantiene la información al recrear los contenedores.
+**Persistencia en base de datos dedicada.** Los datos se almacenan en PostgreSQL (`gestion_empleados`), aislada del resto de servicios.
 
-**Solo hay dos operaciones.** No existen endpoints de actualización, baja ni listado,
-y `estado` no puede cambiarse después del registro.
+**Operaciones implementadas.** Se admiten registro (`POST /empleados`), consulta individual (`GET /empleados/{id}`) y listado total (`GET /empleados`). No existen endpoints de actualización ni de baja física en esta versión.
 
-**`departamentoId` no se valida.** Se acepta cualquier cadena.
-
-**La unicidad se comprueba recorriendo la colección.** `existsByEmail` y
-`existsByNumeroEmpleado` hacen un barrido lineal sobre todos los empleados: es `O(n)`
-por cada registro. Con los volúmenes de un almacenamiento en memoria no importa, pero
-con una base de datos real esto debe ser un índice único.
-
-**Sin observabilidad.** No hay health checks, métricas ni trazas.
+**Estado fijo.** El `estado` se normaliza siempre a `ACTIVO` en el registro. Las transiciones a `EN_VACACIONES` y `RETIRADO` se implementan en retos posteriores.

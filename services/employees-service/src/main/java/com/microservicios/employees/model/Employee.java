@@ -1,6 +1,7 @@
 package com.microservicios.employees.model;
 
 import com.fasterxml.jackson.annotation.JsonProperty;
+import io.swagger.v3.oas.annotations.media.Schema;
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
 import jakarta.persistence.EnumType;
@@ -15,43 +16,53 @@ import java.time.LocalDate;
 
 @Entity
 @Table(name = "employees")
+@Schema(description = "Modelo canónico de datos del Empleado")
 public class Employee {
 
     @Id
     @Column(nullable = false, updatable = false)
     @NotBlank(message = "El id es obligatorio")
+    @Schema(description = "Identificador único asignado al empleado", example = "E001")
     private String id;
 
     @NotBlank(message = "El nombre es obligatorio")
+    @Schema(description = "Nombre del empleado", example = "Juan")
     private String nombre;
 
     @NotBlank(message = "El apellido es obligatorio")
+    @Schema(description = "Apellido del empleado", example = "Pérez")
     private String apellido;
 
     @Column(nullable = false, unique = true)
     @NotBlank(message = "El email es obligatorio")
     @Email(message = "El email no tiene un formato válido")
+    @Schema(description = "Correo electrónico institucional único", example = "juan.perez@empresa.com")
     private String email;
 
     @Column(name = "employee_number", nullable = false, unique = true)
     @NotBlank(message = "El numeroEmpleado es obligatorio")
+    @Schema(description = "Número o código único de empleado", example = "EMP-2026-001")
     private String numeroEmpleado;
 
     @NotBlank(message = "El cargo es obligatorio")
+    @Schema(description = "Cargo o puesto asignado", example = "Desarrollador Senior")
     private String cargo;
 
     @NotBlank(message = "El area es obligatoria")
+    @Schema(description = "Área funcional dentro de la organización", example = "Tecnología")
     private String area;
 
     @NotBlank(message = "El departamentoId es obligatorio")
+    @Schema(description = "Identificador del departamento al que pertenece", example = "D001")
     private String departamentoId;
 
     @NotNull(message = "La fechaIngreso es obligatoria")
+    @Schema(description = "Fecha de ingreso (formato yyyy-MM-dd)", example = "2026-02-10")
     private LocalDate fechaIngreso;
 
     @Enumerated(EnumType.STRING)
     @Column(nullable = false)
-    @NotNull(message = "El estado es obligatorio")
+    @Schema(description = "Estado del empleado (inicialmente siempre ACTIVO)", example = "ACTIVO")
     private EmployeeStatus estado;
 
     public Employee() {}

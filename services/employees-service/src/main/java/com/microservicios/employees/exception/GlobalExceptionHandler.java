@@ -92,18 +92,27 @@ public class GlobalExceptionHandler {
         return construir(HttpStatus.NOT_FOUND, "Recurso no encontrado", request, null);
     }
 
+    /** 503 - la dependencia de departamentos no esta disponible tras los reintentos. */
+    @ExceptionHandler({
+            ResourceAccessException.class,
+            HttpServerErrorException.class
+    })
+    public ResponseEntity<ErrorResponse> departmentServiceUnavailable(RuntimeException ex,
+                                                                      HttpServletRequest request) {
+        return construir(HttpStatus.SERVICE_UNAVAILABLE,
+                "El servicio de departamentos no está disponible temporalmente", request, null);
+    }
+
     /** 503 - la dependencia de persistencia no esta disponible tras los reintentos. */
     @ExceptionHandler({
             DataAccessResourceFailureException.class,
             CannotCreateTransactionException.class,
-            QueryTimeoutException.class,
-            ResourceAccessException.class,
-            HttpServerErrorException.class
+            QueryTimeoutException.class
     })
     public ResponseEntity<ErrorResponse> databaseUnavailable(RuntimeException ex,
                                                               HttpServletRequest request) {
         return construir(HttpStatus.SERVICE_UNAVAILABLE,
-                "La base de datos no esta disponible temporalmente", request, null);
+                "La base de datos no está disponible temporalmente", request, null);
     }
 
     private ResponseEntity<ErrorResponse> construir(HttpStatus status, String mensaje,

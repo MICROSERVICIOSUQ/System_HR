@@ -19,16 +19,21 @@ export class DepartmentRepository {
     );
   }
 
-  async create(data: Omit<Prisma.DepartamentoCreateInput, 'id'>) {
-    const [{ id }] = await withDatabaseRetry(() =>
-      prisma.$queryRaw<{ id: string }[]>`
-        SELECT 'D' || LPAD(nextval('departments_id_seq')::text, 3, '0') AS id
-      `,
-    );
+  async create(data: Partial<Prisma.DepartamentoCreateInput> & { nombre: string; descripcion: string }) {
+    let id = data.id;
+
+    if (!id) {
+      const [generated] = await withDatabaseRetry(() =>
+        prisma.$queryRaw<{ id: string }[]>`
+          SELECT 'D' || LPAD(nextval('departments_id_seq')::text, 3, '0') AS id
+        `,
+      );
+      id = generated.id;
+    }
 
     return withDatabaseRetry(() =>
       prisma.departamento.create({
-        data: { id, ...data },
+        data: { ...data, id },
       }),
     );
   }

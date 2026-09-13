@@ -5,6 +5,7 @@ export const departmentIdSchema = z.object({
 });
 
 export const createDepartmentSchema = z.object({
+  id: z.string().min(1, 'El identificador no puede estar vacio').optional(),
   nombre: z.string().min(1, 'El nombre es obligatorio'),
   descripcion: z.string().min(1, 'La descripcion es obligatoria'),
 });

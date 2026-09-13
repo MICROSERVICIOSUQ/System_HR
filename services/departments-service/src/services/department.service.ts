@@ -11,8 +11,9 @@ export class DepartmentService {
     return this.repository.findById(id);
   }
 
-  async create(data: { nombre: string; descripcion: string }) {
+  async create(data: { id?: string; nombre: string; descripcion: string }) {
     return this.repository.create({
+      ...(data.id !== undefined && { id: data.id }),
       nombre: data.nombre,
       descripcion: data.descripcion,
     });

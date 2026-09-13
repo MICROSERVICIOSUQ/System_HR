@@ -1,6 +1,7 @@
 package com.microservicios.employees;
 
 import com.microservicios.employees.client.DepartmentClient;
+import org.springframework.web.client.ResourceAccessException;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.MethodOrderer;
 import org.junit.jupiter.api.Order;
@@ -138,10 +139,10 @@ class EmployeeEndpointsTest {
                 .andExpect(jsonPath("$.status").value(400))
                 .andExpect(jsonPath("$.error").value("Bad Request"))
                 .andExpect(jsonPath("$.message").value("La solicitud contiene campos inválidos"))
-                .andExpect(jsonPath("$.errores", hasSize(10)))
+                .andExpect(jsonPath("$.errores", hasSize(9)))
                 .andExpect(jsonPath("$.errores[*].campo").value(containsInAnyOrder(
                         "id", "nombre", "apellido", "email", "numeroEmpleado",
-                        "cargo", "area", "departamentoId", "fechaIngreso", "estado")));
+                        "cargo", "area", "departamentoId", "fechaIngreso")));
     }
 
     @Test
@@ -241,5 +242,67 @@ class EmployeeEndpointsTest {
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.message")
                         .value("El departamento con id NOPE no existe"));
+    }
+
+    @Test
+    @Order(15)
+    void departmentServiceFailureReturns503() throws Exception {
+        when(departmentClient.existsById("FAIL")).thenThrow(new ResourceAccessException("Connection timed out"));
+
+        String departamentoFalla = JUAN
+                .replace("\"id\": \"E001\"", "\"id\": \"E050\"")
+                .replace("juan.perez@empresa.com", "departamento.falla@empresa.com")
+                .replace("EMP-2026-001", "EMP-2026-050")
+                .replace("\"departamentoId\": \"IT\"", "\"departamentoId\": \"FAIL\"");
+
+        mockMvc.perform(post("/empleados")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(departamentoFalla))
+                .andExpect(status().isServiceUnavailable())
+                .andExpect(jsonPath("$.status").value(503))
+                .andExpect(jsonPath("$.message")
+                        .value("El servicio de departamentos no está disponible temporalmente"));
+    }
+
+    @Test
+    @Order(16)
+    void openApiDocsEndpointReturns200WithSpec() throws Exception {
+        mockMvc.perform(get("/v3/api-docs"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.openapi").exists())
+                .andExpect(jsonPath("$.info.title").value("Microservicio de Empleados"))
+                .andExpect(jsonPath("$.paths['/empleados']").exists());
+    }
+
+    @Test
+    @Order(17)
+    void swaggerUiEndpointReturnsRedirect() throws Exception {
+        mockMvc.perform(get("/swagger-ui.html"))
+                .andExpect(status().is3xxRedirection());
+    }
+
+    @Test
+    @Order(18)
+    void registrationWithoutEstadoDefaultsToActive() throws Exception {
+        String sinEstado = """
+                {
+                  "id": "E099",
+                  "nombre": "Carlos",
+                  "apellido": "Gómez",
+                  "email": "carlos.gomez@empresa.com",
+                  "numeroEmpleado": "EMP-2026-099",
+                  "cargo": "Desarrollador",
+                  "area": "Tecnología",
+                  "departamentoId": "IT",
+                  "fechaIngreso": "2026-02-15"
+                }
+                """;
+
+        mockMvc.perform(post("/empleados")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(sinEstado))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.id").value("E099"))
+                .andExpect(jsonPath("$.estado").value("ACTIVO"));
     }
 }
