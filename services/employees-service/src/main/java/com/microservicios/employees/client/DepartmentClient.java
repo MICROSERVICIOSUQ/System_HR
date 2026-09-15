@@ -31,6 +31,8 @@ public class DepartmentClient {
             maxAttempts = 3,
             backoff = @Backoff(delay = 1000, multiplier = 2.0)
     )
+
+    
     public boolean existsById(String departmentId) {
         try {
             restClient.get()
