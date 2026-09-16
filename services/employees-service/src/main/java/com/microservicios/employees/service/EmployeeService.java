@@ -33,6 +33,12 @@ public class EmployeeService {
      * La presencia y el formato de los campos ya los garantiza la validación
      * declarativa del modelo ({@code @Valid} en el controller). Aquí solo se
      * comprueban las reglas que dependen del estado del repositorio.
+     *
+     * Orden: email → numeroEmpleado → id → departamento. Las tres comprobaciones
+     * locales van antes de la llamada HTTP a departments-service para no gastar
+     * un round-trip (ni sus reintentos) en un registro que fallará igualmente
+     * por duplicado. El orden visible para el cliente en las tres reglas del
+     * contrato (email, numeroEmpleado, departamento) no cambia.
      */
     @Retryable(
             retryFor = {
@@ -50,11 +56,11 @@ public class EmployeeService {
         if (repository.existsByNumeroEmpleado(employee.getEmployeeNumber())) {
             throw new EmployeeNumberAlreadyRegisteredException(employee.getEmployeeNumber());
         }
-        if (!departmentClient.existsById(employee.getDepartamentoId())) {
-            throw new DepartmentNotFoundException(employee.getDepartamentoId());
-        }
         if (repository.existsById(employee.getId())) {
             throw new IdAlreadyRegisteredException(employee.getId());
+        }
+        if (!departmentClient.existsById(employee.getDepartamentoId())) {
+            throw new DepartmentNotFoundException(employee.getDepartamentoId());
         }
         employee.setStatus(EmployeeStatus.ACTIVE);
         return repository.save(employee);

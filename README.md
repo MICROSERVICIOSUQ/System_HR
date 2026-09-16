@@ -35,7 +35,7 @@ En cumplimiento con el principio de **autonomía de los microservicios**, cada s
 
 Cada interfaz permite probar interactivamente los endpoints y documenta:
 - Propósito detallado de cada operación y parámetros requeridos.
-- Códigos de respuesta HTTP posibles (`200 OK`, `201 Created`, `204 No Content`, `400 Bad Request`, `404 Not Found`, `409 Conflict`, `503 Service Unavailable`).
+- Códigos de respuesta HTTP posibles (`200 OK`, `201 Created`, `204 No Content`, `400 Bad Request`, `404 Not Found`, `503 Service Unavailable`).
 - Esquemas de datos (*Schemas*) para las cargas útiles de entrada (*request bodies*) y modelos de dominio de salida con ejemplos.
 
 ## Despliegue y Puesta en Marcha desde Cero
@@ -96,6 +96,203 @@ curl -s http://localhost:8080/empleados/health
 
 ---
 
+## Evidencias
+
+Salida real de terminal, capturada el 2026-09-15 sobre este repositorio. En la
+máquina donde se capturó, el puerto 8080 estaba ocupado por otro proceso, así que
+`employees-service` se publicó con `EMPLEADOS_PORT=8080` (equivale a fijarlo en
+`.env`); nada más cambia. El volumen `softwareiii_postgres_data` que aparece en los
+listados pertenece a otro proyecto de la misma máquina y es ajeno a este sistema.
+
+### Persistencia: `down` conserva los datos, `down -v` los destruye
+
+**1. Arranque limpio y siembra de datos**
+
+```console
+$ docker compose down -v
+ Volume gestion-departamentos_postgres_data Removed
+ Volume gestion-empleados_postgres_data Removed
+ Network sistema_rrhh_network Removed
+
+$ docker compose up --build -d
+Container system_hr-database-empleados-1 Started
+Container system_hr-database-departamentos-1 Started
+Container system_hr-database-departamentos-1 Healthy
+Container system_hr-departments-service-1 Started
+Container system_hr-database-empleados-1 Healthy
+Container system_hr-departments-service-1 Healthy
+Container system_hr-employees-service-1 Started
+
+$ curl -X POST /departamentos  {"id":"IT",...}
+{"id":"IT","nombre":"Tecnología","descripcion":"Departamento de TI","createdAt":"2026-09-16T02:17:14.009Z","updatedAt":"2026-09-16T02:17:14.009Z"}   -> HTTP 201
+
+$ curl -X POST /empleados  {"id":"E001",...,"departamentoId":"IT"}
+{"id":"E001","nombre":"Juan","apellido":"Pérez","email":"juan.perez@empresa.com","cargo":"Desarrollador Senior","area":"Tecnología","departamentoId":"IT","fechaIngreso":"2026-02-10","estado":"ACTIVO","numeroEmpleado":"EMP-2026-001"}   -> HTTP 201
+```
+
+**2. `down` sin `-v` → `up -d` → el empleado sobrevive**
+
+```console
+$ docker compose down
+Container system_hr-employees-service-1 Removed
+Container system_hr-departments-service-1 Removed
+Container system_hr-database-empleados-1 Removed
+Container system_hr-database-departamentos-1 Removed
+Network sistema_rrhh_network Removed
+
+$ docker volume ls | grep postgres_data
+gestion-departamentos_postgres_data
+gestion-empleados_postgres_data
+softwareiii_postgres_data
+
+$ docker compose up -d
+Container system_hr-database-empleados-1 Started
+Container system_hr-database-departamentos-1 Started
+Container system_hr-database-departamentos-1 Healthy
+Container system_hr-departments-service-1 Started
+Container system_hr-database-empleados-1 Healthy
+Container system_hr-departments-service-1 Healthy
+Container system_hr-employees-service-1 Started
+
+$ curl /empleados/E001
+{"id":"E001","nombre":"Juan","apellido":"Pérez","email":"juan.perez@empresa.com","cargo":"Desarrollador Senior","area":"Tecnología","departamentoId":"IT","fechaIngreso":"2026-02-10","estado":"ACTIVO","numeroEmpleado":"EMP-2026-001"}   -> HTTP 200
+```
+
+Los contenedores se destruyeron y se recrearon; los volúmenes no se tocaron y
+`E001` sigue ahí.
+
+**3. `down -v` → `up -d --build` → el empleado desaparece**
+
+```console
+$ docker compose down -v
+Container system_hr-employees-service-1 Removed
+Container system_hr-database-empleados-1 Removed
+Container system_hr-departments-service-1 Removed
+Container system_hr-database-departamentos-1 Removed
+Volume gestion-empleados_postgres_data Removed
+Volume gestion-departamentos_postgres_data Removed
+Network sistema_rrhh_network Removed
+
+$ docker volume ls | grep postgres_data
+softwareiii_postgres_data
+
+$ docker compose up -d --build
+Container system_hr-database-departamentos-1 Started
+Container system_hr-database-empleados-1 Started
+Container system_hr-database-departamentos-1 Healthy
+Container system_hr-departments-service-1 Started
+Container system_hr-database-empleados-1 Healthy
+Container system_hr-departments-service-1 Healthy
+Container system_hr-employees-service-1 Started
+
+$ curl /empleados/E001
+{"timestamp":"2026-09-16T02:18:29.034525442Z","status":404,"error":"Not Found","message":"El empleado con id E001 no existe","path":"/empleados/E001"}   -> HTTP 404
+```
+
+Con `-v` los dos volúmenes se eliminaron; las migraciones recrearon el esquema
+vacío y `E001` ya no existe.
+
+### Arranque ordenado: los cuatro servicios `healthy`
+
+Tras `docker compose down -v && docker compose up --build`:
+
+```console
+$ docker compose ps
+NAME                                 STATUS                    PORTS
+system_hr-database-departamentos-1   Up 25 seconds (healthy)   5432/tcp
+system_hr-database-empleados-1       Up 25 seconds (healthy)   5432/tcp
+system_hr-departments-service-1      Up 19 seconds (healthy)   0.0.0.0:8081->8081/tcp, [::]:8081->8081/tcp
+system_hr-employees-service-1        Up 13 seconds (healthy)   0.0.0.0:8090->8090/tcp, [::]:8090->8090/tcp
+```
+
+El orden de las marcas `Healthy` en la salida de `up` muestra la cadena de
+dependencias: las bases primero, `departments-service` cuando su base está
+`healthy`, y `employees-service` en último lugar, cuando tanto su base como
+`departments-service` lo están. Las migraciones se aplican durante ese arranque:
+
+```console
+$ docker compose logs employees-service | grep -i "flyway\|Started"
+2026-09-16T02:18:19.874Z  INFO 1 --- [main] o.f.core.internal.command.DbMigrate : Successfully applied 1 migration to schema "public", now at version v1 (execution time 00:00.042s)
+2026-09-16T02:18:22.484Z  INFO 1 --- [main] c.m.employees.EmployeesApplication  : Started EmployeesApplication in 6.178 seconds (process running for 6.705)
+
+$ docker compose logs departments-service | grep -i "migration\|Server running"
+3 migrations found in prisma/migrations
+The following migration(s) have been applied:
+Server running on http://localhost:8081
+```
+
+---
+
+## Decisiones técnicas
+
+Las tres decisiones de persistencia están registradas como ADR en
+[`docs/decisions/`](docs/decisions/README.md). Aquí va el resumen; el contexto
+completo, las alternativas descartadas y las consecuencias están en cada ADR.
+
+### (a) Motor de base de datos: un solo motor, instancias separadas — [ADR-001](docs/decisions/ADR-001-motor-de-base-de-datos.md)
+
+Ambos servicios usan **PostgreSQL 16**, cada uno en su propio contenedor, con su
+propio volumen y sus propias credenciales. La separación es a nivel de instancia,
+no solo de esquema: `database-departamentos` y `database-empleados` no comparten
+proceso, puerto ni volumen.
+
+Se evaluó la **persistencia políglota** —elegir el motor óptimo por caso de uso,
+por ejemplo un almacén de documentos para departamentos, que es un catálogo plano
+de lectura frecuente— y se descartó. La ventaja para tres campos planos es
+marginal; el costo es concreto: dos motores que aprender, dos herramientas de
+migración con semánticas distintas, dos estrategias de backup y el doble de
+superficie para fallos de arranque, en un equipo de dos personas con experiencia
+previa en SQL y sin infraestructura de operación.
+
+Lo que se gana: una sola herramienta de backup, monitoreo y diagnóstico; el mismo
+healthcheck (`pg_isready`) para ambas bases; el mismo comportamiento de
+restricciones y transacciones en los dos servicios. Lo que se sacrifica: la opción
+de optimizar el motor por servicio. Si departamentos creciera hacia documentos de
+estructura variable, PostgreSQL seguiría sirviendo (`jsonb`), pero no sería la
+elección ideal. Como cada servicio es dueño exclusivo de su base, cualquiera de los
+dos puede migrar a otro motor en el futuro sin tocar al otro.
+
+### (b) Estrategia de creación de esquema: migraciones versionadas — [ADR-002](docs/decisions/ADR-002-estrategia-de-esquema.md)
+
+Flyway en `employees-service` y Prisma Migrate en `departments-service`, aplicadas
+automáticamente al arrancar cada contenedor. Detalle y comparación con `init.sql`
+y auto-DDL en la sección siguiente.
+
+### (c) Garantía de unicidad: dos capas — [ADR-003](docs/decisions/ADR-003-garantia-de-unicidad.md)
+
+`employees-service` exige `email` y `numeroEmpleado` únicos. La garantía se
+implementa en **dos capas complementarias**, cada una con un propósito distinto:
+
+**Capa 1 — consulta previa** (`existsByEmailIgnoreCase`, `existsByNumeroEmpleado`
+en `EmployeeService.register`). Cubre el caso común y permite responder un mensaje
+preciso: `El email 'juan.perez@empresa.com' ya está registrado`. Esta capa es la
+que produce **buenos mensajes**, no la que garantiza el invariante.
+
+**Capa 2 — restricción `UNIQUE` en el esquema**, declarada en la migración
+`V1__create_employees.sql`:
+
+```sql
+email           VARCHAR(255) NOT NULL UNIQUE,
+employee_number VARCHAR(255) NOT NULL UNIQUE,
+```
+
+La consulta previa, por sí sola, deja abierta una **condición de carrera**: dos
+peticiones con el mismo email que lleguen casi simultáneamente pueden *ambas* pasar
+la comprobación (ninguna ve a la otra porque ninguna ha insertado todavía) y *ambas*
+intentar insertar. Con un servicio multihilo —o varias réplicas— no es teórico. La
+restricción `UNIQUE` es la única barrera que PostgreSQL hace cumplir de forma
+atómica: la segunda inserción falla aunque haya superado la consulta.
+
+Cuando esa carrera ocurre, JPA lanza `DataIntegrityViolationException`; el
+`GlobalExceptionHandler` la captura y responde **`400` con mensaje descriptivo**
+(`El email o número de empleado ya está registrado`), igual que la capa 1. El
+cliente recibe el mismo código en ambos caminos y nunca ve un `500`.
+
+En resumen: **no es "solo consulta previa"**. La consulta da el mensaje amigable;
+la restricción garantiza la corrección. El `id` queda cubierto por la clave primaria.
+
+---
+
 ## Creación y Evolución del Esquema de Base de Datos
 
 En este sistema, la creación y evolución de las tablas no depende de scripts manuales ni de la máquina de un desarrollador en particular: **se ejecuta automáticamente al iniciar los contenedores**.
@@ -148,8 +345,21 @@ Se optó por la **Estrategia de Herramientas de Migraciones (Flyway y Prisma Mig
 Al comunicar `employees-service` con `departments-service` vía HTTP para validar departamentos, se implementaron las dos protecciones esenciales contra fallos de red o caídas temporales:
 
 1. **Timeout explícito:** Se configuró `SimpleClientHttpRequestFactory` con un tiempo de conexión máximo de **3 segundos** y de lectura de **5 segundos**. Esto impide que una lentitud o congelamiento en el servicio de departamentos bloquee indefinidamente los hilos de atención de empleados.
-2. **Reintentos con espera exponencial creciente (Backoff):** Mediante Spring Retry (`@Retryable`), ante errores de conexión (`ResourceAccessException`) o fallos del servidor remoto (`HttpServerErrorException`), el cliente reintenta hasta un máximo de **3 intentos** con retroceso exponencial:
-   $$\text{Intento 1: } 1s \longrightarrow \text{Intento 2: } 2s \longrightarrow \text{Intento 3: } 4s$$
+2. **Reintentos con espera exponencial creciente (Backoff):** Mediante Spring Retry (`@Retryable(maxAttempts = 4, backoff = @Backoff(delay = 1000, multiplier = 2.0))`), ante errores de conexión (`ResourceAccessException`) o fallos del servidor remoto (`HttpServerErrorException`), el cliente hace **4 intentos en total** (1 inicial + 3 reintentos) con esperas crecientes entre ellos:
+
+   ```
+   intento 1 ──(1 s)──► intento 2 ──(2 s)──► intento 3 ──(4 s)──► intento 4 ──► 503
+   ```
+
+   Un `RetryListener` (`RetryLoggingListener`) deja rastro de cada intento en el log. Salida real del test `DepartmentClientRetryTest`, que apunta el cliente a un puerto cerrado y verifica 4 intentos y un tiempo total ≥ 7 s:
+
+   ```
+   20:53:46.688  WARN  Intento 1 fallido en DepartmentClient.existsById: ResourceAccessException — Connection refused
+   20:53:47.700  WARN  Intento 2 fallido en DepartmentClient.existsById: ResourceAccessException — Connection refused   (+1.0 s)
+   20:53:49.721  WARN  Intento 3 fallido en DepartmentClient.existsById: ResourceAccessException — Connection refused   (+2.0 s)
+   20:53:53.753  WARN  Intento 4 fallido en DepartmentClient.existsById: ResourceAccessException — Connection refused   (+4.0 s)
+   20:53:53.753  ERROR Reintentos agotados en DepartmentClient.existsById tras 4 intentos
+   ```
 
 #### Decisión arquitectónica al agotar los reintentos: ¿Rechazar o aceptar como pendiente?
 
@@ -163,6 +373,103 @@ Al comunicar `employees-service` con `departments-service` vía HTTP para valida
 
 ### Resiliencia en la persistencia (PostgreSQL)
 Para fallos transitorios de PostgreSQL durante la ejecución, ambos microservicios implementan reintentos automáticos con espera exponencial y timeouts de conexión. Si la base continúa sin estar disponible tras los intentos, la petición responde `503` sin colapsar el proceso del microservicio.
+
+## Pruebas con Postman y Newman
+
+En [`postman/`](postman/) hay un environment y tres colecciones (Postman Collection v2.1):
+
+| Archivo | Qué prueba |
+|---|---|
+| `system-hr.postman_environment.json` | Variables `empleadosBaseUrl` y `departamentosBaseUrl`. Las tres colecciones las usan; no hay URLs fijas |
+| `system-hr-ecosistema.postman_collection.json` | **Flujo de integración completo** (punto 8 del enunciado): crea IT → crea E001 en IT → consulta → tres rechazos (email, número, departamento) → listados. Los pasos se encadenan con variables de colección |
+| `empleados-service.postman_collection.json` | Contrato de `employees-service`: 201, duplicados 400, departamento inexistente 400, 404 exacto, listado |
+| `departamentos-service.postman_collection.json` | Contrato de `departments-service`: 201, body inválido 400, 404 con id, listado |
+
+Cada request lleva `pm.test()` de código de estado y de contenido, así que una
+corrida completa en verde es evidencia automatizable de las pruebas.
+
+### Importar en Postman
+
+1. **Import** → arrastra los cuatro archivos de `postman/` a la vez.
+2. Arriba a la derecha, selecciona el environment **System HR - local**.
+3. Si el sistema corre en otros puertos, edita el environment (columna *Current value*), no las colecciones.
+4. Abre una colección → **Run** → *Run collection*. Los requests van en orden.
+
+**Precondición:** las colecciones crean registros con ids fijos (`IT`, `E001`,
+`RRHH`, `E101`) y esperan `201` al crearlos. Ejecútalas sobre una base limpia:
+
+```bash
+docker compose down -v && docker compose up --build -d
+```
+
+Las tres colecciones usan ids distintos entre sí, así que pueden correr una tras
+otra sin reiniciar la base.
+
+### Ejecutar por línea de comandos con Newman
+
+Newman es el runner de Postman para terminal; con `npx` no requiere instalación:
+
+```bash
+npx newman run postman/system-hr-ecosistema.postman_collection.json \
+  -e postman/system-hr.postman_environment.json
+```
+
+```bash
+npx newman run postman/empleados-service.postman_collection.json \
+  -e postman/system-hr.postman_environment.json
+```
+
+```bash
+npx newman run postman/departamentos-service.postman_collection.json \
+  -e postman/system-hr.postman_environment.json
+```
+
+Para sobreescribir un puerto sin editar el environment (por ejemplo, si el 8080
+está ocupado en tu máquina):
+
+```bash
+npx newman run postman/system-hr-ecosistema.postman_collection.json \
+  -e postman/system-hr.postman_environment.json \
+  --env-var empleadosBaseUrl=http://localhost:8090
+```
+
+Newman termina con código de salida distinto de cero si cualquier aserción falla,
+así que sirve tal cual en un pipeline de CI.
+
+### Resultado de la última ejecución
+
+Las tres colecciones, corridas en ese orden sobre una base recién creada
+(`down -v && up --build`), el 2026-09-15:
+
+```console
+$ npx newman run postman/system-hr-ecosistema.postman_collection.json -e postman/system-hr.postman_environment.json
+→ 1. Crear departamento IT                        POST /departamentos   [201 Created]   √ √
+→ 2. Crear empleado E001 en IT                    POST /empleados       [201 Created]   √ √ √
+→ 3. Consultar empleado E001                      GET  /empleados/E001  [200 OK]        √ √
+→ 4. POST con email de E001 duplicado             POST /empleados       [400 Bad Request] √ √
+→ 5. POST con numeroEmpleado de E001 duplicado    POST /empleados       [400 Bad Request] √ √
+→ 6. POST con departamentoId inexistente          POST /empleados       [400 Bad Request] √ √
+→ 7. Consultar departamento IT                    GET  /departamentos/IT [200 OK]       √ √
+→ 8. Listar departamentos                         GET  /departamentos   [200 OK]        √ √
+→ 9. Listar empleados                             GET  /empleados       [200 OK]        √ √
+┌─────────────────────────┬───────────────────┬───────────────────┐
+│                         │          executed │            failed │
+│                requests │                 9 │                 0 │
+│              assertions │                19 │                 0 │
+└─────────────────────────┴───────────────────┴───────────────────┘
+
+$ npx newman run postman/empleados-service.postman_collection.json -e postman/system-hr.postman_environment.json
+│                requests │                 8 │                 0 │
+│              assertions │                16 │                 0 │
+
+$ npx newman run postman/departamentos-service.postman_collection.json -e postman/system-hr.postman_environment.json
+│                requests │                 5 │                 0 │
+│              assertions │                10 │                 0 │
+```
+
+**Total: 22 requests, 45 aserciones, 0 fallos.**
+
+---
 
 ## Reglas de organizacion
 

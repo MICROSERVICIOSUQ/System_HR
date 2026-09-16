@@ -1,0 +1,338 @@
+{
+  "info": {
+    "name": "System HR - Ecosistema (flujo de integración)",
+    "description": "Flujo de integración completo entre departments-service y employees-service (punto 8 del enunciado del Reto 2).\n\nLos requests se ENCADENAN mediante variables de colección: el id del departamento creado en el paso 1 alimenta el paso 2, y así sucesivamente. No hay valores fijos entre pasos.\n\nPRECONDICIÓN: base de datos limpia (`docker compose down -v && docker compose up --build`). Los pasos 1 y 2 crean IT y E001; si ya existen, fallarán con 400 por duplicado.\n\nRequiere el environment `system-hr.postman_environment.json` (empleadosBaseUrl, departamentosBaseUrl).\n\nEjecución por línea de comandos:\n  npx newman run postman/system-hr-ecosistema.postman_collection.json -e postman/system-hr.postman_environment.json",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    { "key": "departamentoId", "value": "", "type": "string" },
+    { "key": "empleadoId", "value": "", "type": "string" },
+    { "key": "empleadoEmail", "value": "", "type": "string" },
+    { "key": "empleadoNumero", "value": "", "type": "string" }
+  ],
+  "item": [
+    {
+      "name": "1. Crear departamento IT",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('Status 201 Created', () => pm.response.to.have.status(201));",
+              "",
+              "const d = pm.response.json();",
+              "pm.test('Devuelve id, nombre y descripcion', () => {",
+              "    pm.expect(d.id).to.eql('IT');",
+              "    pm.expect(d.nombre).to.eql('Tecnología');",
+              "    pm.expect(d.descripcion).to.be.a('string').and.not.empty;",
+              "});",
+              "",
+              "// Encadenamiento: el id creado alimenta los pasos siguientes",
+              "pm.collectionVariables.set('departamentoId', d.id);",
+              "console.log('departamentoId = ' + d.id);"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "POST",
+        "header": [{ "key": "Content-Type", "value": "application/json" }],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"id\": \"IT\",\n  \"nombre\": \"Tecnología\",\n  \"descripcion\": \"Departamento de tecnología e infraestructura\"\n}",
+          "options": { "raw": { "language": "json" } }
+        },
+        "url": {
+          "raw": "{{departamentosBaseUrl}}/departamentos",
+          "host": ["{{departamentosBaseUrl}}"],
+          "path": ["departamentos"]
+        },
+        "description": "Crea el departamento que usará el empleado del paso 2. Guarda su id en {{departamentoId}}."
+      },
+      "response": []
+    },
+    {
+      "name": "2. Crear empleado E001 en IT",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('Status 201 Created', () => pm.response.to.have.status(201));",
+              "",
+              "const e = pm.response.json();",
+              "",
+              "pm.test('Trae los 10 campos del modelo canónico', () => {",
+              "    const campos = ['id','nombre','apellido','email','numeroEmpleado','cargo','area','departamentoId','fechaIngreso','estado'];",
+              "    campos.forEach(c => pm.expect(e, 'campo ' + c).to.have.property(c));",
+              "    pm.expect(Object.keys(e)).to.have.lengthOf(10);",
+              "});",
+              "",
+              "pm.test('Estado ACTIVO y departamento encadenado', () => {",
+              "    pm.expect(e.estado).to.eql('ACTIVO');",
+              "    pm.expect(e.departamentoId).to.eql(pm.collectionVariables.get('departamentoId'));",
+              "});",
+              "",
+              "pm.collectionVariables.set('empleadoId', e.id);",
+              "pm.collectionVariables.set('empleadoEmail', e.email);",
+              "pm.collectionVariables.set('empleadoNumero', e.numeroEmpleado);",
+              "console.log('empleadoId = ' + e.id);"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "POST",
+        "header": [{ "key": "Content-Type", "value": "application/json" }],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"id\": \"E001\",\n  \"nombre\": \"Juan\",\n  \"apellido\": \"Pérez\",\n  \"email\": \"juan.perez@empresa.com\",\n  \"numeroEmpleado\": \"EMP-2026-001\",\n  \"cargo\": \"Desarrollador Senior\",\n  \"area\": \"Tecnología\",\n  \"departamentoId\": \"{{departamentoId}}\",\n  \"fechaIngreso\": \"2026-02-10\",\n  \"estado\": \"ACTIVO\"\n}",
+          "options": { "raw": { "language": "json" } }
+        },
+        "url": {
+          "raw": "{{empleadosBaseUrl}}/empleados",
+          "host": ["{{empleadosBaseUrl}}"],
+          "path": ["empleados"]
+        },
+        "description": "departamentoId viene de {{departamentoId}} (paso 1). employees-service lo valida por HTTP contra departments-service usando el hostname interno de Docker."
+      },
+      "response": []
+    },
+    {
+      "name": "3. Consultar empleado E001",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('Status 200', () => pm.response.to.have.status(200));",
+              "",
+              "const e = pm.response.json();",
+              "pm.test('Todos los campos coinciden con lo registrado', () => {",
+              "    pm.expect(e.id).to.eql(pm.collectionVariables.get('empleadoId'));",
+              "    pm.expect(e.nombre).to.eql('Juan');",
+              "    pm.expect(e.apellido).to.eql('Pérez');",
+              "    pm.expect(e.email).to.eql('juan.perez@empresa.com');",
+              "    pm.expect(e.numeroEmpleado).to.eql('EMP-2026-001');",
+              "    pm.expect(e.cargo).to.eql('Desarrollador Senior');",
+              "    pm.expect(e.area).to.eql('Tecnología');",
+              "    pm.expect(e.departamentoId).to.eql(pm.collectionVariables.get('departamentoId'));",
+              "    pm.expect(e.fechaIngreso).to.eql('2026-02-10');",
+              "    pm.expect(e.estado).to.eql('ACTIVO');",
+              "});"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "{{empleadosBaseUrl}}/empleados/{{empleadoId}}",
+          "host": ["{{empleadosBaseUrl}}"],
+          "path": ["empleados", "{{empleadoId}}"]
+        }
+      },
+      "response": []
+    },
+    {
+      "name": "4. POST con email de E001 duplicado",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('Status 400 Bad Request', () => pm.response.to.have.status(400));",
+              "",
+              "const b = pm.response.json();",
+              "pm.test('Mensaje descriptivo con el email en conflicto', () => {",
+              "    pm.expect(b.status).to.eql(400);",
+              "    pm.expect(b.message).to.eql(\"El email '\" + pm.collectionVariables.get('empleadoEmail') + \"' ya está registrado\");",
+              "});"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "POST",
+        "header": [{ "key": "Content-Type", "value": "application/json" }],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"id\": \"E002\",\n  \"nombre\": \"Pedro\",\n  \"apellido\": \"López\",\n  \"email\": \"{{empleadoEmail}}\",\n  \"numeroEmpleado\": \"EMP-2026-002\",\n  \"cargo\": \"Analista\",\n  \"area\": \"Ventas\",\n  \"departamentoId\": \"{{departamentoId}}\",\n  \"fechaIngreso\": \"2026-03-01\",\n  \"estado\": \"ACTIVO\"\n}",
+          "options": { "raw": { "language": "json" } }
+        },
+        "url": {
+          "raw": "{{empleadosBaseUrl}}/empleados",
+          "host": ["{{empleadosBaseUrl}}"],
+          "path": ["empleados"]
+        },
+        "description": "Reutiliza {{empleadoEmail}} guardado en el paso 2. Id y numeroEmpleado son nuevos: el único conflicto es el email. Orden de validación: email → numeroEmpleado → departamento."
+      },
+      "response": []
+    },
+    {
+      "name": "5. POST con numeroEmpleado de E001 duplicado",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('Status 400 Bad Request', () => pm.response.to.have.status(400));",
+              "",
+              "const b = pm.response.json();",
+              "pm.test('Mensaje descriptivo con el número en conflicto', () => {",
+              "    pm.expect(b.status).to.eql(400);",
+              "    pm.expect(b.message).to.eql(\"El número de empleado '\" + pm.collectionVariables.get('empleadoNumero') + \"' ya está registrado\");",
+              "});"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "POST",
+        "header": [{ "key": "Content-Type", "value": "application/json" }],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"id\": \"E003\",\n  \"nombre\": \"Pedro\",\n  \"apellido\": \"López\",\n  \"email\": \"pedro.lopez@empresa.com\",\n  \"numeroEmpleado\": \"{{empleadoNumero}}\",\n  \"cargo\": \"Analista\",\n  \"area\": \"Ventas\",\n  \"departamentoId\": \"{{departamentoId}}\",\n  \"fechaIngreso\": \"2026-03-01\",\n  \"estado\": \"ACTIVO\"\n}",
+          "options": { "raw": { "language": "json" } }
+        },
+        "url": {
+          "raw": "{{empleadosBaseUrl}}/empleados",
+          "host": ["{{empleadosBaseUrl}}"],
+          "path": ["empleados"]
+        },
+        "description": "Email libre para que el conflicto que salte sea el de numeroEmpleado ({{empleadoNumero}}, del paso 2)."
+      },
+      "response": []
+    },
+    {
+      "name": "6. POST con departamentoId inexistente",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('Status 400 Bad Request', () => pm.response.to.have.status(400));",
+              "",
+              "const b = pm.response.json();",
+              "pm.test('Mensaje descriptivo con el departamento inexistente', () => {",
+              "    pm.expect(b.status).to.eql(400);",
+              "    pm.expect(b.message).to.eql('El departamento con id NOEXISTE no existe');",
+              "});"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "POST",
+        "header": [{ "key": "Content-Type", "value": "application/json" }],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"id\": \"E004\",\n  \"nombre\": \"Ana\",\n  \"apellido\": \"García\",\n  \"email\": \"ana.garcia@empresa.com\",\n  \"numeroEmpleado\": \"EMP-2026-004\",\n  \"cargo\": \"Analista\",\n  \"area\": \"Ventas\",\n  \"departamentoId\": \"NOEXISTE\",\n  \"fechaIngreso\": \"2026-03-01\",\n  \"estado\": \"ACTIVO\"\n}",
+          "options": { "raw": { "language": "json" } }
+        },
+        "url": {
+          "raw": "{{empleadosBaseUrl}}/empleados",
+          "host": ["{{empleadosBaseUrl}}"],
+          "path": ["empleados"]
+        },
+        "description": "Email, número e id libres: la única regla que falla es la validación HTTP contra departments-service, que responde 404 y employees-service traduce a 400."
+      },
+      "response": []
+    },
+    {
+      "name": "7. Consultar departamento IT",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('Status 200', () => pm.response.to.have.status(200));",
+              "pm.test('Es el departamento creado en el paso 1', () => {",
+              "    const d = pm.response.json();",
+              "    pm.expect(d.id).to.eql(pm.collectionVariables.get('departamentoId'));",
+              "    pm.expect(d.nombre).to.eql('Tecnología');",
+              "});"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "{{departamentosBaseUrl}}/departamentos/{{departamentoId}}",
+          "host": ["{{departamentosBaseUrl}}"],
+          "path": ["departamentos", "{{departamentoId}}"]
+        }
+      },
+      "response": []
+    },
+    {
+      "name": "8. Listar departamentos",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('Status 200', () => pm.response.to.have.status(200));",
+              "pm.test('Es un array y contiene IT', () => {",
+              "    const lista = pm.response.json();",
+              "    pm.expect(lista).to.be.an('array').with.length.greaterThan(0);",
+              "    pm.expect(lista.map(d => d.id)).to.include(pm.collectionVariables.get('departamentoId'));",
+              "});"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "{{departamentosBaseUrl}}/departamentos",
+          "host": ["{{departamentosBaseUrl}}"],
+          "path": ["departamentos"]
+        }
+      },
+      "response": []
+    },
+    {
+      "name": "9. Listar empleados",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('Status 200', () => pm.response.to.have.status(200));",
+              "pm.test('Es un array, contiene E001 y NO contiene los rechazados', () => {",
+              "    const ids = pm.response.json().map(e => e.id);",
+              "    pm.expect(ids).to.include(pm.collectionVariables.get('empleadoId'));",
+              "    pm.expect(ids).to.not.include.members(['E002', 'E003', 'E004']);",
+              "});"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "{{empleadosBaseUrl}}/empleados",
+          "host": ["{{empleadosBaseUrl}}"],
+          "path": ["empleados"]
+        },
+        "description": "Además de comprobar el listado, verifica que los tres POST rechazados (pasos 4, 5 y 6) no dejaron rastro en la base de datos."
+      },
+      "response": []
+    }
+  ]
+}

@@ -1,10 +1,22 @@
 import type { NextFunction, Request, Response } from 'express';
 import { DatabaseUnavailableError } from '../utils/database-retry.ts';
 
+/** Detalle de un campo que no superó la validación. */
+export interface FieldError {
+  field: string;
+  message: string;
+}
+
+/**
+ * Error de dominio con código HTTP explícito. Es el único tipo que el
+ * errorHandler traduce a su status: todo lo que no sea AppError, error de
+ * base de datos o error conocido de Prisma se responde como 500.
+ */
 export class AppError extends Error {
   constructor(
     public statusCode: number,
     public message: string,
+    public errors?: FieldError[],
   ) {
     super(message);
     this.name = 'AppError';
@@ -24,14 +36,16 @@ export const errorHandler = (
   res: Response,
   _next: NextFunction,
 ) => {
-  console.error(err);
-
   if (err instanceof AppError) {
     return res.status(err.statusCode).json({
       status: 'error',
       message: err.message,
+      ...(err.errors && { errors: err.errors }),
     });
   }
+
+  // De aquí en adelante son fallos no previstos: sí conviene dejar rastro.
+  console.error(err);
 
   if (err instanceof DatabaseUnavailableError) {
     return res.status(503).json({

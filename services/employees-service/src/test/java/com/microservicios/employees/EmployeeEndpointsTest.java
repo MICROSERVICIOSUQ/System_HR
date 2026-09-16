@@ -81,7 +81,7 @@ class EmployeeEndpointsTest {
 
     @Test
     @Order(3)
-        void duplicateIdReturns409() throws Exception {
+        void duplicateIdReturns400() throws Exception {
         String mismoId = JUAN
                 .replace("juan.perez@empresa.com", "otro.correo@empresa.com")
                 .replace("EMP-2026-001", "EMP-2026-999");
@@ -89,9 +89,9 @@ class EmployeeEndpointsTest {
         mockMvc.perform(post("/empleados")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(mismoId))
-                .andExpect(status().isConflict())
-                .andExpect(jsonPath("$.status").value(409))
-                .andExpect(jsonPath("$.error").value("Conflict"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.status").value(400))
+                .andExpect(jsonPath("$.error").value("Bad Request"))
                 .andExpect(jsonPath("$.message").value("El id 'E001' ya está registrado"))
                 .andExpect(jsonPath("$.path").value("/empleados"))
                 .andExpect(jsonPath("$.timestamp").isNotEmpty());
@@ -99,7 +99,7 @@ class EmployeeEndpointsTest {
 
     @Test
     @Order(4)
-        void duplicateEmailReturns409() throws Exception {
+        void duplicateEmailReturns400() throws Exception {
         String otroIdMismoEmail = JUAN
                 .replace("\"id\": \"E001\"", "\"id\": \"E002\"")
                 .replace("EMP-2026-001", "EMP-2026-999");
@@ -107,15 +107,15 @@ class EmployeeEndpointsTest {
         mockMvc.perform(post("/empleados")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(otroIdMismoEmail))
-                .andExpect(status().isConflict())
-                .andExpect(jsonPath("$.status").value(409))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.status").value(400))
                 .andExpect(jsonPath("$.message")
                         .value("El email 'juan.perez@empresa.com' ya está registrado"));
     }
 
     @Test
     @Order(5)
-        void duplicateEmployeeNumberReturns409() throws Exception {
+        void duplicateEmployeeNumberReturns400() throws Exception {
         String otroIdOtroEmail = JUAN
                 .replace("\"id\": \"E001\"", "\"id\": \"E003\"")
                 .replace("juan.perez@empresa.com", "pedro.lopez@empresa.com");
@@ -123,8 +123,8 @@ class EmployeeEndpointsTest {
         mockMvc.perform(post("/empleados")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(otroIdOtroEmail))
-                .andExpect(status().isConflict())
-                .andExpect(jsonPath("$.status").value(409))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.status").value(400))
                 .andExpect(jsonPath("$.message")
                         .value("El número de empleado 'EMP-2026-001' ya está registrado"));
     }

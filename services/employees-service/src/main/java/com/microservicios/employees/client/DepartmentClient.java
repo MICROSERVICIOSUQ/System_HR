@@ -26,13 +26,16 @@ public class DepartmentClient {
                 .build();
     }
 
+    /**
+     * 4 intentos en total = 1 llamada inicial + 3 reintentos, con esperas de
+     * 1 s → 2 s → 4 s entre ellos. Agotados, la excepción sube al
+     * GlobalExceptionHandler y se responde 503.
+     */
     @Retryable(
             retryFor = {ResourceAccessException.class, HttpServerErrorException.class},
-            maxAttempts = 3,
+            maxAttempts = 4,
             backoff = @Backoff(delay = 1000, multiplier = 2.0)
     )
-
-    
     public boolean existsById(String departmentId) {
         try {
             restClient.get()

@@ -199,7 +199,7 @@ curl -s http://localhost:8081/departamentos/b4f7a3cc-9d31-4d2d-9d5f-3d2fa5432c9a
 ```json
 {
   "status": "error",
-  "message": "Departamento no encontrado"
+  "message": "El departamento con id b4f7a3cc-9d31-4d2d-9d5f-3d2fa5432c9a no existe"
 }
 ```
 
@@ -246,10 +246,10 @@ Sin cuerpo en la respuesta.
 
 | HTTP | Mensaje | Cuando ocurre |
 |---|---|---|
-| `400` | `Datos inválidos` | El body no cumple con Zod |
-| `400` | `Parámetros inválidos` | El `id` no es válido |
+| `400` | `Datos inválidos` + `errors[{field,message}]` | El body no cumple con Zod |
+| `400` | `Parámetros inválidos` + `errors[{field,message}]` | El `id` no es válido |
 | `404` | `Ruta no encontrada: METHOD /ruta` | Ruta no definida |
-| `404` | `Departamento no encontrado` | Consulte un departamento inexistente |
+| `404` | `El departamento con id {id} no existe` | Consulte un departamento inexistente |
 | `500` | `Error interno del servidor.` | Error no controlado |
 
 ---

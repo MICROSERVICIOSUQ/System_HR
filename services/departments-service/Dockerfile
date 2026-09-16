@@ -1,7 +1,13 @@
 FROM node:22-alpine AS deps
 
 WORKDIR /app
-ENV DATABASE_URL=postgresql://postgres:postgres@localhost:5432/gestion_departamentos
+
+# `prisma generate` exige que DATABASE_URL exista aunque no se conecte a nada.
+# Se usa un valor de relleno evidente para que ninguna capa de la imagen contenga
+# credenciales con aspecto real. La URL de verdad la inyecta docker-compose en
+# tiempo de ejecución y solo vive en la etapa runner.
+ARG PRISMA_GENERATE_DATABASE_URL=postgresql://placeholder:placeholder@placeholder:5432/placeholder
+ENV DATABASE_URL=${PRISMA_GENERATE_DATABASE_URL}
 
 COPY package*.json ./
 RUN npm ci --include=dev

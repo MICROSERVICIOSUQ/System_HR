@@ -1,0 +1,172 @@
+{
+  "info": {
+    "name": "departamentos-service",
+    "description": "Pruebas del contrato HTTP de departments-service (Node 22, TypeScript, Express 5, Prisma 7, PostgreSQL).\n\nUsa el id RRHH para no colisionar con el IT de la colección de ecosistema: ambas pueden correr sobre la misma base sin interferir.\n\nPRECONDICIÓN: RRHH no debe existir (base limpia o `docker compose down -v`).\n\nRequiere el environment `system-hr.postman_environment.json`.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "item": [
+    {
+      "name": "1. POST /departamentos exitoso",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('Status 201 Created', () => pm.response.to.have.status(201));",
+              "",
+              "const d = pm.response.json();",
+              "pm.test('Devuelve el departamento creado', () => {",
+              "    pm.expect(d.id).to.eql('RRHH');",
+              "    pm.expect(d.nombre).to.eql('Recursos Humanos');",
+              "    pm.expect(d.descripcion).to.eql('Gestión del talento y nómina');",
+              "});"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "POST",
+        "header": [{ "key": "Content-Type", "value": "application/json" }],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"id\": \"RRHH\",\n  \"nombre\": \"Recursos Humanos\",\n  \"descripcion\": \"Gestión del talento y nómina\"\n}",
+          "options": { "raw": { "language": "json" } }
+        },
+        "url": {
+          "raw": "{{departamentosBaseUrl}}/departamentos",
+          "host": ["{{departamentosBaseUrl}}"],
+          "path": ["departamentos"]
+        },
+        "description": "Modelo: {id, nombre, descripcion}. El id es opcional: si se omite, el servicio genera uno secuencial (D001, D002...)."
+      },
+      "response": []
+    },
+    {
+      "name": "2. POST /departamentos con body inválido",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('Status 400 Bad Request (no 500)', () => pm.response.to.have.status(400));",
+              "",
+              "const b = pm.response.json();",
+              "pm.test('Cuerpo de error con detalle por campo', () => {",
+              "    pm.expect(b.status).to.eql('error');",
+              "    pm.expect(b.message).to.eql('Datos inválidos');",
+              "    pm.expect(b.errors).to.be.an('array');",
+              "    const campos = b.errors.map(e => e.field).sort();",
+              "    pm.expect(campos).to.eql(['descripcion', 'nombre']);",
+              "});"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "POST",
+        "header": [{ "key": "Content-Type", "value": "application/json" }],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"nombre\": \"\"\n}",
+          "options": { "raw": { "language": "json" } }
+        },
+        "url": {
+          "raw": "{{departamentosBaseUrl}}/departamentos",
+          "host": ["{{departamentosBaseUrl}}"],
+          "path": ["departamentos"]
+        },
+        "description": "nombre vacío y descripcion ausente. Antes de la corrección este caso devolvía 500."
+      },
+      "response": []
+    },
+    {
+      "name": "3. GET /departamentos/{id} existente",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('Status 200', () => pm.response.to.have.status(200));",
+              "pm.test('Devuelve RRHH', () => {",
+              "    const d = pm.response.json();",
+              "    pm.expect(d.id).to.eql('RRHH');",
+              "    pm.expect(d.nombre).to.eql('Recursos Humanos');",
+              "});"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "{{departamentosBaseUrl}}/departamentos/RRHH",
+          "host": ["{{departamentosBaseUrl}}"],
+          "path": ["departamentos", "RRHH"]
+        }
+      },
+      "response": []
+    },
+    {
+      "name": "4. GET /departamentos/{id} inexistente",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('Status 404 Not Found', () => pm.response.to.have.status(404));",
+              "pm.test('Mensaje descriptivo con el id solicitado', () => {",
+              "    const b = pm.response.json();",
+              "    pm.expect(b.status).to.eql('error');",
+              "    pm.expect(b.message).to.eql('El departamento con id NOPE no existe');",
+              "});"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "{{departamentosBaseUrl}}/departamentos/NOPE",
+          "host": ["{{departamentosBaseUrl}}"],
+          "path": ["departamentos", "NOPE"]
+        }
+      },
+      "response": []
+    },
+    {
+      "name": "5. GET /departamentos (listar)",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('Status 200', () => pm.response.to.have.status(200));",
+              "pm.test('Es un array y contiene RRHH', () => {",
+              "    const lista = pm.response.json();",
+              "    pm.expect(lista).to.be.an('array');",
+              "    pm.expect(lista.map(d => d.id)).to.include('RRHH');",
+              "});"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "{{departamentosBaseUrl}}/departamentos",
+          "host": ["{{departamentosBaseUrl}}"],
+          "path": ["departamentos"]
+        }
+      },
+      "response": []
+    }
+  ]
+}

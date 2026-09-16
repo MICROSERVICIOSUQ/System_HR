@@ -90,6 +90,17 @@
                 <groupId>org.springframework.boot</groupId>
                 <artifactId>spring-boot-maven-plugin</artifactId>
             </plugin>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-surefire-plugin</artifactId>
+                <configuration>
+                    <!-- Surefire arma el classpath del JVM de tests en un JAR de manifiesto;
+                         con rutas que contienen caracteres no ASCII (tildes, eñes) en Windows
+                         ese manifiesto se corrompe y los tests fallan con NoClassDefFoundError.
+                         Pasar el classpath directamente evita el problema. -->
+                    <useManifestOnlyJar>false</useManifestOnlyJar>
+                </configuration>
+            </plugin>
         </plugins>
     </build>
 </project>

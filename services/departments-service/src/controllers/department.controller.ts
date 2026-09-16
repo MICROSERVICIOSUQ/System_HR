@@ -21,7 +21,7 @@ export class DepartmentController {
       const departamento = await this.service.getById(id);
 
       if (!departamento) {
-        throw new AppError(404, 'Departamento no encontrado');
+        throw new AppError(404, `El departamento con id ${id} no existe`);
       }
 
       return res.json(departamento);

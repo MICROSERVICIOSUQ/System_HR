@@ -45,9 +45,8 @@ public class EmployeeController {
     @ApiResponses({
             @ApiResponse(responseCode = "201", description = "Empleado registrado exitosamente",
                     content = @Content(schema = @Schema(implementation = Employee.class))),
-            @ApiResponse(responseCode = "400", description = "Datos de entrada inválidos o departamento inexistente",
-                    content = @Content(schema = @Schema(implementation = ErrorResponse.class))),
-            @ApiResponse(responseCode = "409", description = "Conflicto por duplicidad de id, email o número de empleado",
+            @ApiResponse(responseCode = "400",
+                    description = "Datos de entrada inválidos, departamento inexistente, o id/email/número de empleado ya registrados",
                     content = @Content(schema = @Schema(implementation = ErrorResponse.class))),
             @ApiResponse(responseCode = "503", description = "Base de datos o servicio de departamentos no disponible",
                     content = @Content(schema = @Schema(implementation = ErrorResponse.class)))

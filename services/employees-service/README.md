@@ -45,7 +45,7 @@ transversal:
 └─────────┬───────────┘
           ▼
 ┌─────────────────────┐
-│ EmployeeRepository  │  Persistencia. Hoy ConcurrentHashMap, mañana una BD.
+│ EmployeeRepository  │  Persistencia. Spring Data JPA sobre PostgreSQL.  
 └─────────────────────┘
 
 ┌──────────────────────────┐
@@ -123,7 +123,7 @@ Base URL por defecto: `http://localhost:8080`
 | Método | Ruta | Descripción | Éxito | Errores |
 |---|---|---|---|---|
 | `GET` | `/empleados/health` | Verificar disponibilidad del servicio | `200` | — |
-| `POST` | `/empleados` | Registrar un empleado asociado a un departamento | `201` | `400` · `409` · `503` |
+| `POST` | `/empleados` | Registrar un empleado asociado a un departamento | `201` | `400` · `503` |
 | `GET` | `/empleados` | Listar todos los empleados registrados | `200` | `503` |
 | `GET` | `/empleados/{id}` | Consultar empleado por identificador | `200` | `404` · `503` |
 | *(cualquiera)* | *(cualquier otra ruta)* | — | — | `404` |
@@ -182,9 +182,9 @@ Todos los errores comparten la misma forma:
 ```json
 {
   "timestamp": "2026-09-08T18:42:11.503-05:00",
-  "status": 409,
-  "error": "Conflict",
-  "message": "El id 'E001' ya está registrado",
+  "status": 400,
+  "error": "Bad Request",
+  "message": "El email 'juan.perez@empresa.com' ya está registrado",
   "path": "/empleados"
 }
 ```
@@ -210,42 +210,48 @@ por campo:
 |---|---|---|
 | `400` | `La solicitud contiene campos inválidos` | Falta un campo obligatorio o el email no tiene formato válido. Incluye `errores` |
 | `400` | `El cuerpo de la petición no es un JSON válido o contiene valores con formato incorrecto` | JSON con sintaxis rota, `estado` fuera del enum, o `fechaIngreso` mal formada |
-| `409` | `El id 'E001' ya está registrado` | Ya existe un empleado con ese `id` |
-| `409` | `El email 'juan.perez@empresa.com' ya está registrado` | Ya existe un empleado con ese email |
-| `409` | `El número de empleado 'EMP-2026-001' ya está registrado` | Ya existe un empleado con ese `numeroEmpleado` |
+| `400` | `El id 'E001' ya está registrado` | Ya existe un empleado con ese `id` |
+| `400` | `El email 'juan.perez@empresa.com' ya está registrado` | Ya existe un empleado con ese email |
+| `400` | `El número de empleado 'EMP-2026-001' ya está registrado` | Ya existe un empleado con ese `numeroEmpleado` |
+| `400` | `El email o número de empleado ya está registrado` | La restricción `UNIQUE` de PostgreSQL rechazó una carrera entre dos registros simultáneos |
 | `404` | `El empleado con id E999 no existe` | `GET` con un `id` no registrado |
 | `404` | `Recurso no encontrado` | Ruta no definida, o método HTTP no soportado en una ruta existente |
 
-**400 frente a 409.** El `400` dice que la petición está mal construida: le faltan
-datos o tienen mal formato, y reenviarla igual siempre fallará. El `409` dice que la
-petición es correcta pero choca con información que ya está en el sistema; la misma
-petición podría funcionar en otro momento o con otro identificador.
+**Nota sobre el código de los duplicados.** Se evaluó devolver `409 Conflict` por
+semántica HTTP (la petición está bien formada; el problema es el estado actual del
+sistema), pero se usa `400 Bad Request` para alinear con la especificación del Reto 2.
+El mensaje descriptivo es el mismo en ambos casos; solo cambia el código.
 
-**Orden de comprobación de conflictos:** `id` → `email` → `numeroEmpleado`. Se detiene
-en el primero, así que para provocar el conflicto de `email` hay que enviar un `id`
-libre, y para el de `numeroEmpleado` hay que dejar libres los dos anteriores.
+**Orden de comprobación al registrar:** `email` → `numeroEmpleado` → `id` →
+`departamento`. Las tres primeras son consultas locales a la base de datos; la cuarta
+es una llamada HTTP a `departments-service` con reintentos. Se agrupan las locales
+antes de la remota para no gastar un round-trip (ni sus reintentos) en un registro que
+fallará igualmente por duplicado. El orden visible para el cliente en las tres reglas
+del contrato (`email`, `numeroEmpleado`, `departamento`) no cambia. Se detiene en la
+primera que falla, así que para provocar el error de `numeroEmpleado` hay que enviar
+un `email` libre, y para el de `departamento` hay que dejar libres los tres anteriores.
 
-La validación de campos corre **antes** que las comprobaciones de unicidad: un cuerpo
-al que le falten campos devuelve `400` aunque además duplique un `id`.
+La validación de campos corre **antes** que todas ellas: un cuerpo al que le falten
+campos devuelve `400` de validación aunque además duplique un `id`.
 
 <details>
 <summary><b>Ejemplos curl de cada caso de error</b></summary>
 
 Partiendo de que `E001` (Juan) ya está registrado:
 
-**`409` — Id duplicado** (email y numeroEmpleado libres)
+**`400` — Id duplicado** (email y numeroEmpleado libres)
 ```bash
 curl -s -X POST http://localhost:8080/empleados -H "Content-Type: application/json" \
   -d '{"id":"E001","nombre":"Otro","apellido":"Empleado","email":"otro@empresa.com","numeroEmpleado":"EMP-2026-999","cargo":"Analista","area":"Ventas","departamentoId":"VT","fechaIngreso":"2026-04-01","estado":"ACTIVO"}'
 ```
 
-**`409` — Email duplicado** (id libre)
+**`400` — Email duplicado** (id libre)
 ```bash
 curl -s -X POST http://localhost:8080/empleados -H "Content-Type: application/json" \
   -d '{"id":"E010","nombre":"Pedro","apellido":"López","email":"juan.perez@empresa.com","numeroEmpleado":"EMP-2026-888","cargo":"Analista","area":"Ventas","departamentoId":"VT","fechaIngreso":"2026-04-01","estado":"ACTIVO"}'
 ```
 
-**`409` — numeroEmpleado duplicado** (id y email libres)
+**`400` — numeroEmpleado duplicado** (id y email libres)
 ```bash
 curl -s -X POST http://localhost:8080/empleados -H "Content-Type: application/json" \
   -d '{"id":"E011","nombre":"Pedro","apellido":"López","email":"pedro.lopez@empresa.com","numeroEmpleado":"EMP-2026-001","cargo":"Analista","area":"Ventas","departamentoId":"VT","fechaIngreso":"2026-04-01","estado":"ACTIVO"}'
@@ -369,9 +375,9 @@ cubren el contrato completo:
 |---|---|
 | 1 | El `POST` conserva el `id` enviado por el cliente |
 | 2 | El `GET` recupera el empleado por ese `id` |
-| 3 | Id duplicado → `409` con cuerpo JSON completo |
-| 4 | Email duplicado → `409` |
-| 5 | numeroEmpleado duplicado → `409` |
+| 3 | Id duplicado → `400` con cuerpo JSON completo |
+| 4 | Email duplicado → `400` |
+| 5 | numeroEmpleado duplicado → `400` |
 | 6 | Cuerpo `{}` → `400` enumerando los 10 campos obligatorios |
 | 7 | Falta un campo → `400` señalando solo ese campo |
 | 8 | Email con formato inválido → `400` |
@@ -382,20 +388,29 @@ cubren el contrato completo:
 
 Usan **MockMvc**, por lo que no levantan Tomcat ni ocupan el puerto 8080: puedes
 ejecutarlos con el servicio corriendo en paralelo. Van ordenados con `@Order` porque
-comparten el estado en memoria: el primer test crea `E001` y el resto depende de él.
+comparten la base H2 en memoria del contexto de test: el primer test crea `E001` y el resto depende de él.
 
 ### Postman
 
-La colección [`etc/gestion-empleados.postman_collection.json`](etc/gestion-empleados.postman_collection.json)
-trae los 10 requests organizados en tres carpetas, cada uno con aserciones
-automáticas y respuesta de ejemplo.
+Las colecciones viven en la carpeta [`postman/`](../../postman/) de la raíz del
+repositorio, compartida por todos los servicios:
 
-1. **Import** → arrastra el archivo.
-2. Ejecuta primero `1.1 Registrar empleado (E001 - Juan)`.
-3. El resto usa `E001` directamente, sin variables intermedias.
+| Archivo | Cubre |
+|---|---|
+| `postman/empleados-service.postman_collection.json` | Este servicio: 201, duplicados 400, departamento inexistente 400, 404 exacto, listado |
+| `postman/system-hr-ecosistema.postman_collection.json` | Flujo de integración con departments-service, encadenando variables |
+| `postman/system-hr.postman_environment.json` | `empleadosBaseUrl` y `departamentosBaseUrl` |
 
-Si el servicio no corre en `http://localhost:8080`, ajusta la variable `baseUrl` de
-la colección — pestaña *Variables*, columna **Current value**.
+Importa el environment y la colección, selecciona el environment **System HR - local**
+y ejecuta con *Run collection*. Por línea de comandos:
+
+```bash
+npx newman run postman/empleados-service.postman_collection.json   -e postman/system-hr.postman_environment.json
+```
+
+La colección necesita que `departments-service` esté arriba (crea un departamento de
+apoyo en el request 0) y que `E101` no exista aún: ejecútala sobre una base limpia.
+Instrucciones completas en el [README global](../../README.md#pruebas-con-postman-y-newman).
 
 ---
 
@@ -405,11 +420,9 @@ la colección — pestaña *Variables*, columna **Current value**.
 cuerpo y lo respeta. Esto obliga a dos comprobaciones que no serían necesarias con ids
 autogenerados:
 
-- **Id obligatorio** (`@NotBlank`). Sin `id` no hay clave con la que guardar; además
-  `ConcurrentHashMap` no admite claves nulas y lanzaría un `500`.
-- **Id único** (`409`). `Map.put()` sobrescribe en silencio. Sin esta comprobación, un
-  `POST` con un `id` ya existente reemplazaría al empleado anterior y devolvería `200`
-  como si nada hubiera pasado.
+- **Id obligatorio** (`@NotBlank`). Sin `id` no hay clave primaria con la que guardar.
+- **Id único** (`400`). `save()` de JPA hace *upsert*: sin esta comprobación, un `POST`
+  con un `id` ya existente reemplazaría al empleado anterior en silencio.
 
 **La validación es declarativa y vive en el modelo.** Las anotaciones de Bean
 La validación sobre `Employee` y el `@Valid` del controller rechazan la petición antes de
@@ -422,10 +435,11 @@ por código en lugar de comparar cadenas. En los fallos de validación se añade
 `errores`, con un objeto por campo, para que el formulario del cliente pueda marcar
 cada uno en su sitio en vez de mostrar un mensaje único.
 
-**Los duplicados son `409`, no `400`.** Un `400` significa que la petición está mal
-construida y reenviarla igual siempre fallará. Un duplicado es distinto: la petición
-está perfectamente formada y el problema es el estado actual del sistema, que puede
-cambiar. Esa es exactamente la semántica de `409 Conflict`.
+**Los duplicados son `400`, aunque `409` sería más preciso.** Un duplicado no es una
+petición mal construida: está perfectamente formada y el problema es el estado actual
+del sistema, que puede cambiar. Esa es la semántica de `409 Conflict`. Se evaluó
+usarlo, pero se devuelve `400 Bad Request` para alinear con la especificación del
+Reto 2; el mensaje descriptivo se conserva íntegro.
 
 **Los 404 se resuelven de forma global.** `spring.mvc.throw-exception-if-no-handler-found=true`
 y `spring.web.resources.add-mappings=false` hacen que Spring lance
@@ -473,14 +487,12 @@ employees-service/
 ├── pom.xml
 ├── mvnw / mvnw.cmd                # Maven Wrapper (no requiere Maven instalado)
 ├── .mvn/wrapper/
-├── etc/
-│   └── gestion-empleados.postman_collection.json
 └── src/
     ├── main/
     │   ├── java/com/microservicios/employees/
     │   │   ├── EmployeesApplication.java
     │   │   ├── model/             # Employee, EmployeeStatus
-    │   │   ├── repository/        # EmployeeRepository (ConcurrentHashMap)
+    │   │   ├── repository/        # EmployeeRepository (Spring Data JPA)
     │   │   ├── service/           # EmployeeService
     │   │   ├── controller/        # EmployeeController
     │   │   └── exception/         # Excepciones de dominio + GlobalExceptionHandler

@@ -33,25 +33,29 @@ public class GlobalExceptionHandler {
     }
 
     /**
-     * 409 — los datos enviados chocan con información que ya existe en el sistema.
-     * La petición está bien formada, por eso no es un 400.
+     * 400 — los datos enviados chocan con información que ya existe en el sistema.
+     * Se evaluó 409 Conflict por semántica HTTP; se usa 400 para alinear con la
+     * especificación del Reto 2.
      */
     @ExceptionHandler({
             IdAlreadyRegisteredException.class,
             EmailAlreadyRegisteredException.class,
             EmployeeNumberAlreadyRegisteredException.class
     })
-    public ResponseEntity<ErrorResponse> conflictoDeDatos(RuntimeException ex,
-                                                          HttpServletRequest request) {
-        return construir(HttpStatus.CONFLICT, ex.getMessage(), request, null);
+    public ResponseEntity<ErrorResponse> datosDuplicados(RuntimeException ex,
+                                                         HttpServletRequest request) {
+        return construir(HttpStatus.BAD_REQUEST, ex.getMessage(), request, null);
     }
 
-    /** 409 - la base de datos rechazo un duplicado que supero la consulta previa. */
+    /**
+     * 400 — la restricción UNIQUE de la base de datos rechazó un duplicado que superó
+     * la consulta previa (condición de carrera entre dos registros simultáneos).
+     */
     @ExceptionHandler(DataIntegrityViolationException.class)
-    public ResponseEntity<ErrorResponse> conflictoEnBaseDeDatos(DataIntegrityViolationException ex,
-                                                                 HttpServletRequest request) {
-        return construir(HttpStatus.CONFLICT,
-                "El email o numero de empleado ya esta registrado", request, null);
+    public ResponseEntity<ErrorResponse> duplicadoEnBaseDeDatos(DataIntegrityViolationException ex,
+                                                                HttpServletRequest request) {
+        return construir(HttpStatus.BAD_REQUEST,
+                "El email o número de empleado ya está registrado", request, null);
     }
 
     /** 400 - el empleado debe estar asociado a un departamento existente. */

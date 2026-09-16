@@ -329,7 +329,7 @@ export const openApiSpec = {
           },
           message: {
             type: 'string',
-            example: 'Departamento no encontrado',
+            example: 'El departamento con id D001 no existe',
           },
         },
       },
