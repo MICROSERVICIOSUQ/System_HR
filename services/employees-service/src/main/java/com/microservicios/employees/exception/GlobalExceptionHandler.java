@@ -8,6 +8,7 @@ import org.springframework.http.converter.HttpMessageNotReadableException;
 import org.springframework.dao.DataAccessResourceFailureException;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.dao.QueryTimeoutException;
+import org.springframework.orm.jpa.JpaSystemException;
 import org.springframework.transaction.CannotCreateTransactionException;
 import org.springframework.web.client.HttpServerErrorException;
 import org.springframework.web.client.ResourceAccessException;
@@ -111,7 +112,8 @@ public class GlobalExceptionHandler {
     @ExceptionHandler({
             DataAccessResourceFailureException.class,
             CannotCreateTransactionException.class,
-            QueryTimeoutException.class
+            QueryTimeoutException.class,
+            JpaSystemException.class
     })
     public ResponseEntity<ErrorResponse> databaseUnavailable(RuntimeException ex,
                                                               HttpServletRequest request) {

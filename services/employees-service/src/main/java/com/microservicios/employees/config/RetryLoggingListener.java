@@ -4,6 +4,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.dao.DataAccessResourceFailureException;
 import org.springframework.dao.QueryTimeoutException;
+import org.springframework.orm.jpa.JpaSystemException;
 import org.springframework.retry.RetryCallback;
 import org.springframework.retry.RetryContext;
 import org.springframework.retry.RetryListener;
@@ -32,7 +33,8 @@ public class RetryLoggingListener implements RetryListener {
             HttpServerErrorException.class,
             DataAccessResourceFailureException.class,
             CannotCreateTransactionException.class,
-            QueryTimeoutException.class
+            QueryTimeoutException.class,
+            JpaSystemException.class
     );
 
     @Override

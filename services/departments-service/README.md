@@ -103,12 +103,12 @@ Base URL por defecto: `http://localhost:8081`
 
 | Método | Ruta | Descripción | Éxito | Errores |
 |---|---|---|---|---|
-| `GET` | `/health` | Verificar disponibilidad del servicio | `200` | `500` |
-| `POST` | `/departamentos` | Crear un departamento | `201` | `400` |
-| `GET` | `/departamentos` | Listar todos los departamentos | `200` | `500` |
-| `GET` | `/departamentos/{id}` | Consultar por identificador | `200` | `404` |
-| `PUT` | `/departamentos/{id}` | Actualizar departamento | `200` | `400`, `404` |
-| `DELETE` | `/departamentos/{id}` | Eliminar departamento | `204` | `404` |
+| `GET` | `/health` | Verificar disponibilidad del servicio | `200` | `503` |
+| `POST` | `/departamentos` | Crear un departamento | `201` | `400` · `503` |
+| `GET` | `/departamentos` | Listar todos los departamentos | `200` | `503` |
+| `GET` | `/departamentos/{id}` | Consultar por identificador | `200` | `404` · `503` |
+| `PUT` | `/departamentos/{id}` | Actualizar departamento | `200` | `400` · `404` · `503` |
+| `DELETE` | `/departamentos/{id}` | Eliminar departamento | `204` | `404` · `503` |
 
 ---
 
@@ -250,7 +250,8 @@ Sin cuerpo en la respuesta.
 | `400` | `Parámetros inválidos` + `errors[{field,message}]` | El `id` no es válido |
 | `404` | `Ruta no encontrada: METHOD /ruta` | Ruta no definida |
 | `404` | `El departamento con id {id} no existe` | Consulte un departamento inexistente |
-| `500` | `Error interno del servidor.` | Error no controlado |
+| `503` | `La base de datos no esta disponible temporalmente.` | La BD cae en runtime: tras 3 intentos con backoff exponencial se agota sin recuperación |
+| `500` | `Error interno del servidor.` | Error no controlado, no relacionado con la BD |
 
 ---
 
@@ -355,6 +356,7 @@ departments-service/
 │   ├── services/
 │   │   └── department.service.ts
 │   └── utils/
+│       ├── database-retry.ts    # Reintentos con backoff exponencial + DatabaseUnavailableError
 │       └── http.ts
 └── README.md
 ```
@@ -368,6 +370,33 @@ departments-service/
 - Los errores se manejan de forma centralizada.
 - La API usa rutas uniformes sin prefijo `/api` para mantener consistencia en microservicios.
 - El proyecto usa TypeScript con `NodeNext` y rutas explícitas para mantener compatibilidad con el entorno actual.
+
+---
+
+## Resiliencia ante fallos de base de datos
+
+Todas las operaciones del repositorio se envuelven en `withDatabaseRetry()` (definido en `src/utils/database-retry.ts`). Este mecanismo protege al servicio ante fallos transitorios de PostgreSQL:
+
+1. **Reintentos con backoff exponencial:** Se realizan hasta **3 intentos** con esperas de 250 ms → 500 ms entre ellos. Si la operación tiene éxito en alguno, la petición se resuelve normalmente.
+
+2. **Detección de errores transitorios (`isTransientDatabaseError`):** La función identifica fallos de red o disponibilidad mediante cuatro mecanismos complementarios:
+
+   | Mecanismo | Ejemplos cubiertos |
+   |---|---|
+   | Nombre de clase Prisma | `PrismaClientInitializationError`, `PrismaClientUnknownRequestError` |
+   | Código PostgreSQL en `error.code` | `08000`, `08003`, `57P01`, `ECONNREFUSED`, `ETIMEDOUT`, `P1001`, `P1002` |
+   | Texto del mensaje (cuando `code` está ausente) | `ECONNREFUSED`, `Connection terminated`, `terminated unexpectedly` |
+   | Recursividad sobre `error.cause` | Encadenamientos de error del driver `@prisma/adapter-pg` |
+
+3. **Decisión al agotar reintentos:** Se lanza `DatabaseUnavailableError`, que el middleware central (`errorHandler` en `error.middleware.ts`) captura y traduce en `503 Service Unavailable` con el mensaje `"La base de datos no esta disponible temporalmente."`. El proceso del servicio **no se interrumpe**.
+
+```
+operación Prisma → falla transitoria
+   │
+   ├── intentos 1–2 → espera exponencial → reintento
+   │
+   └── intento 3 fallido → DatabaseUnavailableError → 503
+```
 
 ---
 

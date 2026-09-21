@@ -372,7 +372,32 @@ Al comunicar `employees-service` con `departments-service` vía HTTP para valida
 * **Estrategia Fail-Fast:** El cliente recibe un código `503` estándar que le indica claramente que el sistema no puede garantizar la validez del registro en ese instante y debe reintentar más tarde.
 
 ### Resiliencia en la persistencia (PostgreSQL)
-Para fallos transitorios de PostgreSQL durante la ejecución, ambos microservicios implementan reintentos automáticos con espera exponencial y timeouts de conexión. Si la base continúa sin estar disponible tras los intentos, la petición responde `503` sin colapsar el proceso del microservicio.
+
+Para fallos transitorios de PostgreSQL durante la ejecución, ambos microservicios implementan reintentos automáticos con espera exponencial y timeouts de conexión. Si la base continúa sin estar disponible tras los intentos, la petición responde `503 Service Unavailable` sin colapsar el proceso del microservicio.
+
+#### `employees-service` (Spring Boot)
+
+Cada método de `EmployeeService` está anotado con `@Retryable` (Spring Retry). Ante un fallo de persistencia hace hasta **3 intentos** (250 ms → 500 ms). Las excepciones cubiertas son:
+
+| Excepción | Causa |
+|---|---|
+| `DataAccessResourceFailureException` | Fallo en el pool de conexiones HikariCP |
+| `CannotCreateTransactionException` | Imposible abrir una transacción JPA |
+| `QueryTimeoutException` | Consulta supera el timeout configurado |
+| `JpaSystemException` | JPA envuelve una `PSQLException` de conexión rota en runtime |
+
+Al agotar los reintentos el `GlobalExceptionHandler` captura cualquiera de estas excepciones y responde `503`. El `RetryLoggingListener` deja trazas de cada intento en el log.
+
+#### `departments-service` (Node.js + Prisma)
+
+Cada operación del repositorio se envuelve en `withDatabaseRetry()` (`src/utils/database-retry.ts`). Ante un fallo transitorio ejecuta hasta **3 intentos** (250 ms → 500 ms). La detección de error transitorio cubre:
+
+- Nombres de clase: `PrismaClientInitializationError`, `PrismaClientUnknownRequestError`
+- Códigos PostgreSQL/Node.js en `error.code`: `08xxx`, `57Pxx`, `ECONNREFUSED`, `ETIMEDOUT`, `P1001`, `P1002`
+- Texto del mensaje cuando `error.code` está ausente: `ECONNREFUSED`, `Connection terminated`, etc.
+- Recursividad sobre `error.cause` para errores encadenados del driver
+
+Al agotar los reintentos se lanza `DatabaseUnavailableError`, que el `errorHandler` de Express traduce a `503`.
 
 ## Pruebas con Postman y Newman
 

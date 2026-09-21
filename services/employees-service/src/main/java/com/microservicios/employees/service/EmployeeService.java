@@ -11,6 +11,7 @@ import com.microservicios.employees.model.EmployeeStatus;
 import com.microservicios.employees.repository.EmployeeRepository;
 import org.springframework.dao.DataAccessResourceFailureException;
 import org.springframework.dao.QueryTimeoutException;
+import org.springframework.orm.jpa.JpaSystemException;
 import org.springframework.retry.annotation.Backoff;
 import org.springframework.retry.annotation.Retryable;
 import org.springframework.stereotype.Service;
@@ -44,7 +45,8 @@ public class EmployeeService {
             retryFor = {
                     DataAccessResourceFailureException.class,
                     CannotCreateTransactionException.class,
-                    QueryTimeoutException.class
+                    QueryTimeoutException.class,
+                    JpaSystemException.class
             },
             maxAttempts = 3,
             backoff = @Backoff(delay = 250, multiplier = 2.0)
@@ -70,7 +72,8 @@ public class EmployeeService {
             retryFor = {
                     DataAccessResourceFailureException.class,
                     CannotCreateTransactionException.class,
-                    QueryTimeoutException.class
+                    QueryTimeoutException.class,
+                    JpaSystemException.class
             },
             maxAttempts = 3,
             backoff = @Backoff(delay = 250, multiplier = 2.0)
@@ -84,7 +87,8 @@ public class EmployeeService {
             retryFor = {
                     DataAccessResourceFailureException.class,
                     CannotCreateTransactionException.class,
-                    QueryTimeoutException.class
+                    QueryTimeoutException.class,
+                    JpaSystemException.class
             },
             maxAttempts = 3,
             backoff = @Backoff(delay = 250, multiplier = 2.0)

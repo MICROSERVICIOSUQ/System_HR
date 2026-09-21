@@ -506,15 +506,41 @@ employees-service/
 
 ## Resiliencia ante fallos de dependencias
 
+### Fallo del servicio remoto (`departments-service`)
+
 El microservicio se comunica vía HTTP con `departments-service` para verificar la existencia del `departamentoId` antes de registrar a un empleado. Para proteger el servicio ante problemas de red o caída de la dependencia:
 
-1. **Timeouts explícitos:** `DepartmentClient` configura un tiempo de conexión de 3s y de lectura de 5s vía `SimpleClientHttpRequestFactory`. Si la dependencia no responde a tiempo, la llamada falla de inmediato liberando el hilo.
-2. **Reintentos con retroceso exponencial:** Utilizando Spring Retry (`@Retryable`), las excepciones de conexión (`ResourceAccessException`) o errores 5xx del servidor remoto (`HttpServerErrorException`) disparan hasta 3 intentos con una espera creciente:
+1. **Timeouts explícitos:** `DepartmentClient` configura un tiempo de conexión de 3 s y de lectura de 5 s vía `SimpleClientHttpRequestFactory`. Si la dependencia no responde a tiempo, la llamada falla de inmediato liberando el hilo.
+2. **Reintentos con retroceso exponencial:** Usando Spring Retry (`@Retryable`), las excepciones de conexión (`ResourceAccessException`) o errores 5xx del servidor remoto (`HttpServerErrorException`) disparan hasta **4 intentos** con espera creciente:
    $$\text{1s} \longrightarrow \text{2s} \longrightarrow \text{4s}$$
-3. **Decisión al agotar reintentos (Fail-Fast):**
-   * Se rechaza la solicitud retornando `503 Service Unavailable` con el mensaje:
-     `"El servicio de departamentos no está disponible temporalmente"`.
-   * **¿Por qué no se marca como pendiente?:** Aceptar al empleado como "pendiente de validación" comprometería la consistencia de los datos en PostgreSQL (creando posibles registros huérfanos con departamentos inválidos) y violaría el modelo canónico donde el estado debe ser `ACTIVO`. Además, no existe aún una infraestructura de colas asíncronas para reconciliar el estado más adelante.
+3. **Decisión al agotar reintentos (Fail-Fast):** Se rechaza la solicitud retornando `503 Service Unavailable` con el mensaje `"El servicio de departamentos no está disponible temporalmente"`.
+   * **¿Por qué no se marca como pendiente?:** Aceptar al empleado como "pendiente de validación" comprometería la consistencia de los datos en PostgreSQL y violaría el modelo canónico donde el estado debe ser `ACTIVO`. No existe aún infraestructura de colas asíncronas para reconciliar el estado más adelante.
+
+### Fallo de la base de datos PostgreSQL
+
+Las operaciones de persistencia de `EmployeeService` también están protegidas ante fallos transitorios de la base de datos propia del servicio:
+
+1. **Reintentos con retroceso exponencial:** Cada método público del service (`register`, `findById`, `findAll`) está anotado con `@Retryable`. Ante errores de acceso a datos, ejecuta hasta **3 intentos** con espera creciente:
+   $$\text{250 ms} \longrightarrow \text{500 ms}$$
+
+2. **Excepciones cubiertas:** Se capturan todas las excepciones transitorias que JPA/Hibernate/HikariCP pueden lanzar cuando PostgreSQL no está disponible en runtime:
+
+   | Excepción | Cuándo ocurre |
+   |---|---|
+   | `DataAccessResourceFailureException` | Fallo de acceso al pool de conexiones |
+   | `CannotCreateTransactionException` | No se puede iniciar una transacción |
+   | `QueryTimeoutException` | La consulta supera el tiempo configurado |
+   | `JpaSystemException` | JPA envuelve una `PSQLException` de conexión rota en runtime |
+
+3. **Respuesta al agotar reintentos:** El `GlobalExceptionHandler` captura cualquiera de esas cuatro excepciones y responde `503 Service Unavailable` con el mensaje `"La base de datos no está disponible temporalmente"`. El proceso del servicio no se interrumpe.
+
+4. **Logging de reintentos:** El `RetryLoggingListener` registra cada intento fallido y el agotamiento final en el log, facilitando el diagnóstico:
+
+   ```
+   WARN  Intento 1 fallido en EmployeeService.findAll: JpaSystemException — ...
+   WARN  Intento 2 fallido en EmployeeService.findAll: JpaSystemException — ...
+   ERROR Reintentos agotados en EmployeeService.findAll tras 3 intentos
+   ```
 
 ---
 
