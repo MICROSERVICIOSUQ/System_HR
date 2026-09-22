@@ -15,6 +15,7 @@ import org.springframework.retry.annotation.Backoff;
 import org.springframework.retry.annotation.Retryable;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.CannotCreateTransactionException;
+import io.github.resilience4j.circuitbreaker.annotation.CircuitBreaker;
 
 import java.util.List;
 
@@ -40,6 +41,7 @@ public class EmployeeService {
      * por duplicado. El orden visible para el cliente en las tres reglas del
      * contrato (email, numeroEmpleado, departamento) no cambia.
      */
+    @CircuitBreaker(name = "departmentsCircuitBreaker", fallbackMethod = "registerFallback")
     @Retryable(
             retryFor = {
                     DataAccessResourceFailureException.class,
@@ -49,6 +51,7 @@ public class EmployeeService {
             maxAttempts = 3,
             backoff = @Backoff(delay = 250, multiplier = 2.0)
     )
+    
     public Employee register(Employee employee) {
         if (repository.existsByEmailIgnoreCase(employee.getEmail())) {
             throw new EmailAlreadyRegisteredException(employee.getEmail());

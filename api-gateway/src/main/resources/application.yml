@@ -1,0 +1,29 @@
+server:
+  port: 8080
+
+spring:
+  application:
+    name: api-gateway
+  cloud:
+    gateway:
+      routes:
+        # Enrutamiento para empleados
+        - id: empleados-route
+          uri: ${EMPLEADOS_URL:http://localhost:8080}
+          predicates:
+            - Path=/empleados/**
+
+        # Enrutamiento para departamentos
+        - id: departamentos-route
+          uri: ${DEPARTAMENTOS_URL:http://localhost:8081}
+          predicates:
+            - Path=/departamentos/**
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health, gateway
+  endpoint:
+    health:
+      show-details: always

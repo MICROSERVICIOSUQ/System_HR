@@ -2,6 +2,19 @@ include:
   - ./infrastructure/databases/docker-compose.yml
 
 services:
+  api-gateway:
+    build:
+      context: ./api-gateway
+      dockerfile: Dockerfile
+    ports:
+      - "8080:8080"  
+    environment:
+      - EMPLEADOS_URL=http://employees-service:8080
+      - DEPARTAMENTOS_URL=http://departments-service:8081
+    networks:
+      - microservices-network
+    restart: unless-stopped
+
   departments-service:
     build:
       context: ./services/departments-service
@@ -13,8 +26,8 @@ services:
       NODE_ENV: production
       PORT: ${DEPARTAMENTOS_PORT:-8081}
       DATABASE_URL: postgresql://${DEPARTAMENTOS_DB_USER:-postgres}:${DEPARTAMENTOS_DB_PASSWORD:-postgres}@database-departamentos:5432/${DEPARTAMENTOS_DB_NAME:-gestion_departamentos}
-    ports:
-      - "${DEPARTAMENTOS_PORT:-8081}:${DEPARTAMENTOS_PORT:-8081}"
+    expose:
+      - "${DEPARTAMENTOS_PORT:-8081}"  
     restart: unless-stopped
     healthcheck:
       test: ["CMD-SHELL", "curl -f --silent http://localhost:$${PORT:-8081}/health"]
@@ -41,8 +54,8 @@ services:
         condition: service_healthy
       departments-service:
         condition: service_healthy
-    ports:
-      - "${EMPLEADOS_PORT:-8080}:${EMPLEADOS_PORT:-8080}"
+    expose:
+      - "${EMPLEADOS_PORT:-8080}"  
     restart: unless-stopped
     healthcheck:
       test: ["CMD-SHELL", "curl -f --silent http://localhost:$${SERVER_PORT:-8080}/empleados/health"]
@@ -56,4 +69,3 @@ services:
 networks:
   microservices-network:
     name: sistema_rrhh_network
-
