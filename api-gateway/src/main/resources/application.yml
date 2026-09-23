@@ -1,0 +1,27 @@
+server:
+  port: 8080
+
+spring:
+  application:
+    name: api-gateway
+  cloud:
+    gateway:
+      httpclient:
+        connect-timeout: 3000
+        # Allows the employee client's four attempts and exponential backoff.
+        response-timeout: 45s
+      routes:
+        - id: empleados-route
+          uri: ${EMPLEADOS_URL:http://employees-service:8080}
+          predicates:
+            - Path=/empleados,/empleados/**
+        - id: departamentos-route
+          uri: ${DEPARTAMENTOS_URL:http://departments-service:8081}
+          predicates:
+            - Path=/departamentos,/departamentos/**
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health

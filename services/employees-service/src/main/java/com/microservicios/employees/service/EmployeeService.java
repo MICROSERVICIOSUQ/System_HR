@@ -51,6 +51,7 @@ public class EmployeeService {
             maxAttempts = 3,
             backoff = @Backoff(delay = 250, multiplier = 2.0)
     )
+    
     public Employee register(Employee employee) {
         if (repository.existsByEmailIgnoreCase(employee.getEmail())) {
             throw new EmailAlreadyRegisteredException(employee.getEmail());

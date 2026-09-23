@@ -1,50 +1,27 @@
 package com.microservicios.employees.client;
 
-import org.springframework.beans.factory.annotation.Value;
-import org.springframework.http.client.SimpleClientHttpRequestFactory;
-import org.springframework.retry.annotation.Backoff;
-import org.springframework.retry.annotation.Retryable;
+import io.github.resilience4j.circuitbreaker.CircuitBreaker;
+import io.github.resilience4j.circuitbreaker.CircuitBreakerRegistry;
+import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
-import org.springframework.web.client.HttpClientErrorException;
-import org.springframework.web.client.HttpServerErrorException;
-import org.springframework.web.client.ResourceAccessException;
-import org.springframework.web.client.RestClient;
 
 @Component
 public class DepartmentClient {
+    public static final String CIRCUIT_NAME = "departmentsCircuitBreaker";
+    private final DepartmentHttpClient httpClient;
+    private final CircuitBreaker circuitBreaker;
 
-    private final RestClient restClient;
-
-    public DepartmentClient(@Value("${departments.service.url}") String departmentsServiceUrl) {
-        SimpleClientHttpRequestFactory requestFactory = new SimpleClientHttpRequestFactory();
-        requestFactory.setConnectTimeout(3_000);
-        requestFactory.setReadTimeout(5_000);
-
-        this.restClient = RestClient.builder()
-                .baseUrl(departmentsServiceUrl)
-                .requestFactory(requestFactory)
-                .build();
+    public DepartmentClient(DepartmentHttpClient httpClient, CircuitBreakerRegistry registry) {
+        this.httpClient = httpClient;
+        this.circuitBreaker = registry.circuitBreaker(CIRCUIT_NAME);
+        circuitBreaker.getEventPublisher().onStateTransition(event ->
+                LoggerFactory.getLogger(DepartmentClient.class).info("Circuito departamentos: {}",
+                        event.getStateTransition()));
     }
 
-    /**
-     * 4 intentos en total = 1 llamada inicial + 3 reintentos, con esperas de
-     * 1 s → 2 s → 4 s entre ellos. Agotados, la excepción sube al
-     * GlobalExceptionHandler y se responde 503.
-     */
-    @Retryable(
-            retryFor = {ResourceAccessException.class, HttpServerErrorException.class},
-            maxAttempts = 4,
-            backoff = @Backoff(delay = 1000, multiplier = 2.0)
-    )
     public boolean existsById(String departmentId) {
-        try {
-            restClient.get()
-                    .uri("/departamentos/{id}", departmentId)
-                    .retrieve()
-                    .toBodilessEntity();
-            return true;
-        } catch (HttpClientErrorException.NotFound exception) {
-            return false;
-        }
+        // One exhausted retry sequence is one failed call. OPEN never enters the HTTP client.
+        // A remote 404 returns false and counts as a successful communication.
+        return circuitBreaker.executeSupplier(() -> httpClient.existsById(departmentId));
     }
 }

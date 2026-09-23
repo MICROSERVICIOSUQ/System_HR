@@ -2,6 +2,7 @@ package com.microservicios.employees.exception;
 
 import com.microservicios.employees.exception.ErrorResponse.InvalidField;
 import jakarta.servlet.http.HttpServletRequest;
+import io.github.resilience4j.circuitbreaker.CallNotPermittedException;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.http.converter.HttpMessageNotReadableException;
@@ -100,7 +101,8 @@ public class GlobalExceptionHandler {
     /** 503 - la dependencia de departamentos no esta disponible tras los reintentos. */
     @ExceptionHandler({
             ResourceAccessException.class,
-            HttpServerErrorException.class
+            HttpServerErrorException.class,
+            CallNotPermittedException.class
     })
     public ResponseEntity<ErrorResponse> departmentServiceUnavailable(RuntimeException ex,
                                                                       HttpServletRequest request) {
