@@ -17,6 +17,9 @@ services:
     environment:
       - EMPLEADOS_URL=http://employees-service:${EMPLEADOS_PORT:-8080}
       - DEPARTAMENTOS_URL=http://departments-service:${DEPARTAMENTOS_PORT:-8081}
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
     networks:
       - microservices-network
     restart: unless-stopped
@@ -28,12 +31,15 @@ services:
     depends_on:
       database-departamentos:
         condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
     environment:
       NODE_ENV: production
       PORT: ${DEPARTAMENTOS_PORT:-8081}
       DATABASE_URL: postgresql://${DEPARTAMENTOS_DB_USER:-postgres}:${DEPARTAMENTOS_DB_PASSWORD:-postgres}@database-departamentos:5432/${DEPARTAMENTOS_DB_NAME:-gestion_departamentos}
+      RABBITMQ_URL: amqp://${RABBITMQ_USER:-admin}:${RABBITMQ_PASSWORD:-admin}@${RABBITMQ_HOST:-rabbitmq}:${RABBITMQ_PORT:-5672}
     expose:
-      - "${DEPARTAMENTOS_PORT:-8081}"  
+      - "${DEPARTAMENTOS_PORT:-8081}"
     restart: unless-stopped
     healthcheck:
       test: ["CMD-SHELL", "curl -f --silent http://localhost:$${PORT:-8081}/health"]
@@ -55,13 +61,16 @@ services:
       SPRING_DATASOURCE_PASSWORD: ${EMPLEADOS_DB_PASSWORD:-postgres}
       SPRING_JPA_DDL_AUTO: validate
       DEPARTMENTS_SERVICE_URL: ${DEPARTMENTS_SERVICE_URL:-http://departments-service:${DEPARTAMENTOS_PORT:-8081}}
+      RABBITMQ_URL: amqp://${RABBITMQ_USER:-admin}:${RABBITMQ_PASSWORD:-admin}@${RABBITMQ_HOST:-rabbitmq}:${RABBITMQ_PORT:-5672}
     depends_on:
       database-empleados:
         condition: service_healthy
       departments-service:
         condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
     expose:
-      - "${EMPLEADOS_PORT:-8080}"  
+      - "${EMPLEADOS_PORT:-8080}"
     restart: unless-stopped
     healthcheck:
       test: ["CMD-SHELL", "curl -f --silent http://localhost:$${SERVER_PORT:-8080}/empleados/health"]

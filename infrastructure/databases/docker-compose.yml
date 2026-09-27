@@ -35,6 +35,80 @@ services:
     networks:
       - microservices-network
 
+  database-perfiles:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${PERFILES_DB_NAME:-gestion_perfiles}
+      POSTGRES_USER: ${PERFILES_DB_USER:-postgres}
+      POSTGRES_PASSWORD: ${PERFILES_DB_PASSWORD:-postgres}
+    volumes:
+      - perfiles_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${PERFILES_DB_USER:-postgres} -d ${PERFILES_DB_NAME:-gestion_perfiles}"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 10s
+    networks:
+      - microservices-network
+
+  database-notificaciones:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${NOTIFICACIONES_DB_NAME:-gestion_notificaciones}
+      POSTGRES_USER: ${NOTIFICACIONES_DB_USER:-postgres}
+      POSTGRES_PASSWORD: ${NOTIFICACIONES_DB_PASSWORD:-postgres}
+    volumes:
+      - notificaciones_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${NOTIFICACIONES_DB_USER:-postgres} -d ${NOTIFICACIONES_DB_NAME:-gestion_notificaciones}"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 10s
+    networks:
+      - microservices-network
+
+  database-vacaciones:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${VACACIONES_DB_NAME:-gestion_vacaciones}
+      POSTGRES_USER: ${VACACIONES_DB_USER:-postgres}
+      POSTGRES_PASSWORD: ${VACACIONES_DB_PASSWORD:-postgres}
+    volumes:
+      - vacaciones_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${VACACIONES_DB_USER:-postgres} -d ${VACACIONES_DB_NAME:-gestion_vacaciones}"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 10s
+    networks:
+      - microservices-network
+
+  rabbitmq:
+    image: rabbitmq:3-management
+    restart: unless-stopped
+    environment:
+      RABBITMQ_DEFAULT_USER: ${RABBITMQ_USER:-admin}
+      RABBITMQ_DEFAULT_PASS: ${RABBITMQ_PASSWORD:-admin}
+    ports:
+      - "5672:5672"
+      - "15672:15672"
+    volumes:
+      - rabbitmq_data:/var/lib/rabbitmq
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "check_port_connectivity"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+    networks:
+      - microservices-network
+
 networks:
   microservices-network:
     name: sistema_rrhh_network
@@ -45,3 +119,15 @@ volumes:
 
   empleados_data:
     name: gestion-empleados_postgres_data
+
+  perfiles_data:
+    name: gestion-perfiles_postgres_data
+
+  notificaciones_data:
+    name: gestion-notificaciones_postgres_data
+
+  vacaciones_data:
+    name: gestion-vacaciones_postgres_data
+
+  rabbitmq_data:
+    name: sistema_rrhh_rabbitmq_data

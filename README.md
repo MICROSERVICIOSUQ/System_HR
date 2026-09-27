@@ -184,3 +184,92 @@ Se conservan PostgreSQL por servicio, las migraciones versionadas y las restricc
 - `docs/`: arquitectura y decisiones técnicas.
 
 La [evidencia de ejecución verificada](docs/evidencias/reto3-evidencia.jsonl) contiene respuestas, tiempos, estados y resultados de pruebas. Las capturas o el video exigidos para la entrega todavía deben adjuntarse.
+
+## Infraestructura de mensajería
+
+### Justificación técnica de RabbitMQ
+
+En el Reto 4 se incorporan nuevos microservicios (perfiles, notificaciones, vacaciones) que deben reaccionar a eventos producidos por los servicios existentes —por ejemplo, cuando se registra un empleado nuevo. Una llamada HTTP síncrona acoplaría los servicios: si notificaciones no responde, el registro de empleados fallaría. RabbitMQ resuelve esto desacoplando productores y consumidores mediante colas de mensajes:
+
+- El productor (por ejemplo, employees-service) publica un evento y continúa sin esperar respuesta.
+- Cada consumidor (perfiles-service, notificaciones-service, vacaciones-service) procesa el mensaje de forma independiente y a su ritmo.
+- Si un consumidor está caído, RabbitMQ retiene el mensaje hasta que vuelva a estar disponible.
+- La falla de un consumidor no afecta a los demás ni al productor.
+
+### Exchange Fanout
+
+Un **Exchange Fanout** distribuye cada mensaje recibido a **todas** las colas vinculadas a él, sin filtrar por routing key. Es el patrón indicado cuando un mismo evento debe ser procesado por múltiples servicios. Por ejemplo, el evento `empleado.creado` puede enviarse al exchange `empleados_events` de tipo fanout y llegar simultáneamente a las colas de perfiles, notificaciones y vacaciones.
+
+```
+Producer ──► Exchange (fanout) ──► Cola perfiles      ──► profiles-service
+                               └──► Cola notificaciones ──► notifications-service
+                               └──► Cola vacaciones     ──► vacations-service
+```
+
+### Puertos y panel de administración
+
+| Puerto | Uso |
+|---|---|
+| `5672` | Protocolo AMQP — conexión de aplicaciones |
+| `15672` | Panel web de administración (Management UI) |
+
+Accede al panel de administración en:
+
+```
+http://localhost:15672
+```
+
+| Campo | Valor |
+|---|---|
+| Usuario | `admin` |
+| Contraseña | `admin` |
+
+### Diagrama de arquitectura actualizado (Reto 4)
+
+```text
+Cliente HTTP
+    │ http://localhost:8080
+    ▼
+API Gateway
+    ├── /empleados y /empleados/** ────────► employees-service
+    │                                         │
+    │                                         ├── PostgreSQL empleados
+    │                                         │
+    │                                         └── Circuit Breaker + reintentos
+    │                                                      │
+    └── /departamentos y /departamentos/** ───► departments-service
+                                                           │
+                                                           └── PostgreSQL departamentos
+
+Mensajería asíncrona (Reto 4)
+    employees-service ──► RabbitMQ Exchange (fanout: empleados_events)
+                              ├──► [cola perfiles]       ──► profiles-service      → PostgreSQL perfiles
+                              ├──► [cola notificaciones] ──► notifications-service → PostgreSQL notificaciones
+                              └──► [cola vacaciones]     ──► vacations-service     → PostgreSQL vacaciones
+
+Panel de administración RabbitMQ: http://localhost:15672  (admin / admin)
+```
+
+### Verificación del arranque
+
+Desde la raíz del repositorio:
+
+```bash
+docker compose up --build
+docker compose ps
+docker compose logs rabbitmq
+```
+
+Cuando RabbitMQ esté listo verás en sus logs:
+
+```
+Server startup complete; 4 plugins started.
+```
+
+Y el healthcheck marcará el contenedor como `healthy`. Luego abre el panel:
+
+```
+http://localhost:15672
+```
+
+Usuario: `admin` — Contraseña: `admin`
