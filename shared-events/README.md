@@ -1,54 +1,24 @@
-# shared-events — Catálogo de Eventos System_HR
+# Contratos de Eventos Compartidos — System_HR (`shared-events`)
 
-Módulo de contratos compartidos para la comunicación asíncrona del sistema System_HR.
-No contiene código ejecutable. Solo define los contratos de mensajería que todos los
-microservicios deben respetar.
+## Propósito
 
-## Estructura
+El directorio `shared-events` actúa como el **repositorio oficial de los contratos de eventos** del ecosistema **System_HR**. 
 
-```
-shared-events/
-├── catalog/                  # Ejemplos JSON de cada evento
-│   ├── empleado-creado.json
-│   ├── empleado-actualizado.json
-│   ├── empleado-retirado.json
-│   └── vacaciones-programadas.json
-├── schemas/                  # JSON Schemas para validación
-│   ├── event-envelope.schema.json
-│   ├── empleado.schema.json
-│   └── vacaciones.schema.json
-└── docs/
-    └── event-catalog.md      # Documentación detallada del catálogo
-```
+En una arquitectura guiada por eventos (Event-Driven Architecture), los contratos compartidos formalizan la estructura, versionamiento y semántica de los mensajes que viajan a través del bus de mensajería (RabbitMQ), garantizando interoperabilidad y estabilidad entre productores y consumidores.
 
-## Event Envelope
+---
 
-Todos los eventos siguen el mismo sobre estándar:
+## Contenido
 
-```json
-{
-  "id":         "<UUID v4 único por evento>",
-  "type":       "<dominio.accion>",
-  "version":    "1.0",
-  "occurredAt": "<ISO 8601 UTC>",
-  "producer":   "<nombre-del-servicio>",
-  "data":       { }
-}
-```
+El repositorio de contratos está organizado de la siguiente manera:
 
-## Eventos registrados
+* **`catalog/`** → Ejemplos JSON representativos de cada evento de dominio (`empleado.creado`, `empleado.actualizado`, `empleado.retirado`).
+* **`schemas/`** → JSON Schemas oficiales que validan la estructura sintáctica del sobre (Event Envelope) y el payload (`data`).
+* **`docs/`** → Catálogo de eventos con documentación técnica detallada de atributos, tipos, productores y consumidores.
 
-| Tipo | Productor | Schema de data |
-|---|---|---|
-| `empleado.creado` | employees-service | `empleado.schema.json` |
-| `empleado.actualizado` | employees-service | `empleado.schema.json` |
-| `empleado.retirado` | employees-service | `empleado.schema.json` |
-| `vacaciones.programadas` | vacations-service | `vacaciones.schema.json` |
+---
 
-## Reglas de contrato
+## Regla Arquitectónica
 
-1. El campo `id` debe ser un UUID v4 generado por el productor en el momento del evento.
-2. El campo `occurredAt` debe ser UTC en formato ISO 8601 (`2026-09-27T22:00:00.000Z`).
-3. El campo `version` identifica la versión del contrato. Al cambiar campos de `data`, incrementar la versión.
-4. El campo `data` no puede ser `null`. Si no hay datos adicionales, usar `{}`.
-5. No agregar campos fuera del envelope estándar en el nivel raíz.
+> [!IMPORTANT]
+> **Ningún microservicio importa código desde `shared-events`.** Este directorio funciona únicamente como **documentación y contrato compartido entre equipos** de desarrollo. Cada microservicio mantiene su propia implementación interna de modelos y serializadores/deserializadores, evitando el acoplamiento binario o dependencias compartidas en tiempo de compilación.

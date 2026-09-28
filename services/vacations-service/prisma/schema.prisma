@@ -1,0 +1,31 @@
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+/// Saldo y estado de vacaciones de cada empleado.
+/// Construido exclusivamente desde eventos RabbitMQ (CQRS - Consumidor asíncrono).
+model VacationBalance {
+  /// UUID interno generado por la base de datos
+  id              String   @id @default(uuid())
+  /// ID del empleado (clave de negocio, UNIQUE)
+  employeeId      String   @unique
+  nombre          String
+  apellido        String
+  email           String
+  departamentoId  String
+  /// Días de vacaciones disponibles (inicia en 15)
+  diasDisponibles Int      @default(15)
+  /// Días de vacaciones ya tomados (inicia en 0)
+  diasTomados     Int      @default(0)
+  /// ACTIVO | RETIRADO
+  estadoEmpleado  String   @default("ACTIVO")
+  /// UUID del último evento aplicado (garantía de idempotencia)
+  lastEventId     String   @unique
+  /// Actualizado automáticamente por Prisma en cada operación
+  updatedAt       DateTime @updatedAt
+}

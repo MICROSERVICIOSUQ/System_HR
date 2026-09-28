@@ -143,6 +143,35 @@ services:
     networks:
       - microservices-network
 
+  vacations-service:
+    build:
+      context: ./services/vacations-service
+      dockerfile: Dockerfile
+    depends_on:
+      database-vacaciones:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+    environment:
+      NODE_ENV: production
+      PORT: ${VACACIONES_PORT:-8084}
+      DATABASE_URL: postgresql://${VACACIONES_DB_USER:-postgres}:${VACACIONES_DB_PASSWORD:-postgres}@database-vacaciones:5432/${VACACIONES_DB_NAME:-gestion_vacaciones}
+      RABBITMQ_HOST: ${RABBITMQ_HOST:-rabbitmq}
+      RABBITMQ_PORT: ${RABBITMQ_PORT:-5672}
+      RABBITMQ_USER: ${RABBITMQ_USER:-admin}
+      RABBITMQ_PASSWORD: ${RABBITMQ_PASSWORD:-admin}
+    expose:
+      - "${VACACIONES_PORT:-8084}"
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f --silent http://localhost:$${PORT:-8084}/health"]
+      interval: 30s
+      timeout: 5s
+      start_period: 20s
+      retries: 3
+    networks:
+      - microservices-network
+
 networks:
   microservices-network:
     name: sistema_rrhh_network
