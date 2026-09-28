@@ -1,8 +1,12 @@
-# Sistema de Recursos Humanos — Reto 3
+# Sistema de Recursos Humanos — System_HR (Reto 3 y Reto 4)
 
-Sistema de gestión de empleados y departamentos con microservicios, bases PostgreSQL independientes, un API Gateway y protección de la comunicación síncrona mediante Circuit Breaker.
+Sistema empresarial de gestión de empleados y departamentos basado en **Arquitectura de Microservicios**, combinando comunicación síncrona protegida mediante **Circuit Breaker** (Reto 3) con comunicación asíncrona desacoplada mediante **RabbitMQ y Arquitectura Orientada a Eventos** (Reto 4).
 
-## Arquitectura
+---
+
+# PARTE I — Reto 3: Comunicación Síncrona, API Gateway y Resiliencia
+
+## Arquitectura Síncrona
 
 ```text
 Cliente HTTP
@@ -22,7 +26,7 @@ API Gateway
 
 Solo el Gateway publica un puerto al host. Los servicios de negocio usan `expose` y las bases de datos no publican puertos. Cada servicio mantiene su propio modelo, reglas y migraciones.
 
-## Servicios y tecnologías
+## Servicios y Tecnologías (Núcleo Síncrono)
 
 | Servicio | Tecnología | Puerto interno predeterminado | Acceso desde el host |
 |---|---|---|---|
@@ -38,7 +42,7 @@ El Gateway y empleados pueden usar el mismo puerto interno porque se ejecutan en
 
 Se utiliza Spring Cloud Gateway porque es un Gateway de aplicación, permite configurar rutas y añadir código para responsabilidades transversales. En esta entrega enruta solicitudes y controla errores de conexión; permite incorporar autenticación y autorización en retos posteriores. Las reglas de registro y validación permanecen en los servicios.
 
-## URL base y rutas
+## URL Base y Rutas Síncronas
 
 URL pública única: `http://localhost:8080`.
 
@@ -54,29 +58,7 @@ El Gateway conserva las rutas de negocio y propaga cuerpos, cabeceras de aplicac
 
 Las interfaces Swagger y las especificaciones OpenAPI siguen disponibles dentro de cada servicio, pero sus rutas no están publicadas por el Gateway actual. El `/health` interno de departamentos tampoco se enruta como una ruta pública: Compose lo utiliza dentro del contenedor.
 
-## Iniciar el sistema
-
-Requisitos: Docker y Docker Compose con soporte para `include`. Python 3 solo es necesario para ejecutar la prueba integral.
-
-Desde la raíz del repositorio:
-
-```bash
-docker compose up --build -d
-docker compose ps
-curl -i http://localhost:8080/health
-curl -i http://localhost:8080/empleados
-curl -i http://localhost:8080/departamentos
-```
-
-Las variables y valores predeterminados están en `.env.example`. Si necesitas personalizarlos, crea `.env` sin sobrescribir uno existente. `EMPLEADOS_PORT` y `DEPARTAMENTOS_PORT` configuran puertos internos; el puerto público del Gateway permanece en 8080.
-
-Las migraciones Flyway y Prisma Migrate se ejecutan durante el arranque. Los datos persisten en volúmenes de PostgreSQL. Para detener conservando los datos:
-
-```bash
-docker compose down
-```
-
-## Circuit Breaker
+## Circuit Breaker (Resilience4j)
 
 La llamada de empleados a departamentos está protegida por Resilience4j. `DepartmentClient` ejecuta la operación mediante el circuito; `DepartmentHttpClient` realiza la consulta HTTP y sus reintentos. Las validaciones de duplicados y la persistencia quedan fuera del circuito de departamentos.
 
@@ -107,7 +89,7 @@ curl -s http://localhost:8080/empleados/circuit-breaker
 
 También se registran las transiciones CLOSED, OPEN y HALF_OPEN en los logs de empleados.
 
-## Estrategia de fallback
+## Estrategia de Fallback
 
 Si departamentos no está disponible o el circuito está abierto, el registro devuelve `503 Service Unavailable`, con el mensaje:
 
@@ -119,7 +101,7 @@ Este es el mensaje relevante; la respuesta incluye también `timestamp`, `status
 
 Se prioriza la consistencia: no se guarda un empleado cuyo departamento no pudo validarse. El usuario debe reintentar después de la recuperación. No se crean registros pendientes y, por tanto, no se necesita reconciliación de esos registros. Las consultas que no dependen de departamentos pueden seguir funcionando si la base de empleados está disponible.
 
-## Prueba reproducible del Reto 3
+## Prueba Reproducible del Reto 3
 
 Con los servicios saludables y el circuito cerrado, desde la raíz del repositorio:
 
@@ -144,7 +126,7 @@ curl -i --max-time 5 http://localhost:8082/empleados
 
 Ambas conexiones deben rechazarse. El script además verifica que los contenedores reales de negocio no tienen puertos publicados.
 
-## Resultados verificados
+## Resultados Verificados del Reto 3
 
 En la ejecución del 22 de septiembre de 2026, realizada con contenedores y volúmenes de prueba aislados:
 
@@ -160,116 +142,253 @@ En la ejecución del 22 de septiembre de 2026, realizada con contenedores y vol�
 | Recuperación automática | OPEN → HALF_OPEN → CLOSED |
 | Registro con departamento inexistente tras recuperarse | 400 por departamento inexistente |
 
-Los tiempos dependen del entorno. La evidencia relevante es que las solicitudes con el circuito abierto evitan las llamadas de red y responden mucho más rápido.
+---
 
-Para la entrega, adjuntar las capturas o el video de estas comprobaciones y la salida de la prueba; los resultados históricos del Reto 2 deben identificarse como tales.
+# PARTE II — Reto 4: Arquitectura Orientada a Eventos y Mensajería Asíncrona
 
-## Postman
+## 1. Descripción y Objetivos del Reto 4
 
-Importa el environment y las colecciones de `postman/`. Las variables `empleadosBaseUrl` y `departamentosBaseUrl` deben tener el mismo valor: `http://localhost:8080`.
+El **Reto 4** incorpora comunicación asíncrona desacoplada mediante **RabbitMQ** bajo el patrón **Event-Driven Architecture (EDA)** y el modelo **CQRS (Read Model)**.
 
-Las colecciones existentes utilizan identificadores fijos; pueden devolver errores por duplicados al repetirse sobre una base que ya contiene esos registros. Para demostrar resiliencia con identificadores nuevos, utiliza el script del Reto 3.
+El sistema demuestra y valida los siguientes principios:
+* **API Gateway como único punto de entrada:** Control perimetral centralizado.
+* **Microservicios independientes:** Separación de dominios con ciclos de vida y despliegues autónomos.
+* **Database-per-Service:** Cada microservicio gestiona su propia base PostgreSQL independiente.
+* **Comunicación asíncrona Fanout:** Transmisión 1 a N de eventos de dominio a múltiples consumidores simultáneos.
+* **Idempotencia en consumidores:** Manejo seguro de reentregas de red mediante llaves de evento (`lastEventId`) e índices únicos.
 
-## Persistencia y decisiones previas
-
-Se conservan PostgreSQL por servicio, las migraciones versionadas y las restricciones de unicidad. Las decisiones del Reto 2 están documentadas en `docs/decisions/`. Los reintentos de base de datos son independientes del Circuit Breaker de departamentos.
-
-## Organización
-
-- `api-gateway/`: entrada pública y enrutamiento.
-- `services/`: servicios, contratos y migraciones.
-- `infrastructure/`: configuración de bases de datos.
-- `tests/`: prueba integral del ecosistema.
-- `postman/`: colecciones y environment.
-- `docs/`: arquitectura y decisiones técnicas.
-
-La [evidencia de ejecución verificada](docs/evidencias/reto3-evidencia.jsonl) contiene respuestas, tiempos, estados y resultados de pruebas. Las capturas o el video exigidos para la entrega todavía deben adjuntarse.
-
-## Infraestructura de mensajería
-
-### Justificación técnica de RabbitMQ
-
-En el Reto 4 se incorporan nuevos microservicios (perfiles, notificaciones, vacaciones) que deben reaccionar a eventos producidos por los servicios existentes —por ejemplo, cuando se registra un empleado nuevo. Una llamada HTTP síncrona acoplaría los servicios: si notificaciones no responde, el registro de empleados fallaría. RabbitMQ resuelve esto desacoplando productores y consumidores mediante colas de mensajes:
-
-- El productor (por ejemplo, employees-service) publica un evento y continúa sin esperar respuesta.
-- Cada consumidor (perfiles-service, notificaciones-service, vacaciones-service) procesa el mensaje de forma independiente y a su ritmo.
-- Si un consumidor está caído, RabbitMQ retiene el mensaje hasta que vuelva a estar disponible.
-- La falla de un consumidor no afecta a los demás ni al productor.
-
-### Exchange Fanout
-
-Un **Exchange Fanout** distribuye cada mensaje recibido a **todas** las colas vinculadas a él, sin filtrar por routing key. Es el patrón indicado cuando un mismo evento debe ser procesado por múltiples servicios. Por ejemplo, el evento `empleado.creado` puede enviarse al exchange `empleados_events` de tipo fanout y llegar simultáneamente a las colas de perfiles, notificaciones y vacaciones.
-
-```
-Producer ──► Exchange (fanout) ──► Cola perfiles      ──► profiles-service
-                               └──► Cola notificaciones ──► notifications-service
-                               └──► Cola vacaciones     ──► vacations-service
-```
-
-### Puertos y panel de administración
-
-| Puerto | Uso |
-|---|---|
-| `5672` | Protocolo AMQP — conexión de aplicaciones |
-| `15672` | Panel web de administración (Management UI) |
-
-Accede al panel de administración en:
-
-```
-http://localhost:15672
-```
-
-| Campo | Valor |
-|---|---|
-| Usuario | `admin` |
-| Contraseña | `admin` |
-
-### Diagrama de arquitectura actualizado (Reto 4)
+## 2. Arquitectura General del Reto 4
 
 ```text
-Cliente HTTP
-    │ http://localhost:8080
-    ▼
-API Gateway
-    ├── /empleados y /empleados/** ────────► employees-service
-    │                                         │
-    │                                         ├── PostgreSQL empleados
-    │                                         │
-    │                                         └── Circuit Breaker + reintentos
-    │                                                      │
-    └── /departamentos y /departamentos/** ───► departments-service
-                                                           │
-                                                           └── PostgreSQL departamentos
-
-Mensajería asíncrona (Reto 4)
-    employees-service ──► RabbitMQ Exchange (fanout: empleados_events)
-                              ├──► [cola perfiles]       ──► profiles-service      → PostgreSQL perfiles
-                              ├──► [cola notificaciones] ──► notifications-service → PostgreSQL notificaciones
-                              └──► [cola vacaciones]     ──► vacations-service     → PostgreSQL vacaciones
-
-Panel de administración RabbitMQ: http://localhost:15672  (admin / admin)
+                         Cliente
+                            │
+                    http://localhost:8080
+                            │
+                 API Gateway (Spring Boot)
+              ┌─────────────┴─────────────┐
+              │                           │
+      Employees Service          Departments Service
+              │                           │
+              │ HTTP                      │
+              └───────────────┐           │
+                              │
+                      RabbitMQ Exchange
+                         hr.events
+                         (Fanout)
+      ┌───────────────┬───────────────┬───────────────┐
+      │               │               │
+Notifications     Profiles      Vacations
+      │               │               │
+  PostgreSQL      PostgreSQL     PostgreSQL
 ```
 
-### Verificación del arranque
+### Principios Fundamentales
+* **Único puerto público:** Solo el API Gateway publica el puerto `8080` hacia el host.
+* **Aislamiento entre consumidores:** `notifications-service`, `profiles-service` y `vacations-service` nunca se llaman entre sí; consumen eventos de forma completamente asíncrona.
+* **Bases de datos independientes:** Cada consumidor persiste exclusivamente en su propia base de datos PostgreSQL.
 
-Desde la raíz del repositorio:
+## 3. Catálogo Completo de Microservicios
+
+| Servicio | Tecnología | Puerto interno | Base de datos | Rol en Reto 4 |
+|---|---|---|---|---|
+| api-gateway | Spring Boot | 8080 | No | Enrutamiento perimetral |
+| employees-service | Spring Boot | 8080 | PostgreSQL | Productor de eventos de dominio |
+| departments-service | Node + Prisma | 8081 | PostgreSQL | Catálogo de departamentos |
+| notifications-service | Node + Prisma | 8082 | PostgreSQL | Consumidor asíncrono (notificaciones) |
+| profiles-service | Node + Prisma | 8083 | PostgreSQL | Consumidor asíncrono (Read Model CQRS) |
+| vacations-service | Node + Prisma | 8084 | PostgreSQL | Consumidor asíncrono (saldo vacaciones) |
+| rabbitmq | RabbitMQ Management | 5672 | No | Message Broker AMQP |
+
+> [!NOTE]
+> **Solo el puerto 8080 es público** (API Gateway). Los servicios de negocio operan aislados mediante la directiva `expose` en la red interna de Docker (`sistema_rrhh_network`).
+
+## 4. Infraestructura RabbitMQ
+
+### Exchange
+
+| Nombre | Tipo | Durabilidad |
+|---|---|---|
+| hr.events | Fanout | Durable |
+
+### Colas
+
+| Cola | Consumidor | Enlace (Binding) |
+|---|---|---|
+| notifications.queue | notifications-service | Vinculada a `hr.events` |
+| profiles.queue | profiles-service | Vinculada a `hr.events` |
+| vacations.queue | vacations-service | Vinculada a `hr.events` |
+
+> **Funcionamiento Fanout:** El exchange `hr.events` duplica automáticamente cada evento emitido hacia las tres colas suscritas. La *routing key* siempre es vacía (`""`), pues el enrutamiento es de difusión global.
+
+## 5. Catálogo de Eventos
+
+| Evento | Productor | Consumidores | Descripción |
+|---|---|---|---|
+| empleado.creado | employees-service | notifications, profiles, vacations | Alta de nuevo empleado |
+| empleado.actualizado | employees-service | notifications, profiles, vacations | Modificación de datos del empleado |
+| empleado.retirado | employees-service | notifications, profiles, vacations | Retiro lógico del empleado |
+
+### Estructura del Event Envelope
+
+Todos los mensajes transmitidos en RabbitMQ viajan bajo el sobre estándar canónico:
+
+```json
+{
+  "id": "550e8400-e29b-41d4-a716-446655440000",
+  "type": "empleado.creado",
+  "version": "1.0",
+  "occurredAt": "2026-09-28T20:00:00Z",
+  "producer": "employees-service",
+  "data": {
+    "id": "E001",
+    "nombre": "Juan",
+    "apellido": "Perez",
+    "email": "juan@empresa.com",
+    "cargo": "Developer",
+    "departamentoId": "D001"
+  }
+}
+```
+
+## 6. Organización del Proyecto
+
+```text
+System_HR/
+├── api-gateway/
+├── services/
+│   ├── employees-service/
+│   ├── departments-service/
+│   ├── notifications-service/
+│   ├── profiles-service/
+│   └── vacations-service/
+├── infrastructure/
+│   ├── databases/
+│   └── rabbitmq/
+├── shared-events/
+│   ├── catalog/
+│   ├── schemas/
+│   └── docs/
+├── docs/
+│   ├── architecture/
+│   ├── decisions/
+│   └── evidencias/
+├── postman/
+├── tests/
+├── docker-compose.yml
+└── README.md
+```
+
+* **`api-gateway/`**: Gateway de entrada basado en Spring Cloud Gateway.
+* **`services/`**: Código fuente de los microservicios de dominio (Productores y Consumidores).
+* **`infrastructure/`**: Definiciones de Docker Compose para bases PostgreSQL y RabbitMQ.
+* **`shared-events/`**: Repositorio de especificaciones, contratos de eventos y JSON Schemas compartidos.
+* **`docs/decisions/`**: Registros formales de decisiones de arquitectura (ADR).
+* **`postman/`**: Colecciones y entornos de Postman para pruebas de integración de API.
+* **`tests/`**: Scripts automatizados de pruebas de humo y validación de resiliencia.
+
+## 7. Cómo Ejecutar el Sistema Completo
+
+### Requisitos previos
+* **Docker Desktop** (con soporte para Docker Compose v2 e `include`).
+
+### Comandos principales
 
 ```bash
-docker compose up --build
+# Iniciar todos los contenedores en segundo plano
+docker compose up --build -d
+
+# Verificar estado y healthchecks
 docker compose ps
-docker compose logs rabbitmq
+
+# Detener el sistema conservando los volúmenes de datos
+docker compose down
 ```
 
-Cuando RabbitMQ esté listo verás en sus logs:
+### URLs y Accesos Principales
 
-```
-Server startup complete; 4 plugins started.
-```
+| Recurso | URL | Credenciales |
+|---|---|---|
+| API Gateway | [http://localhost:8080](http://localhost:8080) | N/A |
+| RabbitMQ Management | [http://localhost:15672](http://localhost:15672) | `admin` / `admin` |
+| Health Gateway | [http://localhost:8080/health](http://localhost:8080/health) | N/A |
 
-Y el healthcheck marcará el contenedor como `healthy`. Luego abre el panel:
+## 8. Cómo Probar el Sistema (Guía Paso a Paso)
 
+### Prueba 1 — Crear un Departamento
+```bash
+curl -i -X POST http://localhost:8080/departamentos \
+  -H "Content-Type: application/json" \
+  -d '{"nombre": "Tecnología", "codigo": "DEP-TEC"}'
 ```
-http://localhost:15672
-```
+* **Esperado:** Código HTTP `201 Created`.
 
-Usuario: `admin` — Contraseña: `admin`
+### Prueba 2 — Crear un Empleado
+```bash
+curl -i -X POST http://localhost:8080/empleados \
+  -H "Content-Type: application/json" \
+  -d '{
+    "nombre": "Juan",
+    "apellido": "Perez",
+    "email": "juan.perez@empresa.com",
+    "cargo": "Developer",
+    "departamentoId": "<ID_DEPARTAMENTO_CREADO>"
+  }'
+```
+* **Esperado:** Código HTTP `201 Created` y publicación automática de `empleado.creado` en RabbitMQ.
+
+### Prueba 3 — Verificar RabbitMQ
+Ingresar a la consola en [http://localhost:15672](http://localhost:15672) (`admin` / `admin`) → Pestaña **Queues**.
+* **Esperado:**
+  * `notifications.queue` → `Ready = 0` (mensaje consumido con ACK).
+  * `profiles.queue` → `Ready = 0`.
+  * `vacations.queue` → `Ready = 0`.
+
+### Prueba 4 — Ver Notifications
+```bash
+docker compose exec notifications-service curl -s http://localhost:8082/notifications
+```
+* **Esperado:** Historial con la notificación de bienvenida registrada.
+
+### Prueba 5 — Ver Profiles (Read Model CQRS)
+```bash
+docker compose exec profiles-service curl -s http://localhost:8083/profiles
+```
+* **Esperado:** Lista de perfiles con el empleado creado y estado `ACTIVO`.
+
+### Prueba 6 — Ver Vacations
+```bash
+docker compose exec vacations-service curl -s http://localhost:8084/vacations
+```
+* **Esperado:** Registro con `diasDisponibles = 15`, `diasTomados = 0` y `estadoEmpleado = ACTIVO`.
+
+### Prueba 7 — Idempotencia
+Reenviar el mismo mensaje con el mismo `id` (UUID).
+* **Esperado:**
+  * Log del consumidor registra `[DUPLICADO]`.
+  * Confirmación con ACK sin duplicar registros en la base de datos PostgreSQL.
+
+## 9. Decisiones Arquitectónicas del Proyecto
+
+El historial formal de decisiones técnicas se documenta en [`docs/decisions/`](docs/decisions/):
+
+* **[ADR-001](docs/decisions/ADR-001-motor-de-base-de-datos.md):** PostgreSQL en instancias separadas por servicio.
+* **[ADR-002](docs/decisions/ADR-002-estrategia-de-esquema.md):** Migraciones versionadas (Flyway y Prisma Migrate).
+* **[ADR-003](docs/decisions/ADR-003-garantia-de-unicidad.md):** Unicidad en dos capas (consulta previa + restricción UNIQUE).
+* **[ADR-004](docs/decisions/ADR-004-rabbitmq-message-broker.md):** Selección de RabbitMQ como Message Broker oficial.
+* **[ADR-005](docs/decisions/ADR-005-event-driven-architecture.md):** Adopción de Arquitectura Orientada a Eventos (EDA).
+* **[ADR-006](docs/decisions/ADR-006-fanout-exchange.md):** Uso de Exchange Fanout `hr.events` para distribución simultánea 1 a N.
+* **[ADR-007](docs/decisions/ADR-007-idempotent-consumers.md):** Consumidores idempotentes basados en Event ID.
+
+## 10. Resultados Obtenidos del Reto 4
+
+| Validación | Estado |
+|---|---|
+| Gateway funcionando | Completado |
+| Employees Service (Productor) | Completado |
+| Departments Service | Completado |
+| Notifications Consumer | Completado |
+| Profiles Consumer (Read Model CQRS) | Completado |
+| Vacations Consumer | Completado |
+| RabbitMQ Fanout (`hr.events`) | Completado |
+| Idempotencia en consumidores | Completado |
+| Database-per-Service (PostgreSQL independientes) | Completado |
