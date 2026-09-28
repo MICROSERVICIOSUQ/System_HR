@@ -4,8 +4,9 @@ import com.microservicios.employees.client.DepartmentClient;
 import com.microservicios.employees.exception.DepartmentNotFoundException;
 import com.microservicios.employees.exception.EmailAlreadyRegisteredException;
 import com.microservicios.employees.exception.EmployeeNotFoundException;
-import com.microservicios.employees.exception.IdAlreadyRegisteredException;
 import com.microservicios.employees.exception.EmployeeNumberAlreadyRegisteredException;
+import com.microservicios.employees.exception.IdAlreadyRegisteredException;
+import com.microservicios.employees.messaging.EmployeeEventPublisher;
 import com.microservicios.employees.model.Employee;
 import com.microservicios.employees.model.EmployeeStatus;
 import com.microservicios.employees.repository.EmployeeRepository;
@@ -24,10 +25,16 @@ public class EmployeeService {
 
     private final EmployeeRepository repository;
     private final DepartmentClient departmentClient;
+    private final EmployeeEventPublisher eventPublisher;
 
-    public EmployeeService(EmployeeRepository repository, DepartmentClient departmentClient) {
+    public EmployeeService(
+            EmployeeRepository repository,
+            DepartmentClient departmentClient,
+            EmployeeEventPublisher eventPublisher
+    ) {
         this.repository = repository;
         this.departmentClient = departmentClient;
+        this.eventPublisher = eventPublisher;
     }
 
     /**
@@ -51,7 +58,6 @@ public class EmployeeService {
             maxAttempts = 3,
             backoff = @Backoff(delay = 250, multiplier = 2.0)
     )
-    
     public Employee register(Employee employee) {
         if (repository.existsByEmailIgnoreCase(employee.getEmail())) {
             throw new EmailAlreadyRegisteredException(employee.getEmail());
@@ -66,7 +72,104 @@ public class EmployeeService {
             throw new DepartmentNotFoundException(employee.getDepartamentoId());
         }
         employee.setStatus(EmployeeStatus.ACTIVE);
-        return repository.save(employee);
+        Employee saved = repository.save(employee);
+
+        try {
+            eventPublisher.publishEmployeeCreated(saved);
+        } catch (Exception ex) {
+            // El error queda registrado en los logs por el publisher.
+            // Para mantener la consistencia de la respuesta HTTP, no se altera la respuesta de persistencia.
+        }
+
+        return saved;
+    }
+
+    @Retryable(
+            retryFor = {
+                    DataAccessResourceFailureException.class,
+                    CannotCreateTransactionException.class,
+                    QueryTimeoutException.class,
+                    JpaSystemException.class
+            },
+            maxAttempts = 3,
+            backoff = @Backoff(delay = 250, multiplier = 2.0)
+    )
+    public Employee update(String id, Employee updatedData) {
+        Employee existing = findById(id);
+
+        if (updatedData.getEmail() != null && !updatedData.getEmail().equalsIgnoreCase(existing.getEmail())) {
+            if (repository.existsByEmailIgnoreCase(updatedData.getEmail())) {
+                throw new EmailAlreadyRegisteredException(updatedData.getEmail());
+            }
+            existing.setEmail(updatedData.getEmail());
+        }
+
+        if (updatedData.getEmployeeNumber() != null && !updatedData.getEmployeeNumber().equals(existing.getEmployeeNumber())) {
+            if (repository.existsByNumeroEmpleado(updatedData.getEmployeeNumber())) {
+                throw new EmployeeNumberAlreadyRegisteredException(updatedData.getEmployeeNumber());
+            }
+            existing.setEmployeeNumber(updatedData.getEmployeeNumber());
+        }
+
+        if (updatedData.getDepartamentoId() != null && !updatedData.getDepartamentoId().equals(existing.getDepartamentoId())) {
+            if (!departmentClient.existsById(updatedData.getDepartamentoId())) {
+                throw new DepartmentNotFoundException(updatedData.getDepartamentoId());
+            }
+            existing.setDepartamentoId(updatedData.getDepartamentoId());
+        }
+
+        if (updatedData.getNombre() != null) {
+            existing.setNombre(updatedData.getNombre());
+        }
+        if (updatedData.getApellido() != null) {
+            existing.setApellido(updatedData.getApellido());
+        }
+        if (updatedData.getCargo() != null) {
+            existing.setCargo(updatedData.getCargo());
+        }
+        if (updatedData.getArea() != null) {
+            existing.setArea(updatedData.getArea());
+        }
+        if (updatedData.getFechaIngreso() != null) {
+            existing.setFechaIngreso(updatedData.getFechaIngreso());
+        }
+        if (updatedData.getStatus() != null) {
+            existing.setStatus(updatedData.getStatus());
+        }
+
+        Employee saved = repository.save(existing);
+
+        try {
+            eventPublisher.publishEmployeeUpdated(saved);
+        } catch (Exception ex) {
+            // El error queda registrado en los logs por el publisher
+        }
+
+        return saved;
+    }
+
+    @Retryable(
+            retryFor = {
+                    DataAccessResourceFailureException.class,
+                    CannotCreateTransactionException.class,
+                    QueryTimeoutException.class,
+                    JpaSystemException.class
+            },
+            maxAttempts = 3,
+            backoff = @Backoff(delay = 250, multiplier = 2.0)
+    )
+    public Employee retire(String id) {
+        Employee existing = findById(id);
+        existing.setStatus(EmployeeStatus.RETIRED);
+        Employee saved = repository.save(existing);
+
+        try {
+            eventPublisher.publishEmployeeRetired(saved);
+        } catch (Exception ex) {
+            // El error queda registrado en los logs por el publisher
+        }
+
+        return saved;
     }
 
     @Retryable(

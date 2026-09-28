@@ -34,6 +34,9 @@ class EmployeeEndpointsTest {
     @MockBean
     private DepartmentClient departmentClient;
 
+    @MockBean
+    private com.microservicios.employees.messaging.EmployeeEventPublisher eventPublisher;
+
     @BeforeEach
     void existingDepartment() {
         when(departmentClient.existsById("IT")).thenReturn(true);

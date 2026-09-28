@@ -1,0 +1,16 @@
+{
+  "id": "d4e5f6a7-b8c9-0123-defa-123456789013",
+  "type": "vacaciones.programadas",
+  "version": "1.0",
+  "occurredAt": "2026-09-27T23:30:00.000Z",
+  "producer": "vacations-service",
+  "data": {
+    "id": "e5f6a7b8-c9d0-1234-efab-234567890124",
+    "empleadoId": "f47ac10b-58cc-4372-a567-0e02b2c3d479",
+    "fechaInicio": "2026-10-15",
+    "fechaFin": "2026-10-24",
+    "diasHabiles": 8,
+    "estado": "PENDIENTE",
+    "observacion": null
+  }
+}

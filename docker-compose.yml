@@ -61,6 +61,10 @@ services:
       SPRING_DATASOURCE_PASSWORD: ${EMPLEADOS_DB_PASSWORD:-postgres}
       SPRING_JPA_DDL_AUTO: validate
       DEPARTMENTS_SERVICE_URL: ${DEPARTMENTS_SERVICE_URL:-http://departments-service:${DEPARTAMENTOS_PORT:-8081}}
+      RABBITMQ_HOST: ${RABBITMQ_HOST:-rabbitmq}
+      RABBITMQ_PORT: ${RABBITMQ_PORT:-5672}
+      RABBITMQ_USER: ${RABBITMQ_USER:-admin}
+      RABBITMQ_PASSWORD: ${RABBITMQ_PASSWORD:-admin}
       RABBITMQ_URL: amqp://${RABBITMQ_USER:-admin}:${RABBITMQ_PASSWORD:-admin}@${RABBITMQ_HOST:-rabbitmq}:${RABBITMQ_PORT:-5672}
     depends_on:
       database-empleados:

@@ -1,0 +1,17 @@
+{
+  "id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+  "type": "empleado.creado",
+  "version": "1.0",
+  "occurredAt": "2026-09-27T22:00:00.000Z",
+  "producer": "employees-service",
+  "data": {
+    "id": "f47ac10b-58cc-4372-a567-0e02b2c3d479",
+    "nombre": "Laura",
+    "apellido": "Martínez",
+    "email": "laura.martinez@empresa.com",
+    "departamentoId": "3c4d5e6f-7a8b-9c0d-e1f2-a3b4c5d6e7f8",
+    "cargo": "Ingeniería de Software",
+    "fechaIngreso": "2026-09-27",
+    "fechaRetiro": null
+  }
+}

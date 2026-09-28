@@ -1,0 +1,45 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://system-hr/schemas/vacaciones.schema.json",
+  "title": "VacacionesData",
+  "description": "Estructura del campo `data` para eventos del dominio vacaciones.",
+  "type": "object",
+  "required": ["id", "empleadoId", "fechaInicio", "fechaFin", "diasHabiles", "estado"],
+  "additionalProperties": false,
+  "properties": {
+    "id": {
+      "type": "string",
+      "format": "uuid",
+      "description": "Identificador único del período de vacaciones."
+    },
+    "empleadoId": {
+      "type": "string",
+      "format": "uuid",
+      "description": "Identificador del empleado que toma las vacaciones."
+    },
+    "fechaInicio": {
+      "type": "string",
+      "format": "date",
+      "description": "Primer día del período de vacaciones (yyyy-MM-dd)."
+    },
+    "fechaFin": {
+      "type": "string",
+      "format": "date",
+      "description": "Último día del período de vacaciones (yyyy-MM-dd)."
+    },
+    "diasHabiles": {
+      "type": "integer",
+      "minimum": 1,
+      "description": "Número de días hábiles del período."
+    },
+    "estado": {
+      "type": "string",
+      "enum": ["PENDIENTE", "APROBADA", "RECHAZADA", "CANCELADA"],
+      "description": "Estado de la solicitud de vacaciones."
+    },
+    "observacion": {
+      "type": ["string", "null"],
+      "description": "Observación o motivo de rechazo/cancelación."
+    }
+  }
+}

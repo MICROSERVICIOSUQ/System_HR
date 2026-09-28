@@ -1,0 +1,40 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://system-hr/schemas/event-envelope.schema.json",
+  "title": "EventEnvelope",
+  "description": "Sobre estándar que envuelve todos los eventos del sistema System_HR.",
+  "type": "object",
+  "required": ["id", "type", "version", "occurredAt", "producer", "data"],
+  "additionalProperties": false,
+  "properties": {
+    "id": {
+      "type": "string",
+      "format": "uuid",
+      "description": "Identificador único del evento (UUID v4)."
+    },
+    "type": {
+      "type": "string",
+      "description": "Tipo de evento en formato dominio.accion. Ejemplo: empleado.creado.",
+      "examples": ["empleado.creado", "empleado.actualizado", "empleado.retirado", "vacaciones.programadas"]
+    },
+    "version": {
+      "type": "string",
+      "description": "Versión del contrato del evento.",
+      "default": "1.0"
+    },
+    "occurredAt": {
+      "type": "string",
+      "format": "date-time",
+      "description": "Fecha y hora UTC en que ocurrió el evento (ISO 8601)."
+    },
+    "producer": {
+      "type": "string",
+      "description": "Nombre del microservicio que produjo el evento.",
+      "examples": ["employees-service", "vacations-service"]
+    },
+    "data": {
+      "type": "object",
+      "description": "Carga útil del evento. La estructura depende del tipo de evento."
+    }
+  }
+}
