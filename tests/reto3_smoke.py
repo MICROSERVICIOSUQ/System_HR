@@ -78,7 +78,9 @@ def main():
         request("/empleados", 200)  # The independent operation remains available.
         times = []
         for i in range(8):
-            _, elapsed = request("/empleados", 503, employee(i))
+            # The department was previously validated and remains available
+            # through the temporary contingency cache.
+            _, elapsed = request("/empleados", 201, employee(i))
             times.append(elapsed)
             state, _ = request("/empleados/circuit-breaker", 200)
             if i >= 2:

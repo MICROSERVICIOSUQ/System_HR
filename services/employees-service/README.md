@@ -131,8 +131,27 @@ Desde el directorio `services/employees-service`:
 ./mvnw test
 ```
 
-La suite cuenta con **27 pruebas automatizadas**:
+La suite cuenta con **pruebas automatizadas**:
 * `EmployeeEndpointsTest` (18 pruebas): Cobertura completa de endpoints REST, validaciones, códigos de error HTTP (400, 404, 503) y Circuit Breaker.
 * `EmployeeEventPublisherTest` (4 pruebas): Verificación de generación de `empleado.creado`, `empleado.actualizado`, `empleado.retirado`, formato estricto del Envelope (UUID, ISO-8601, productor) y garantía de no publicación ante fallos de validación/rollback.
 * `DepartmentCircuitBreakerTest` (4 pruebas): Comportamiento de estados del circuito (CLOSED, OPEN, HALF_OPEN) con servidor mock.
 * `DepartmentClientRetryTest` (1 prueba): Validación de reintentos exponenciales ante fallos de red.
+* `DepartmentCacheTest` y `DepartmentCacheFallbackTest`: Cobertura completa del caso alternativo de contingencia mediante caché en memoria ante indisponibilidad de departamentos.
+
+---
+
+## Caso alternativo — Caché de contingencia
+
+Como mejora para la resiliencia, el sistema cuenta con un caché temporal de información de departamentos.
+
+* **Propósito:** Mantener temporalmente la capacidad de validar departamentos durante una interrupción de la comunicación con `departments-service`.
+* **Ubicación:** Integrado en el `DepartmentClient` dentro de `employees-service`.
+* **TTL:** 30 minutos (configurable vía `departments.cache.ttl-minutes` / `DEPARTMENTS_CACHE_TTL_MINUTES`).
+* **Fuente de verdad:** El servicio real y su base de datos. El caché se alimenta estrictamente de las respuestas exitosas de `departments-service`.
+* **Cuándo se utiliza:** Únicamente como fallback tras agotar los reintentos HTTP o cuando el Circuit Breaker está abierto (`OPEN`). 
+* **Cuándo NO se utiliza:** Nunca se utiliza como primera opción frente al servicio disponible. Además, un `404` (departamento inexistente) del servicio real no usa el caché porque constituye una comunicación exitosa.
+* **Comportamiento ante cache miss:** Devuelve `503 Service Unavailable`, manteniendo el comportamiento original.
+* **Comportamiento ante expiración:** Si la entrada superó su TTL, no se utiliza y devuelve `503`.
+* **Recuperación del servicio:** Cuando el servicio real se recupera, las consultas vuelven a pasar por él (estado `HALF_OPEN` -> `CLOSED`) y el caché se actualiza.
+* **Relación con Circuit Breaker:** Funciona de forma conjunta y posterior al CB. El CB sigue protegiendo la red, y el caché actúa en memoria cuando el CB determina la indisponibilidad.
+* **Consistencia eventual:** Durante la ventana de caída, el servicio puede permitir registros si el caché está válido pero el departamento fue borrado de la base de datos de origen en ese intermedio. Esta limitación de consistencia eventual es asumida a favor de la disponibilidad.
