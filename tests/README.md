@@ -70,3 +70,9 @@ Los ejemplos simplificados del enunciado deben completarse con los campos obliga
 Los tiempos exactos dependen de la red y de los timeouts. En la ejecución comprobada, los primeros tres registros fallidos tardaron aproximadamente 19, 18 y 12 segundos; los siguientes, con OPEN, unos 10 ms.
 
 La [evidencia de ejecución verificada](../docs/evidencias/reto3-evidencia.jsonl) contiene respuestas, tiempos, estados y resultados de pruebas. Las capturas o el video exigidos para la entrega todavía deben adjuntarse.
+
+## Caso alternativo — Caché de contingencia
+
+Se ha extendido la prueba para incluir el **Caché de contingencia**.
+
+Al detener `departments-service`, el `employees-service` devolverá éxito en el registro (201) de los empleados al utilizar la información cacheada temporalmente, en lugar de un `503`. La prueba `tests/reto3_smoke.py` demuestra que, aunque el circuito se abre (OPEN), el sistema permite registros temporales apoyándose en este fallback. El comportamiento por defecto del 503 sigue ocurriendo si se consulta un departamento que nunca ha sido cacheado o expiró.
