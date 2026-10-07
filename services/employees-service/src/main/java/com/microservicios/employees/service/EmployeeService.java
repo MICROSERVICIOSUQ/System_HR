@@ -18,6 +18,7 @@ import org.springframework.retry.annotation.Retryable;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.CannotCreateTransactionException;
 
+import java.time.LocalDate;
 import java.util.List;
 
 @Service
@@ -133,6 +134,9 @@ public class EmployeeService {
         if (updatedData.getFechaIngreso() != null) {
             existing.setFechaIngreso(updatedData.getFechaIngreso());
         }
+        if (updatedData.getFechaRetiro() != null) {
+            existing.setFechaRetiro(updatedData.getFechaRetiro());
+        }
         if (updatedData.getStatus() != null) {
             existing.setStatus(updatedData.getStatus());
         }
@@ -161,6 +165,9 @@ public class EmployeeService {
     public Employee retire(String id) {
         Employee existing = findById(id);
         existing.setStatus(EmployeeStatus.RETIRED);
+        if (existing.getFechaRetiro() == null) {
+            existing.setFechaRetiro(LocalDate.now());
+        }
         Employee saved = repository.save(existing);
 
         try {
@@ -170,6 +177,29 @@ public class EmployeeService {
         }
 
         return saved;
+    }
+
+    @Retryable(
+            retryFor = {
+                    DataAccessResourceFailureException.class,
+                    CannotCreateTransactionException.class,
+                    QueryTimeoutException.class,
+                    JpaSystemException.class
+            },
+            maxAttempts = 3,
+            backoff = @Backoff(delay = 250, multiplier = 2.0)
+    )
+    public List<Employee> findAuditoria(LocalDate desde, LocalDate hasta) {
+        if (desde == null) {
+            throw new IllegalArgumentException("El parámetro de fecha inicial 'desde' es obligatorio");
+        }
+        if (hasta == null) {
+            throw new IllegalArgumentException("El parámetro de fecha final 'hasta' es obligatorio");
+        }
+        if (desde.isAfter(hasta)) {
+            throw new IllegalArgumentException("La fecha 'desde' (" + desde + ") no puede ser posterior a la fecha 'hasta' (" + hasta + ")");
+        }
+        return repository.findByEstadoAndFechaRetiroBetween(EmployeeStatus.RETIRED, desde, hasta);
     }
 
     @Retryable(

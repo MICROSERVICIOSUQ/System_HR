@@ -29,3 +29,23 @@ model VacationBalance {
   /// Actualizado automáticamente por Prisma en cada operación
   updatedAt       DateTime @updatedAt
 }
+
+/// Período de vacaciones programado por un empleado.
+/// Creado vía POST /vacations. Al crearse publica vacaciones.programadas en RabbitMQ.
+model VacationPeriod {
+  /// UUID generado por la base de datos
+  id           String   @id @default(uuid())
+  /// ID del empleado (debe existir en VacationBalance)
+  empleadoId   String
+  /// Fecha de inicio del período (solo fecha, sin hora)
+  fechaInicio  DateTime @db.Date
+  /// Fecha de fin del período (solo fecha, sin hora)
+  fechaFin     DateTime @db.Date
+  /// Estado: PROGRAMADA | EN_CURSO | COMPLETADA | CANCELADA
+  estado       String   @default("PROGRAMADA")
+  /// Fecha/hora de creación del registro
+  fechaCreacion DateTime @default(now())
+
+  @@index([empleadoId])
+  @@index([estado])
+}

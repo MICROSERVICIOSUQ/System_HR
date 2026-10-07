@@ -12,9 +12,11 @@ import io.swagger.v3.oas.annotations.responses.ApiResponse;
 import io.swagger.v3.oas.annotations.responses.ApiResponses;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
+import org.springframework.format.annotation.DateTimeFormat;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
+import java.time.LocalDate;
 import java.util.List;
 import java.util.Map;
 
@@ -65,6 +67,44 @@ public class EmployeeController {
     })
     public ResponseEntity<List<Employee>> getAll() {
         return ResponseEntity.ok(service.findAll());
+    }
+
+    @GetMapping("/auditoria")
+    @Operation(summary = "Auditoría de empleados retirados por rango de fechas",
+            description = "Consulta únicamente empleados con estado RETIRADO cuya fechaRetiro esté dentro del rango especificado (desde y hasta inclusivos).")
+    @ApiResponses({
+            @ApiResponse(responseCode = "200", description = "Lista de empleados retirados obtenida exitosamente",
+                    content = @Content(array = @ArraySchema(schema = @Schema(implementation = Employee.class)))),
+            @ApiResponse(responseCode = "400", description = "Fechas inválidas, parámetros faltantes o fecha desde posterior a hasta",
+                    content = @Content(schema = @Schema(implementation = ErrorResponse.class))),
+            @ApiResponse(responseCode = "503", description = "Base de datos no disponible",
+                    content = @Content(schema = @Schema(implementation = ErrorResponse.class)))
+    })
+    public ResponseEntity<List<Employee>> getAuditoria(
+            @Parameter(description = "Fecha inicial del rango (formato yyyy-MM-dd)", example = "2026-01-01")
+            @RequestParam(name = "desde", required = false)
+            @DateTimeFormat(iso = DateTimeFormat.ISO.DATE)
+            LocalDate desde,
+
+            @Parameter(description = "Fecha final del rango (formato yyyy-MM-dd)", example = "2026-12-31")
+            @RequestParam(name = "hasta", required = false)
+            @DateTimeFormat(iso = DateTimeFormat.ISO.DATE)
+            LocalDate hasta,
+
+            @Parameter(hidden = true)
+            @RequestParam(name = "fechaInicio", required = false)
+            @DateTimeFormat(iso = DateTimeFormat.ISO.DATE)
+            LocalDate fechaInicio,
+
+            @Parameter(hidden = true)
+            @RequestParam(name = "fechaFin", required = false)
+            @DateTimeFormat(iso = DateTimeFormat.ISO.DATE)
+            LocalDate fechaFin) {
+
+        LocalDate fechaDesde = (desde != null) ? desde : fechaInicio;
+        LocalDate fechaHasta = (hasta != null) ? hasta : fechaFin;
+
+        return ResponseEntity.ok(service.findAuditoria(fechaDesde, fechaHasta));
     }
 
     @GetMapping("/{id}")

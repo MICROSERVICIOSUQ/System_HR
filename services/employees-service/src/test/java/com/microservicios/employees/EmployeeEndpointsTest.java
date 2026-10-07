@@ -16,6 +16,7 @@ import org.springframework.test.web.servlet.MockMvc;
 
 import static org.hamcrest.Matchers.containsInAnyOrder;
 import static org.hamcrest.Matchers.hasSize;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
@@ -307,5 +308,71 @@ class EmployeeEndpointsTest {
                 .andExpect(status().isCreated())
                 .andExpect(jsonPath("$.id").value("E099"))
                 .andExpect(jsonPath("$.estado").value("ACTIVO"));
+    }
+
+    @Test
+    @Order(19)
+    void auditEndpointFiltersRetiredEmployeesByDateRangeAndVerifiesLogicalDelete() throws Exception {
+        // 1. Verificar que antes del retiro, la auditoría no incluye a E001
+        mockMvc.perform(get("/empleados/auditoria?desde=2020-01-01&hasta=2030-12-31"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$").isArray())
+                .andExpect(jsonPath("$[?(@.id == 'E001')]").doesNotExist());
+
+        // 2. Ejecutar baja lógica de E001 (DELETE /empleados/E001)
+        mockMvc.perform(delete("/empleados/E001"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.id").value("E001"))
+                .andExpect(jsonPath("$.employeeId").value("E001"))
+                .andExpect(jsonPath("$.estado").value("RETIRADO"))
+                .andExpect(jsonPath("$.fechaRetiro").isNotEmpty());
+
+        // 3. Demostrar que el registro NO fue eliminado físicamente (GET /empleados/E001 responde 200 OK)
+        mockMvc.perform(get("/empleados/E001"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.id").value("E001"))
+                .andExpect(jsonPath("$.employeeId").value("E001"))
+                .andExpect(jsonPath("$.nombre").value("Juan"))
+                .andExpect(jsonPath("$.estado").value("RETIRADO"))
+                .andExpect(jsonPath("$.fechaRetiro").isNotEmpty());
+
+        // 4. Consultar auditoría en rango que cubre la fecha actual: debe retornar a E001
+        mockMvc.perform(get("/empleados/auditoria?desde=2026-01-01&hasta=2026-12-31"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$").isArray())
+                .andExpect(jsonPath("$[?(@.employeeId == 'E001')].nombre").value("Juan"))
+                .andExpect(jsonPath("$[?(@.employeeId == 'E001')].estado").value("RETIRADO"))
+                .andExpect(jsonPath("$[?(@.employeeId == 'E001')].fechaRetiro").isNotEmpty());
+
+        // 5. Consultar auditoría en un rango de fechas fuera del rango de retiro: no debe retornar registros
+        mockMvc.perform(get("/empleados/auditoria?desde=2024-01-01&hasta=2024-12-31"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$", hasSize(0)));
+
+        // 6. Probar alias de parámetros fechaInicio y fechaFin
+        mockMvc.perform(get("/empleados/auditoria?fechaInicio=2026-01-01&fechaFin=2026-12-31"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$").isArray())
+                .andExpect(jsonPath("$[?(@.employeeId == 'E001')].nombre").value("Juan"));
+    }
+
+    @Test
+    @Order(20)
+    void auditEndpointValidatesDateParameters() throws Exception {
+        // Validación: desde > hasta debe retornar 400
+        mockMvc.perform(get("/empleados/auditoria?desde=2026-12-31&hasta=2026-01-01"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.status").value(400))
+                .andExpect(jsonPath("$.message").value(org.hamcrest.Matchers.containsString("no puede ser posterior a la fecha 'hasta'")));
+
+        // Validación: fecha con formato inválido debe retornar 400
+        mockMvc.perform(get("/empleados/auditoria?desde=no-es-fecha&hasta=2026-12-31"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.status").value(400));
+
+        // Validación: parámetros faltantes debe retornar 400
+        mockMvc.perform(get("/empleados/auditoria"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.status").value(400));
     }
 }

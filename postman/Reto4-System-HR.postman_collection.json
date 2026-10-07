@@ -2,7 +2,7 @@
   "info": {
     "name": "Reto 4 - System HR",
     "_postman_id": "c4d7e9b1-2a3f-4e89-9a7b-8c1d2e3f4a5b",
-    "description": "Colección completa para sustentar y probar el RETO 4 de System_HR.\n\nContiene únicamente los endpoints existentes en el código del repositorio, organizados por microservicio y componente de infraestructura:\n1. INFRAESTRUCTURA Y BROKER (RabbitMQ)\n2. PRECONDICIÓN - DEPARTAMENTOS\n3. EMPLOYEES-SERVICE (Publicación de Eventos y Baja Lógica)\n4. NOTIFICATIONS-SERVICE (Consumidor e Idempotencia)\n5. PROFILES-SERVICE (CQRS Read Model e Idempotencia)\n6. VACATIONS-SERVICE (CQRS Read Model y Saldos)\n\nVariables parametrizadas a nivel de colección para ejecución inmediata contra localhost o contenedores Docker.",
+    "description": "Colección completa para sustentar y probar el RETO 4 de System_HR.\n\nOrganizada por microservicio y componente de infraestructura:\n1. INFRAESTRUCTURA Y BROKER (RabbitMQ)\n2. PRECONDICIÓN - DEPARTAMENTOS\n3. EMPLOYEES-SERVICE (Publicación de Eventos y Baja Lógica)\n4. NOTIFICATIONS-SERVICE (Consumidor e Idempotencia)\n5. PROFILES-SERVICE (CQRS Read Model e Idempotencia)\n6. VACATIONS-SERVICE (PRODUCTOR: POST /vacations + 4 validaciones + evento vacaciones.programadas + CQRS Read Model de saldos)\n\nVariables parametrizadas a nivel de colección. Usar {{vacacionesBaseUrl}} apuntando a http://localhost:8084 para acceso directo o http://localhost:8080 vía API Gateway.",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
   },
   "variable": [
@@ -104,6 +104,56 @@
     {
       "key": "profileRetireMessageId",
       "value": "f6a7b8c9-d0e1-2345-fabc-345678901235",
+      "type": "string"
+    },
+    {
+      "key": "vacacionId",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "messagesMap",
+      "value": "{}",
+      "type": "string"
+    },
+    {
+      "key": "notifOccurredAt",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "notifEmployeeId",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "notifNombre",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "notifApellido",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "notifEmail",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "notifCargo",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "notifDepartamentoId",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "notifFechaIngreso",
+      "value": "",
       "type": "string"
     }
   ],
@@ -614,20 +664,24 @@
           "response": []
         },
         {
-          "name": "3.6 Consultar Endpoint de Auditoría por rango de fechas (Inspección)",
+          "name": "3.6 Verificar si existe endpoint de auditoría",
           "event": [
             {
               "listen": "test",
               "script": {
                 "exec": [
-                  "// Según la inspección del código fuente, employees-service no implementa endpoint HTTP de auditoría.",
-                  "// La prueba documenta este resultado (404 Not Found) cumpliendo la condición 'si existe'.",
-                  "pm.test('Resultado de inspección de endpoint de auditoría', () => {",
+                  "pm.test('Verificación de endpoint de auditoría (si existe)', () => {",
                   "    pm.expect([200, 404]).to.include(pm.response.code);",
                   "    if (pm.response.code === 404) {",
-                  "        console.log('Inspección confirmada: employees-service no expone endpoint HTTP de auditoría en su controlador.');",
+                  "        console.log('employees-service no expone endpoint HTTP de auditoría; el requisito indica consultarlo si existe.');",
                   "    }",
-                  "});"
+                  "});",
+                  "if (pm.response.code === 200) {",
+                  "    pm.test('Respuesta 200 contiene lista de auditoría válida', () => {",
+                  "        const res = pm.response.json();",
+                  "        pm.expect(res).to.be.an('array');",
+                  "    });",
+                  "}"
                 ],
                 "type": "text/javascript"
               }
@@ -645,7 +699,7 @@
                 { "key": "fechaFin", "value": "2026-12-31" }
               ]
             },
-            "description": "Criterio: 'Consultar el endpoint de auditoría por rango de fechas, si existe'. Valida la respuesta del servicio confirmando que el endpoint no está expuesto en el código actual."
+            "description": "Criterio Reto 4: 'Consultar el endpoint de auditoría por rango de fechas, si existe'. Valida la respuesta del servicio documentando si el endpoint está expuesto o no."
           },
           "response": []
         }
@@ -898,12 +952,66 @@
           "name": "4.8 Deduplicación - Reenviar mismo evento/messageId",
           "event": [
             {
+              "listen": "prerequest",
+              "script": {
+                "exec": [
+                  "// Catálogo messageId -> datos del empleado (se guarda en variable de colección)",
+                  "const map = JSON.parse(pm.collectionVariables.get(\"messagesMap\") || \"{}\");",
+                  "let mid = pm.variables.get(\"notifMessageId\");",
+                  "",
+                  "// Si no hay messageId, generamos uno nuevo y lo registramos en el catálogo",
+                  "if (!mid) {",
+                  "    mid = \"msg-\" + Date.now() + \"-\" + Math.floor(Math.random() * 10000);",
+                  "    pm.variables.set(\"notifMessageId\", mid);",
+                  "    pm.variables.set(\"notifOccurredAt\", new Date().toISOString());",
+                  "",
+                  "    map[mid] = {",
+                  "        employeeId:     \"EMP-\" + Date.now(),",
+                  "        nombre:         \"nuevo\",",
+                  "        apellido:       \"empleado\",",
+                  "        email:          \"nuevo\" + Date.now() + \"@empresa.com\",",
+                  "        cargo:          \"Analista\",",
+                  "        departamentoId: \"D000\",",
+                  "        fechaIngreso:   \"2026-01-01\"",
+                  "    };",
+                  "    pm.collectionVariables.set(\"messagesMap\", JSON.stringify(map));",
+                  "    console.log(\"➕ Nuevo mensaje registrado:\", mid, map[mid]);",
+                  "",
+                  "} else {",
+                  "    // Reutilizamos los datos existentes para ese messageId (deduplicación)",
+                  "    const emp = map[mid];",
+                  "    if (emp) {",
+                  "        pm.variables.set(\"notifEmployeeId\",     emp.employeeId);",
+                  "        pm.variables.set(\"notifNombre\",         emp.nombre);",
+                  "        pm.variables.set(\"notifApellido\",       emp.apellido);",
+                  "        pm.variables.set(\"notifEmail\",          emp.email);",
+                  "        pm.variables.set(\"notifCargo\",          emp.cargo);",
+                  "        pm.variables.set(\"notifDepartamentoId\", emp.departamentoId);",
+                  "        pm.variables.set(\"notifFechaIngreso\",   emp.fechaIngreso);",
+                  "        console.log(\"♻ Reutilizando datos existentes para:\", mid);",
+                  "    } else {",
+                  "        console.warn(\"⚠ messageId no está en el catálogo:\", mid);",
+                  "    }",
+                  "}",
+                  "",
+                  "// Aseguramos que occurredAt tenga valor",
+                  "if (!pm.variables.get(\"notifOccurredAt\")) {",
+                  "    pm.variables.set(\"notifOccurredAt\", \"2026-10-06T20:00:00.000Z\");",
+                  "}"
+                ],
+                "type": "text/javascript"
+              }
+            },
+            {
               "listen": "test",
               "script": {
                 "exec": [
                   "pm.test('Status 200 OK de RabbitMQ', () => pm.response.to.have.status(200));",
                   "const res = pm.response.json();",
-                  "pm.test('Mensaje duplicado entregado al broker', () => pm.expect(res.routed).to.be.true);"
+                  "pm.test('Mensaje duplicado entregado al broker', () => pm.expect(res.routed).to.be.true);",
+                  "pm.test(\"El messageId está presente en el envío\", function () {",
+                  "    pm.expect(pm.variables.get(\"notifMessageId\")).to.be.a(\"string\").and.not.empty;",
+                  "});"
                 ],
                 "type": "text/javascript"
               }
@@ -921,7 +1029,7 @@
             "header": [{ "key": "Content-Type", "value": "application/json" }],
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"properties\": { \"content_type\": \"application/json\" },\n  \"routing_key\": \"\",\n  \"payload\": \"{\\\"id\\\":\\\"{{notifMessageId}}\\\",\\\"type\\\":\\\"empleado.creado\\\",\\\"version\\\":\\\"1.0\\\",\\\"occurredAt\\\":\\\"2026-10-06T20:00:00.000Z\\\",\\\"producer\\\":\\\"employees-service\\\",\\\"data\\\":{\\\"id\\\":\\\"EMP-N-01\\\",\\\"nombre\\\":\\\"Diana\\\",\\\"apellido\\\":\\\"Torres\\\",\\\"email\\\":\\\"diana.torres@empresa.com\\\",\\\"departamentoId\\\":\\\"DEPT-R4\\\",\\\"cargo\\\":\\\"DevOps Engineer\\\",\\\"fechaIngreso\\\":\\\"2026-03-15\\\",\\\"fechaRetiro\\\":null}}\",\n  \"payload_encoding\": \"string\"\n}",
+              "raw": "{\n  \"properties\": { \"content_type\": \"application/json\" },\n  \"routing_key\": \"\",\n  \"payload\": \"{\\\"id\\\":\\\"{{notifMessageId}}\\\",\\\"type\\\":\\\"empleado.creado\\\",\\\"version\\\":\\\"1.0\\\",\\\"occurredAt\\\":\\\"{{notifOccurredAt}}\\\",\\\"producer\\\":\\\"employees-service\\\",\\\"data\\\":{\\\"id\\\":\\\"{{notifEmployeeId}}\\\",\\\"nombre\\\":\\\"{{notifNombre}}\\\",\\\"apellido\\\":\\\"{{notifApellido}}\\\",\\\"email\\\":\\\"{{notifEmail}}\\\",\\\"departamentoId\\\":\\\"{{notifDepartamentoId}}\\\",\\\"cargo\\\":\\\"{{notifCargo}}\\\",\\\"fechaIngreso\\\":\\\"{{notifFechaIngreso}}\\\",\\\"fechaRetiro\\\":null}}\",\n  \"payload_encoding\": \"string\"\n}",
               "options": { "raw": { "language": "json" } }
             },
             "url": {
@@ -1343,11 +1451,51 @@
       ]
     },
     {
-      "name": "6. Vacations Service",
-      "description": "Demuestra los criterios de vacations-service: CRUD de consulta existente de saldos (GET /vacations, por estado y por ID), validación de empleado inexistente (404), operación válida de saldo, y publicación/tolerancia al evento vacaciones.programadas.",
+      "name": "6. Vacations Service - PRODUCTOR",
+      "description": "Demuestra los criterios de vacations-service como PRODUCTOR del Reto 4:\n- POST /vacations: Programa períodos y publica vacaciones.programadas en RabbitMQ\n- 4 validaciones de negocio: fechas incoherentes, fechas pasadas, solapamiento, empleado inexistente\n- GET /vacations, GET /vacations/:id, GET /vacations?empleadoId=...\n- DELETE /vacations/:id\n- CQRS Read Model de saldos (VacationBalance) construido desde eventos RabbitMQ\n- Verificación de publicación del evento vacaciones.programadas\n\nEstrategia de validación de empleado: réplica local (VacationBalance) alimentada vía eventos RabbitMQ (empleado.creado). El empleado debe existir en esa réplica para poder programar vacaciones. Responde 404 si no existe.",
       "item": [
         {
-          "name": "6.1 Consultar Todos los Saldos de Vacaciones (GET /vacations)",
+          "name": "6.0 Precondición: Crear empleado en réplica local (publicar empleado.creado)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Evento enrutado correctamente al broker', () => pm.response.to.have.status(200));",
+                  "const res = pm.response.json();",
+                  "pm.test('RabbitMQ confirma enrutamiento a las colas', () => pm.expect(res.routed).to.be.true);",
+                  "console.log('Precondición: evento empleado.creado publicado para {{empleadoId}}. Esperar ~2s antes de continuar.');"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "auth": {
+              "type": "basic",
+              "basic": [
+                { "key": "username", "value": "{{rabbitmqUser}}", "type": "string" },
+                { "key": "password", "value": "{{rabbitmqPassword}}", "type": "string" }
+              ]
+            },
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"properties\": { \"content_type\": \"application/json\" },\n  \"routing_key\": \"\",\n  \"payload\": \"{\\\"id\\\":\\\"vac-pre-emp-{{empleadoId}}-001\\\",\\\"type\\\":\\\"empleado.creado\\\",\\\"version\\\":\\\"1.0\\\",\\\"occurredAt\\\":\\\"2026-01-01T08:00:00.000Z\\\",\\\"producer\\\":\\\"employees-service\\\",\\\"data\\\":{\\\"id\\\":\\\"{{empleadoId}}\\\",\\\"nombre\\\":\\\"Carlos\\\",\\\"apellido\\\":\\\"Gómez\\\",\\\"email\\\":\\\"{{empleadoEmail}}\\\",\\\"departamentoId\\\":\\\"{{departamentoId}}\\\",\\\"cargo\\\":\\\"Ingeniero Cloud\\\",\\\"fechaIngreso\\\":\\\"2026-03-01\\\",\\\"fechaRetiro\\\":null}}\",\n  \"payload_encoding\": \"string\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": {
+              "raw": "{{rabbitmqApiUrl}}/api/exchanges/%2F/hr.events/publish",
+              "host": ["{{rabbitmqApiUrl}}"],
+              "path": ["api", "exchanges", "%2F", "hr.events", "publish"]
+            },
+            "description": "Precondición obligatoria: publica el evento 'empleado.creado' para que vacations-service incorpore el empleado en su réplica local (VacationBalance). Sin este paso, POST /vacations devolverá 404. Esperar ~2 segundos antes de continuar con las siguientes pruebas."
+          },
+          "response": []
+        },
+        {
+          "name": "6.1 Health Check - Vacations Service",
           "event": [
             {
               "listen": "test",
@@ -1355,9 +1503,132 @@
                 "exec": [
                   "pm.test('Status 200 OK', () => pm.response.to.have.status(200));",
                   "const res = pm.response.json();",
-                  "pm.test('Respuesta es un array de saldos de vacaciones', () => {",
-                  "    pm.expect(res).to.be.an('array');",
+                  "pm.test('Vacations Service operativo', () => {",
+                  "    pm.expect(res.status).to.eql('ok');",
+                  "    pm.expect(res.service).to.eql('vacations');",
                   "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{vacacionesBaseUrl}}/health",
+              "host": ["{{vacacionesBaseUrl}}"],
+              "path": ["health"]
+            },
+            "description": "Verifica que vacations-service está activo antes de ejecutar las pruebas del productor."
+          },
+          "response": []
+        },
+        {
+          "name": "6.2 Swagger/OpenAPI disponible",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status 200 OK', () => pm.response.to.have.status(200));",
+                  "const spec = pm.response.json();",
+                  "pm.test('Spec OpenAPI presente con endpoints documentados', () => {",
+                  "    pm.expect(spec.openapi).to.match(/^3\\./);",
+                  "    pm.expect(spec.paths).to.have.property('/vacations');",
+                  "    pm.expect(spec.paths).to.have.property('/vacations/{id}');",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{vacacionesBaseUrl}}/api-docs",
+              "host": ["{{vacacionesBaseUrl}}"],
+              "path": ["api-docs"]
+            },
+            "description": "Verifica que la documentación OpenAPI 3.x está disponible en /api-docs con los endpoints del productor documentados."
+          },
+          "response": []
+        },
+        {
+          "name": "6.3 POST /vacations - Crear vacaciones correctamente → 201",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "exec": [
+                  "// Calcular fechas futuras: inicio = hoy + 30 días, fin = hoy + 44 días",
+                  "const startDate = new Date();",
+                  "startDate.setDate(startDate.getDate() + 30);",
+                  "const endDate = new Date();",
+                  "endDate.setDate(endDate.getDate() + 44);",
+                  "const fmt = d => d.toISOString().split('T')[0];",
+                  "pm.collectionVariables.set('vac_fechaInicio', fmt(startDate));",
+                  "pm.collectionVariables.set('vac_fechaFin', fmt(endDate));",
+                  "console.log('Programando vacaciones:', fmt(startDate), 'al', fmt(endDate));"
+                ],
+                "type": "text/javascript"
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status 201 Created', () => pm.response.to.have.status(201));",
+                  "const vac = pm.response.json();",
+                  "pm.test('Período creado con campos obligatorios', () => {",
+                  "    pm.expect(vac.id).to.be.a('string').and.not.empty;",
+                  "    pm.expect(vac.empleadoId).to.eql(pm.collectionVariables.get('empleadoId'));",
+                  "    pm.expect(vac.fechaInicio).to.eql(pm.collectionVariables.get('vac_fechaInicio'));",
+                  "    pm.expect(vac.fechaFin).to.eql(pm.collectionVariables.get('vac_fechaFin'));",
+                  "    pm.expect(vac.estado).to.eql('PROGRAMADA');",
+                  "    pm.expect(vac.fechaCreacion).to.be.a('string').and.not.empty;",
+                  "});",
+                  "// Guardar el ID para usar en pruebas posteriores",
+                  "pm.collectionVariables.set('vacacionId', vac.id);",
+                  "console.log('Período creado con id:', vac.id);"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"empleadoId\": \"{{empleadoId}}\",\n  \"fechaInicio\": \"{{vac_fechaInicio}}\",\n  \"fechaFin\": \"{{vac_fechaFin}}\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": {
+              "raw": "{{vacacionesBaseUrl}}/vacations",
+              "host": ["{{vacacionesBaseUrl}}"],
+              "path": ["vacations"]
+            },
+            "description": "Crea un período de vacaciones válido. Verifica: id, empleadoId, fechaInicio, fechaFin, estado=PROGRAMADA y fechaCreacion. Guarda el id en {{vacacionId}} para pruebas posteriores. Las fechas se calculan dinámicamente (hoy+30 a hoy+44 días) para garantizar que siempre sean futuras."
+          },
+          "response": []
+        },
+        {
+          "name": "6.4 GET /vacations - Listar todos los períodos",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status 200 OK', () => pm.response.to.have.status(200));",
+                  "const lista = pm.response.json();",
+                  "pm.test('Respuesta es un array', () => pm.expect(lista).to.be.an('array'));",
+                  "const vid = pm.collectionVariables.get('vacacionId');",
+                  "if (vid) {",
+                  "    const found = lista.find(v => v.id === vid);",
+                  "    pm.test('El período recién creado aparece en la lista', () => pm.expect(found).to.not.be.undefined);",
+                  "}"
                 ],
                 "type": "text/javascript"
               }
@@ -1371,12 +1642,442 @@
               "host": ["{{vacacionesBaseUrl}}"],
               "path": ["vacations"]
             },
-            "description": "Demuestra la operación de consulta general existente en el microservicio vacations-service."
+            "description": "Lista todos los períodos de vacaciones programados. Verifica que el período creado en 6.3 aparece en la respuesta."
           },
           "response": []
         },
         {
-          "name": "6.2 Consultar Saldos Filtrados por Estado ACTIVO",
+          "name": "6.5 GET /vacations/:id - Obtener período por ID",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status 200 OK', () => pm.response.to.have.status(200));",
+                  "const vac = pm.response.json();",
+                  "pm.test('Período encontrado con id correcto', () => {",
+                  "    pm.expect(vac.id).to.eql(pm.collectionVariables.get('vacacionId'));",
+                  "    pm.expect(vac.estado).to.eql('PROGRAMADA');",
+                  "    pm.expect(vac.empleadoId).to.eql(pm.collectionVariables.get('empleadoId'));",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{vacacionesBaseUrl}}/vacations/{{vacacionId}}",
+              "host": ["{{vacacionesBaseUrl}}"],
+              "path": ["vacations", "{{vacacionId}}"]
+            },
+            "description": "Obtiene el período específico por UUID. Usa la variable {{vacacionId}} guardada en 6.3."
+          },
+          "response": []
+        },
+        {
+          "name": "6.6 GET /vacations?empleadoId - Filtrar por empleado",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status 200 OK', () => pm.response.to.have.status(200));",
+                  "const lista = pm.response.json();",
+                  "pm.test('Respuesta es un array', () => pm.expect(lista).to.be.an('array'));",
+                  "pm.test('Todos los períodos pertenecen al empleado filtrado', () => {",
+                  "    lista.forEach(v => pm.expect(v.empleadoId).to.eql(pm.collectionVariables.get('empleadoId')));",
+                  "});",
+                  "const vid = pm.collectionVariables.get('vacacionId');",
+                  "if (vid) {",
+                  "    const found = lista.find(v => v.id === vid);",
+                  "    pm.test('El período creado aparece en el filtro por empleado', () => pm.expect(found).to.not.be.undefined);",
+                  "}"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{vacacionesBaseUrl}}/vacations?empleadoId={{empleadoId}}",
+              "host": ["{{vacacionesBaseUrl}}"],
+              "path": ["vacations"],
+              "query": [{ "key": "empleadoId", "value": "{{empleadoId}}" }]
+            },
+            "description": "Filtra los períodos de vacaciones por empleadoId. Verifica que todos los resultados pertenecen al empleado indicado."
+          },
+          "response": []
+        },
+        {
+          "name": "6.7 Validación: fechaFin <= fechaInicio → 400",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status 400 Bad Request (fechas incoherentes)', () => pm.response.to.have.status(400));",
+                  "const res = pm.response.json();",
+                  "pm.test('Error de validación de fechas', () => {",
+                  "    pm.expect(res.status).to.eql(400);",
+                  "    pm.expect(res.message).to.be.a('string').and.not.empty;",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"empleadoId\": \"{{empleadoId}}\",\n  \"fechaInicio\": \"2027-03-15\",\n  \"fechaFin\": \"2027-03-10\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": {
+              "raw": "{{vacacionesBaseUrl}}/vacations",
+              "host": ["{{vacacionesBaseUrl}}"],
+              "path": ["vacations"]
+            },
+            "description": "Validación 1 de 4: fechaFin (2027-03-10) anterior a fechaInicio (2027-03-15). Debe retornar HTTP 400 con mensaje de error descriptivo."
+          },
+          "response": []
+        },
+        {
+          "name": "6.8 Validación: fechaInicio en el pasado → 400",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status 400 Bad Request (fecha pasada)', () => pm.response.to.have.status(400));",
+                  "const res = pm.response.json();",
+                  "pm.test('Error de validación de fecha pasada', () => {",
+                  "    pm.expect(res.status).to.eql(400);",
+                  "    pm.expect(res.message).to.be.a('string').and.not.empty;",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"empleadoId\": \"{{empleadoId}}\",\n  \"fechaInicio\": \"2020-01-01\",\n  \"fechaFin\": \"2020-01-15\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": {
+              "raw": "{{vacacionesBaseUrl}}/vacations",
+              "host": ["{{vacacionesBaseUrl}}"],
+              "path": ["vacations"]
+            },
+            "description": "Validación 2 de 4: fechaInicio en el pasado (2020-01-01). Debe retornar HTTP 400 con mensaje indicando que la fecha de inicio no puede ser pasada."
+          },
+          "response": []
+        },
+        {
+          "name": "6.9 Validación: solapamiento con período existente → 400",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "exec": [
+                  "// Calcular fechas que se solapan con el período creado en 6.3 (hoy+30 a hoy+44)",
+                  "// Enviamos hoy+32 a hoy+36 para garantizar solapamiento",
+                  "const s = new Date(); s.setDate(s.getDate() + 32);",
+                  "const e = new Date(); e.setDate(e.getDate() + 36);",
+                  "const fmt = d => d.toISOString().split('T')[0];",
+                  "pm.collectionVariables.set('vac_overlap_inicio', fmt(s));",
+                  "pm.collectionVariables.set('vac_overlap_fin', fmt(e));"
+                ],
+                "type": "text/javascript"
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status 400 Bad Request (solapamiento)', () => pm.response.to.have.status(400));",
+                  "const res = pm.response.json();",
+                  "pm.test('Error de validación de solapamiento', () => {",
+                  "    pm.expect(res.status).to.eql(400);",
+                  "    pm.expect(res.message).to.be.a('string').and.not.empty;",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"empleadoId\": \"{{empleadoId}}\",\n  \"fechaInicio\": \"{{vac_overlap_inicio}}\",\n  \"fechaFin\": \"{{vac_overlap_fin}}\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": {
+              "raw": "{{vacacionesBaseUrl}}/vacations",
+              "host": ["{{vacacionesBaseUrl}}"],
+              "path": ["vacations"]
+            },
+            "description": "Validación 3 de 4: solapamiento con el período PROGRAMADA creado en 6.3. Las fechas calculadas se solapan con ese período. Debe retornar HTTP 400 con mensaje indicando el conflicto de fechas."
+          },
+          "response": []
+        },
+        {
+          "name": "6.10 Validación: empleado inexistente → 404",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status 404 Not Found (empleado no existe)', () => pm.response.to.have.status(404));",
+                  "const res = pm.response.json();",
+                  "pm.test('Error de empleado inexistente', () => {",
+                  "    pm.expect(res.status).to.eql(404);",
+                  "    pm.expect(res.message).to.be.a('string').and.not.empty;",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"empleadoId\": \"EMPLEADO_INEXISTENTE_999\",\n  \"fechaInicio\": \"2027-05-01\",\n  \"fechaFin\": \"2027-05-15\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": {
+              "raw": "{{vacacionesBaseUrl}}/vacations",
+              "host": ["{{vacacionesBaseUrl}}"],
+              "path": ["vacations"]
+            },
+            "description": "Validación 4 de 4: empleado no existe en la réplica local (VacationBalance). Retorna 404 porque la validación usa la réplica CQRS local alimentada por eventos RabbitMQ. Documentado: si el empleado no envió 'empleado.creado' previamente, su registro no existe en vacations-service."
+          },
+          "response": []
+        },
+        {
+          "name": "6.11 DELETE /vacations/:id - Eliminar período programado",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status 200 OK', () => pm.response.to.have.status(200));",
+                  "const res = pm.response.json();",
+                  "pm.test('Período eliminado correctamente', () => {",
+                  "    pm.expect(res.message).to.include('eliminado');",
+                  "    pm.expect(res.data.id).to.eql(pm.collectionVariables.get('vacacionId'));",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": {
+              "raw": "{{vacacionesBaseUrl}}/vacations/{{vacacionId}}",
+              "host": ["{{vacacionesBaseUrl}}"],
+              "path": ["vacations", "{{vacacionId}}"]
+            },
+            "description": "Elimina el período programado por UUID. Usa {{vacacionId}} guardado en 6.3."
+          },
+          "response": []
+        },
+        {
+          "name": "6.12 GET /vacations/:id - Período eliminado → 404",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status 404 Not Found (período eliminado)', () => pm.response.to.have.status(404));",
+                  "const res = pm.response.json();",
+                  "pm.test('Período ya no existe tras el DELETE', () => {",
+                  "    pm.expect(res.status).to.eql(404);",
+                  "    pm.expect(res.message).to.include('no encontrado');",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{vacacionesBaseUrl}}/vacations/{{vacacionId}}",
+              "host": ["{{vacacionesBaseUrl}}"],
+              "path": ["vacations", "{{vacacionId}}"]
+            },
+            "description": "Confirma que el DELETE fue efectivo: el período ya no existe en la base de datos."
+          },
+          "response": []
+        },
+        {
+          "name": "6.13 Verificar evento vacaciones.programadas en RabbitMQ",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status 200 OK de RabbitMQ Management API', () => pm.response.to.have.status(200));",
+                  "const res = pm.response.json();",
+                  "pm.test('Exchange hr.events existe y es fanout', () => {",
+                  "    pm.expect(res.name).to.eql('hr.events');",
+                  "    pm.expect(res.type).to.eql('fanout');",
+                  "});",
+                  "console.log('Verificación: El exchange hr.events existe. Al crear vacaciones via POST /vacations, vacations-service publica automáticamente vacaciones.programadas en este exchange.');"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "auth": {
+              "type": "basic",
+              "basic": [
+                { "key": "username", "value": "{{rabbitmqUser}}", "type": "string" },
+                { "key": "password", "value": "{{rabbitmqPassword}}", "type": "string" }
+              ]
+            },
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{rabbitmqApiUrl}}/api/exchanges/%2F/hr.events",
+              "host": ["{{rabbitmqApiUrl}}"],
+              "path": ["api", "exchanges", "%2F", "hr.events"]
+            },
+            "description": "Verifica que el exchange hr.events existe. El evento vacaciones.programadas se publica automáticamente cuando POST /vacations tiene éxito (fire-and-forget). Envelope: { id, type:'vacaciones.programadas', version:'1.0', occurredAt, producer:'vacations-service', data: { id, empleadoId, fechaInicio, fechaFin, estado, fechaCreacion } }."
+          },
+          "response": []
+        },
+        {
+          "name": "6.14 Crear segundo período (para luego publicar vacaciones.programadas manualmente)",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "exec": [
+                  "const s = new Date(); s.setDate(s.getDate() + 60);",
+                  "const e = new Date(); e.setDate(e.getDate() + 74);",
+                  "const fmt = d => d.toISOString().split('T')[0];",
+                  "pm.collectionVariables.set('vac_fechaInicio2', fmt(s));",
+                  "pm.collectionVariables.set('vac_fechaFin2', fmt(e));"
+                ],
+                "type": "text/javascript"
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status 201 Created', () => pm.response.to.have.status(201));",
+                  "const vac = pm.response.json();",
+                  "pm.test('Segundo período creado correctamente', () => {",
+                  "    pm.expect(vac.id).to.be.a('string').and.not.empty;",
+                  "    pm.expect(vac.estado).to.eql('PROGRAMADA');",
+                  "});",
+                  "pm.collectionVariables.set('vacacionId', vac.id);",
+                  "pm.collectionVariables.set('vacacion2Id', vac.id);",
+                  "console.log('Segundo período creado:', vac.id, '— Al crearlo se publicó automáticamente vacaciones.programadas en RabbitMQ');"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"empleadoId\": \"{{empleadoId}}\",\n  \"fechaInicio\": \"{{vac_fechaInicio2}}\",\n  \"fechaFin\": \"{{vac_fechaFin2}}\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": {
+              "raw": "{{vacacionesBaseUrl}}/vacations",
+              "host": ["{{vacacionesBaseUrl}}"],
+              "path": ["vacations"]
+            },
+            "description": "Crea un segundo período en un rango no solapado (hoy+60 a hoy+74). Al crearlo exitosamente, vacations-service publica automáticamente el evento 'vacaciones.programadas' en el exchange hr.events de RabbitMQ."
+          },
+          "response": []
+        },
+        {
+          "name": "6.15 CQRS Saldos: GET /vacations/balances",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status 200 OK', () => pm.response.to.have.status(200));",
+                  "const res = pm.response.json();",
+                  "pm.test('Respuesta es un array de saldos de vacaciones', () => pm.expect(res).to.be.an('array'));"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{vacacionesBaseUrl}}/vacations/balances",
+              "host": ["{{vacacionesBaseUrl}}"],
+              "path": ["vacations", "balances"]
+            },
+            "description": "Consulta el Read Model CQRS de saldos (VacationBalance) alimentado por eventos RabbitMQ. Lista todos los empleados con sus días disponibles y tomados."
+          },
+          "response": []
+        },
+        {
+          "name": "6.16 CQRS Saldos: GET /vacations/balances/:employeeId (empleado válido)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status 200 OK', () => pm.response.to.have.status(200));",
+                  "const v = pm.response.json();",
+                  "pm.test('Saldo válido del empleado (CQRS Read Model)', () => {",
+                  "    pm.expect(v.employeeId).to.eql(pm.collectionVariables.get('empleadoId'));",
+                  "    pm.expect(v.diasDisponibles).to.eql(15);",
+                  "    pm.expect(v.diasTomados).to.eql(0);",
+                  "    pm.expect(v.estadoEmpleado).to.eql('ACTIVO');",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{vacacionesBaseUrl}}/vacations/balances/{{empleadoId}}",
+              "host": ["{{vacacionesBaseUrl}}"],
+              "path": ["vacations", "balances", "{{empleadoId}}"]
+            },
+            "description": "Consulta el saldo CQRS del empleado específico. Verifica que tiene 15 días disponibles, 0 tomados y estado ACTIVO (valores por defecto al recibir empleado.creado)."
+          },
+          "response": []
+        },
+        {
+          "name": "6.17 CQRS Saldos: GET /vacations/balances?estado=ACTIVO",
           "event": [
             {
               "listen": "test",
@@ -1396,180 +2097,12 @@
             "method": "GET",
             "header": [],
             "url": {
-              "raw": "{{vacacionesBaseUrl}}/vacations?estado=ACTIVO",
+              "raw": "{{vacacionesBaseUrl}}/vacations/balances?estado=ACTIVO",
               "host": ["{{vacacionesBaseUrl}}"],
-              "path": ["vacations"],
+              "path": ["vacations", "balances"],
               "query": [{ "key": "estado", "value": "ACTIVO" }]
             },
-            "description": "Consulta de saldos filtrados por ?estado=ACTIVO."
-          },
-          "response": []
-        },
-        {
-          "name": "6.3 Consultar Saldos Filtrados por Estado RETIRADO",
-          "event": [
-            {
-              "listen": "test",
-              "script": {
-                "exec": [
-                  "pm.test('Status 200 OK', () => pm.response.to.have.status(200));",
-                  "const res = pm.response.json();",
-                  "pm.test('Todos los registros corresponden a empleados RETIRADOS', () => {",
-                  "    res.forEach(v => pm.expect(v.estadoEmpleado).to.eql('RETIRADO'));",
-                  "});"
-                ],
-                "type": "text/javascript"
-              }
-            }
-          ],
-          "request": {
-            "method": "GET",
-            "header": [],
-            "url": {
-              "raw": "{{vacacionesBaseUrl}}/vacations?estado=RETIRADO",
-              "host": ["{{vacacionesBaseUrl}}"],
-              "path": ["vacations"],
-              "query": [{ "key": "estado", "value": "RETIRADO" }]
-            },
-            "description": "Consulta de saldos filtrados por ?estado=RETIRADO, comprobando que los empleados retirados conservan su saldo histórico."
-          },
-          "response": []
-        },
-        {
-          "name": "6.4 Consultar Saldo de Empleado (Operación Válida)",
-          "event": [
-            {
-              "listen": "test",
-              "script": {
-                "exec": [
-                  "pm.test('Status 200 OK', () => pm.response.to.have.status(200));",
-                  "const v = pm.response.json();",
-                  "pm.test('Saldo válido de 15 días disponibles y 0 tomados', () => {",
-                  "    pm.expect(v.employeeId).to.eql(pm.collectionVariables.get('empleadoId'));",
-                  "    pm.expect(v.diasDisponibles).to.eql(15);",
-                  "    pm.expect(v.diasTomados).to.eql(0);",
-                  "});"
-                ],
-                "type": "text/javascript"
-              }
-            }
-          ],
-          "request": {
-            "method": "GET",
-            "header": [],
-            "url": {
-              "raw": "{{vacacionesBaseUrl}}/vacations/{{empleadoId}}",
-              "host": ["{{vacacionesBaseUrl}}"],
-              "path": ["vacations", "{{empleadoId}}"]
-            },
-            "description": "Demuestra la consulta de saldo para un empleado existente creado durante el flujo, verificando los valores por defecto (15 días disponibles, 0 tomados)."
-          },
-          "response": []
-        },
-        {
-          "name": "6.5 Validación: Empleado Inexistente (GET /vacations/:id)",
-          "event": [
-            {
-              "listen": "test",
-              "script": {
-                "exec": [
-                  "pm.test('Status 404 Not Found', () => pm.response.to.have.status(404));",
-                  "const res = pm.response.json();",
-                  "pm.test('Mensaje de empleado inexistente', () => {",
-                  "    pm.expect(res.status).to.eql(404);",
-                  "    pm.expect(res.message).to.include('no encontrado');",
-                  "});"
-                ],
-                "type": "text/javascript"
-              }
-            }
-          ],
-          "request": {
-            "method": "GET",
-            "header": [],
-            "url": {
-              "raw": "{{vacacionesBaseUrl}}/vacations/EMPLEADO_NO_EXISTE_999",
-              "host": ["{{vacacionesBaseUrl}}"],
-              "path": ["vacations", "EMPLEADO_NO_EXISTE_999"]
-            },
-            "description": "Demuestra la validación de empleado inexistente implementada en el controlador de vacations-service, retornando 404 Not Found."
-          },
-          "response": []
-        },
-        {
-          "name": "6.6 Publicar Evento vacaciones.programadas a RabbitMQ",
-          "event": [
-            {
-              "listen": "test",
-              "script": {
-                "exec": [
-                  "pm.test('Status 200 OK de RabbitMQ', () => pm.response.to.have.status(200));",
-                  "const res = pm.response.json();",
-                  "pm.test('Evento publicado en RabbitMQ', () => pm.expect(res.routed).to.be.true);"
-                ],
-                "type": "text/javascript"
-              }
-            }
-          ],
-          "request": {
-            "auth": {
-              "type": "basic",
-              "basic": [
-                { "key": "username", "value": "{{rabbitmqUser}}", "type": "string" },
-                { "key": "password", "value": "{{rabbitmqPassword}}", "type": "string" }
-              ]
-            },
-            "method": "POST",
-            "header": [{ "key": "Content-Type", "value": "application/json" }],
-            "body": {
-              "mode": "raw",
-              "raw": "{\n  \"properties\": { \"content_type\": \"application/json\" },\n  \"routing_key\": \"\",\n  \"payload\": \"{\\\"id\\\":\\\"d4e5f6a7-b8c9-0123-defa-123456789013\\\",\\\"type\\\":\\\"vacaciones.programadas\\\",\\\"version\\\":\\\"1.0\\\",\\\"occurredAt\\\":\\\"2026-10-06T20:45:00.000Z\\\",\\\"producer\\\":\\\"vacations-service\\\",\\\"data\\\":{\\\"id\\\":\\\"e5f6a7b8-c9d0-1234-efab-234567890124\\\",\\\"empleadoId\\\":\\\"{{empleadoId}}\\\",\\\"fechaInicio\\\":\\\"2026-11-01\\\",\\\"fechaFin\\\":\\\"2026-11-15\\\",\\\"diasHabiles\\\":10,\\\"estado\\\":\\\"PENDIENTE\\\",\\\"observacion\\\":null}}\",\n  \"payload_encoding\": \"string\"\n}",
-              "options": { "raw": { "language": "json" } }
-            },
-            "url": {
-              "raw": "{{rabbitmqApiUrl}}/api/exchanges/%2F/hr.events/publish",
-              "host": ["{{rabbitmqApiUrl}}"],
-              "path": ["api", "exchanges", "%2F", "hr.events", "publish"]
-            },
-            "description": "Demuestra la publicación del evento 'vacaciones.programadas' según el catálogo estándar. Los consumidores confirman con ACK y descartan de forma segura eventos no suscritos ('IGNORED')."
-          },
-          "response": []
-        },
-        {
-          "name": "6.7 Verificación de Operaciones de Solicitud de Vacaciones (Inspección)",
-          "event": [
-            {
-              "listen": "test",
-              "script": {
-                "exec": [
-                  "// Según la inspección exhaustiva del código fuente de vacations-service,",
-                  "// este microservicio implementa exclusivamente el Read Model CQRS de saldos vía eventos y consultas GET.",
-                  "// No expone endpoint HTTP POST /vacations ni validaciones de solicitud de fechas en esta fase.",
-                  "pm.test('Resultado de inspección de operaciones de solicitud POST', () => {",
-                  "    pm.expect([200, 201, 404, 405]).to.include(pm.response.code);",
-                  "    if (pm.response.code === 404) {",
-                  "        console.log('Inspección confirmada: vacations-service opera exclusivamente como Read Model CQRS desacoplado.');",
-                  "    }",
-                  "});"
-                ],
-                "type": "text/javascript"
-              }
-            }
-          ],
-          "request": {
-            "method": "POST",
-            "header": [{ "key": "Content-Type", "value": "application/json" }],
-            "body": {
-              "mode": "raw",
-              "raw": "{\n  \"empleadoId\": \"{{empleadoId}}\",\n  \"fechaInicio\": \"2026-10-15\",\n  \"fechaFin\": \"2026-10-24\"\n}",
-              "options": { "raw": { "language": "json" } }
-            },
-            "url": {
-              "raw": "{{vacacionesBaseUrl}}/vacations",
-              "host": ["{{vacacionesBaseUrl}}"],
-              "path": ["vacations"]
-            },
-            "description": "Criterio: Validaciones de fechas incoherentes, fechas pasadas, solapamiento y solicitud de vacaciones. Valida y documenta el estado real del microservicio en el código, confirmando su arquitectura CQRS Read Model."
+            "description": "Filtra saldos CQRS por estado=ACTIVO."
           },
           "response": []
         }

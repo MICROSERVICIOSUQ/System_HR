@@ -4,12 +4,22 @@ import { VacationController } from '../controllers/vacation.controller.ts';
 const router = Router();
 const controller = new VacationController();
 
-// GET /vacations                  → Lista completa
-// GET /vacations?estado=ACTIVO    → Solo empleados activos
-// GET /vacations?estado=RETIRADO  → Solo empleados retirados
-router.get('/', controller.getAll);
+// ── Períodos de vacaciones (Productor / Write Model) ──────────────────────────
+// POST  /vacations                       → Programar período (+ publica vacaciones.programadas)
+// GET   /vacations                       → Listar todos los períodos
+// GET   /vacations?empleadoId=EMP-001    → Filtrar períodos por empleado
+// GET   /vacations/:id                   → Obtener período por UUID
+// DELETE /vacations/:id                  → Eliminar período por UUID
 
-// GET /vacations/:employeeId      → Buscar saldo de un empleado por ID
-router.get('/:employeeId', controller.getByEmployeeId);
+router.post('/', controller.createPeriod);
+router.get('/', controller.getAllPeriods);
+router.get('/:id', controller.getPeriodById);
+router.delete('/:id', controller.deletePeriod);
+
+// ── Saldos de vacaciones (CQRS Read Model desde eventos RabbitMQ) ─────────────
+// GET   /vacations/balances              → Listar saldos
+// GET   /vacations/balances?estado=ACTIVO
+// GET   /vacations/balances/:employeeId  → Saldo de un empleado
+// Nota: /balances debe declararse ANTES de /:id para evitar conflicto de rutas
 
 export default router;

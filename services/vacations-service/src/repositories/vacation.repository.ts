@@ -26,7 +26,18 @@ export interface RetireVacationDto {
 
 export type EstadoFiltro = 'ACTIVO' | 'RETIRADO';
 
+// ── DTOs para VacationPeriod ─────────────────────────────────────────────────
+
+export interface CreateVacationPeriodDto {
+  empleadoId: string;
+  fechaInicio: Date;
+  fechaFin: Date;
+  estado?: string;
+}
+
 export class VacationRepository {
+  // ── VacationBalance (CQRS Read Model) ──────────────────────────────────────
+
   /** Buscar por lastEventId para garantía de idempotencia */
   async findByLastEventId(eventId: string) {
     return prisma.vacationBalance.findUnique({
@@ -87,6 +98,66 @@ export class VacationRepository {
       data: {
         estadoEmpleado: 'RETIRADO',
         lastEventId: data.lastEventId,
+      },
+    });
+  }
+
+  // ── VacationPeriod (Productor / Write Model) ────────────────────────────────
+
+  /** Crear un nuevo período de vacaciones */
+  async createPeriod(data: CreateVacationPeriodDto) {
+    return prisma.vacationPeriod.create({
+      data: {
+        empleadoId: data.empleadoId,
+        fechaInicio: data.fechaInicio,
+        fechaFin: data.fechaFin,
+        estado: data.estado ?? 'PROGRAMADA',
+      },
+    });
+  }
+
+  /** Listar todos los períodos. Filtro opcional por empleadoId. */
+  async findAllPeriods(empleadoId?: string) {
+    return prisma.vacationPeriod.findMany({
+      where: empleadoId ? { empleadoId } : undefined,
+      orderBy: { fechaCreacion: 'desc' },
+    });
+  }
+
+  /** Buscar un período por ID */
+  async findPeriodById(id: string) {
+    return prisma.vacationPeriod.findUnique({
+      where: { id },
+    });
+  }
+
+  /** Eliminar un período por ID */
+  async deletePeriod(id: string) {
+    return prisma.vacationPeriod.delete({
+      where: { id },
+    });
+  }
+
+  /**
+   * Detectar solapamientos con períodos PROGRAMADA o EN_CURSO para un empleado.
+   * Un solapamiento existe cuando los rangos se cruzan: inicio1 <= fin2 AND fin1 >= inicio2
+   * Excluye opcionalmente un ID (para futura edición).
+   */
+  async findOverlappingPeriods(
+    empleadoId: string,
+    fechaInicio: Date,
+    fechaFin: Date,
+    excludeId?: string
+  ) {
+    return prisma.vacationPeriod.findMany({
+      where: {
+        empleadoId,
+        estado: { in: ['PROGRAMADA', 'EN_CURSO'] },
+        id: excludeId ? { not: excludeId } : undefined,
+        AND: [
+          { fechaInicio: { lte: fechaFin } },
+          { fechaFin: { gte: fechaInicio } },
+        ],
       },
     });
   }

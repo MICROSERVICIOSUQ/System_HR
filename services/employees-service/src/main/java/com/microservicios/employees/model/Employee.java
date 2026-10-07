@@ -60,6 +60,10 @@ public class Employee {
     @Schema(description = "Fecha de ingreso (formato yyyy-MM-dd)", example = "2026-02-10")
     private LocalDate fechaIngreso;
 
+    @Column(name = "fecha_retiro")
+    @Schema(description = "Fecha de retiro lógico (formato yyyy-MM-dd). Solo presente cuando estado=RETIRADO.", example = "2026-10-07", nullable = true)
+    private LocalDate fechaRetiro;
+
     @Enumerated(EnumType.STRING)
     @Column(nullable = false)
     @Schema(description = "Estado del empleado (inicialmente siempre ACTIVO)", example = "ACTIVO")
@@ -69,6 +73,17 @@ public class Employee {
 
     public String getId() { return id; }
     public void setId(String id) { this.id = id; }
+
+    @JsonProperty("employeeId")
+    @Schema(description = "Identificador único del empleado (alias de id)", example = "E001")
+    public String getEmployeeId() { return id; }
+
+    @JsonProperty("employeeId")
+    public void setEmployeeId(String employeeId) {
+        if (this.id == null || this.id.isBlank()) {
+            this.id = employeeId;
+        }
+    }
 
     public String getNombre() { return nombre; }
     public void setNombre(String nombre) { this.nombre = nombre; }
@@ -95,6 +110,11 @@ public class Employee {
 
     public LocalDate getFechaIngreso() { return fechaIngreso; }
     public void setFechaIngreso(LocalDate fechaIngreso) { this.fechaIngreso = fechaIngreso; }
+
+    @JsonProperty("fechaRetiro")
+    public LocalDate getFechaRetiro() { return fechaRetiro; }
+    @JsonProperty("fechaRetiro")
+    public void setFechaRetiro(LocalDate fechaRetiro) { this.fechaRetiro = fechaRetiro; }
 
     @JsonProperty("estado")
     public EmployeeStatus getStatus() { return estado; }

@@ -1,4 +1,5 @@
 import { VacationRepository, EstadoFiltro } from '../repositories/vacation.repository.ts';
+import { RabbitMQPublisher } from '../messaging/rabbitmq.publisher.ts';
 
 export interface EventEnvelope {
   id: string;
@@ -20,10 +21,44 @@ export type ProcessingResult = 'CREATED' | 'UPDATED' | 'RETIRED' | 'DUPLICATE' |
 
 const ALLOWED_EVENTS = ['empleado.creado', 'empleado.actualizado', 'empleado.retirado'] as const;
 
-export class VacationService {
-  constructor(private readonly repository = new VacationRepository()) {}
+// ── DTOs de período ─────────────────────────────────────────────────────────
 
-  // ── Consultas (Read Model) ──────────────────────────────────────────────────
+export interface CreatePeriodDto {
+  empleadoId: string;
+  fechaInicio: string; // ISO date string (YYYY-MM-DD)
+  fechaFin: string;    // ISO date string (YYYY-MM-DD)
+}
+
+export interface VacationPeriodResult {
+  id: string;
+  empleadoId: string;
+  fechaInicio: string;
+  fechaFin: string;
+  estado: string;
+  fechaCreacion: string;
+}
+
+export class ValidationError extends Error {
+  constructor(
+    message: string,
+    public readonly statusCode: number = 400
+  ) {
+    super(message);
+    this.name = 'ValidationError';
+  }
+}
+
+export class VacationService {
+  private readonly publisher: RabbitMQPublisher;
+
+  constructor(
+    private readonly repository = new VacationRepository(),
+    publisher?: RabbitMQPublisher
+  ) {
+    this.publisher = publisher ?? new RabbitMQPublisher();
+  }
+
+  // ── Consultas VacationBalance (Read Model) ──────────────────────────────────
 
   async getAll(estado?: string) {
     const estadoFiltro = this.parseEstado(estado);
@@ -34,7 +69,112 @@ export class VacationService {
     return this.repository.findByEmployeeId(employeeId);
   }
 
-  // ── Procesamiento de eventos RabbitMQ ───────────────────────────────────────
+  // ── CRUD VacationPeriod (Productor) ─────────────────────────────────────────
+
+  /**
+   * Programa un nuevo período de vacaciones aplicando las 4 validaciones de negocio.
+   * Si todo es válido, persiste el período y publica vacaciones.programadas en RabbitMQ.
+   */
+  async createPeriod(dto: CreatePeriodDto): Promise<VacationPeriodResult> {
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+
+    const inicio = this.parseDate(dto.fechaInicio, 'fechaInicio');
+    const fin = this.parseDate(dto.fechaFin, 'fechaFin');
+
+    // Validación 1: fechaFin debe ser posterior a fechaInicio
+    if (fin <= inicio) {
+      throw new ValidationError(
+        `fechaFin (${dto.fechaFin}) debe ser posterior a fechaInicio (${dto.fechaInicio})`
+      );
+    }
+
+    // Validación 2: fechaInicio no puede ser en el pasado
+    if (inicio < today) {
+      throw new ValidationError(
+        `fechaInicio (${dto.fechaInicio}) no puede ser una fecha pasada`
+      );
+    }
+
+    // Validación 3: empleado debe existir en la réplica local (VacationBalance)
+    const balance = await this.repository.findByEmployeeId(dto.empleadoId);
+    if (!balance) {
+      throw new ValidationError(
+        `Empleado con id '${dto.empleadoId}' no encontrado. Debe existir en el sistema de vacaciones.`,
+        404
+      );
+    }
+
+    // Validación 4: no debe solaparse con períodos PROGRAMADA o EN_CURSO del mismo empleado
+    const overlaps = await this.repository.findOverlappingPeriods(
+      dto.empleadoId,
+      inicio,
+      fin
+    );
+    if (overlaps.length > 0) {
+      const overlap = overlaps[0];
+      const iniStr = overlap.fechaInicio instanceof Date
+        ? overlap.fechaInicio.toISOString().split('T')[0]
+        : String(overlap.fechaInicio);
+      const finStr = overlap.fechaFin instanceof Date
+        ? overlap.fechaFin.toISOString().split('T')[0]
+        : String(overlap.fechaFin);
+      throw new ValidationError(
+        `El período solicitado se solapa con uno existente (${iniStr} → ${finStr}, estado: ${overlap.estado})`
+      );
+    }
+
+    // Persistir el período
+    const period = await this.repository.createPeriod({
+      empleadoId: dto.empleadoId,
+      fechaInicio: inicio,
+      fechaFin: fin,
+      estado: 'PROGRAMADA',
+    });
+
+    const result = this.mapPeriod(period);
+
+    // Publicar evento vacaciones.programadas en RabbitMQ (fire-and-forget, no bloquea)
+    this.publisher
+      .publishVacacionesProgramadas({
+        id: result.id,
+        empleadoId: result.empleadoId,
+        fechaInicio: result.fechaInicio,
+        fechaFin: result.fechaFin,
+        estado: result.estado,
+        fechaCreacion: result.fechaCreacion,
+      })
+      .catch((err) => {
+        console.error(
+          `[VACATIONS] [WARN] No se pudo publicar evento para período ${result.id}:`,
+          err.message
+        );
+      });
+
+    return result;
+  }
+
+  async getAllPeriods(empleadoId?: string): Promise<VacationPeriodResult[]> {
+    const periods = await this.repository.findAllPeriods(empleadoId);
+    return periods.map(this.mapPeriod);
+  }
+
+  async getPeriodById(id: string): Promise<VacationPeriodResult | null> {
+    const period = await this.repository.findPeriodById(id);
+    return period ? this.mapPeriod(period) : null;
+  }
+
+  async deletePeriod(id: string): Promise<VacationPeriodResult> {
+    const existing = await this.repository.findPeriodById(id);
+    if (!existing) {
+      throw new ValidationError(`Período de vacaciones con id '${id}' no encontrado`, 404);
+    }
+
+    const deleted = await this.repository.deletePeriod(id);
+    return this.mapPeriod(deleted);
+  }
+
+  // ── Procesamiento de eventos RabbitMQ (CQRS Consumer) ──────────────────────
 
   async processEvent(envelope: EventEnvelope): Promise<ProcessingResult> {
     const { id: eventId, type: eventType, data } = envelope;
@@ -187,8 +327,41 @@ export class VacationService {
     return 'RETIRED';
   }
 
+  // ── Helpers ─────────────────────────────────────────────────────────────────
+
   private parseEstado(estado?: string): EstadoFiltro | undefined {
     if (estado === 'ACTIVO' || estado === 'RETIRADO') return estado;
     return undefined;
+  }
+
+  /** Parsea una string YYYY-MM-DD a Date (midnight UTC) */
+  private parseDate(dateStr: string, field: string): Date {
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(dateStr)) {
+      throw new ValidationError(
+        `El campo '${field}' debe tener formato YYYY-MM-DD, recibido: '${dateStr}'`
+      );
+    }
+    const d = new Date(dateStr + 'T00:00:00.000Z');
+    if (isNaN(d.getTime())) {
+      throw new ValidationError(`El campo '${field}' no es una fecha válida: '${dateStr}'`);
+    }
+    return d;
+  }
+
+  private mapPeriod(p: any): VacationPeriodResult {
+    return {
+      id: p.id,
+      empleadoId: p.empleadoId,
+      fechaInicio: p.fechaInicio instanceof Date
+        ? p.fechaInicio.toISOString().split('T')[0]
+        : String(p.fechaInicio).split('T')[0],
+      fechaFin: p.fechaFin instanceof Date
+        ? p.fechaFin.toISOString().split('T')[0]
+        : String(p.fechaFin).split('T')[0],
+      estado: p.estado,
+      fechaCreacion: p.fechaCreacion instanceof Date
+        ? p.fechaCreacion.toISOString()
+        : String(p.fechaCreacion),
+    };
   }
 }
