@@ -17,6 +17,9 @@ services:
     environment:
       - EMPLEADOS_URL=http://employees-service:${EMPLEADOS_PORT:-8080}
       - DEPARTAMENTOS_URL=http://departments-service:${DEPARTAMENTOS_PORT:-8081}
+      - NOTIFICACIONES_URL=http://notifications-service:${NOTIFICACIONES_PORT:-8082}
+      - PERFILES_URL=http://profiles-service:${PERFILES_PORT:-8083}
+      - VACACIONES_URL=http://vacations-service:${VACACIONES_PORT:-8084}
     depends_on:
       rabbitmq:
         condition: service_healthy

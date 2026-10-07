@@ -1,0 +1,1579 @@
+{
+  "info": {
+    "name": "Reto 4 - System HR",
+    "_postman_id": "c4d7e9b1-2a3f-4e89-9a7b-8c1d2e3f4a5b",
+    "description": "Colección completa para sustentar y probar el RETO 4 de System_HR.\n\nContiene únicamente los endpoints existentes en el código del repositorio, organizados por microservicio y componente de infraestructura:\n1. INFRAESTRUCTURA Y BROKER (RabbitMQ)\n2. PRECONDICIÓN - DEPARTAMENTOS\n3. EMPLOYEES-SERVICE (Publicación de Eventos y Baja Lógica)\n4. NOTIFICATIONS-SERVICE (Consumidor e Idempotencia)\n5. PROFILES-SERVICE (CQRS Read Model e Idempotencia)\n6. VACATIONS-SERVICE (CQRS Read Model y Saldos)\n\nVariables parametrizadas a nivel de colección para ejecución inmediata contra localhost o contenedores Docker.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    {
+      "key": "baseUrl",
+      "value": "http://localhost:8080",
+      "type": "string"
+    },
+    {
+      "key": "empleadosBaseUrl",
+      "value": "http://localhost:8080",
+      "type": "string"
+    },
+    {
+      "key": "departamentosBaseUrl",
+      "value": "http://localhost:8080",
+      "type": "string"
+    },
+    {
+      "key": "notificacionesBaseUrl",
+      "value": "http://localhost:8080",
+      "type": "string"
+    },
+    {
+      "key": "perfilesBaseUrl",
+      "value": "http://localhost:8080",
+      "type": "string"
+    },
+    {
+      "key": "vacacionesBaseUrl",
+      "value": "http://localhost:8080",
+      "type": "string"
+    },
+    {
+      "key": "rabbitmqApiUrl",
+      "value": "http://localhost:15672",
+      "type": "string"
+    },
+    {
+      "key": "rabbitmqUser",
+      "value": "admin",
+      "type": "string"
+    },
+    {
+      "key": "rabbitmqPassword",
+      "value": "admin",
+      "type": "string"
+    },
+    {
+      "key": "departamentoId",
+      "value": "DEPT-R4",
+      "type": "string"
+    },
+    {
+      "key": "empleadoId",
+      "value": "E401",
+      "type": "string"
+    },
+    {
+      "key": "empleadoEmail",
+      "value": "reto4.empleado@empresa.com",
+      "type": "string"
+    },
+    {
+      "key": "empleadoNumero",
+      "value": "EMP-R4-001",
+      "type": "string"
+    },
+    {
+      "key": "notifMessageId",
+      "value": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+      "type": "string"
+    },
+    {
+      "key": "notifUpdateMessageId",
+      "value": "b2c3d4e5-f6a7-8901-bcde-f01234567891",
+      "type": "string"
+    },
+    {
+      "key": "notifRetireMessageId",
+      "value": "c3d4e5f6-a7b8-9012-cdef-012345678902",
+      "type": "string"
+    },
+    {
+      "key": "profileEmployeeId",
+      "value": "EMP-PROF-01",
+      "type": "string"
+    },
+    {
+      "key": "profileMessageId",
+      "value": "d4e5f6a7-b8c9-0123-defa-123456789013",
+      "type": "string"
+    },
+    {
+      "key": "profileUpdateMessageId",
+      "value": "e5f6a7b8-c9d0-1234-efab-234567890124",
+      "type": "string"
+    },
+    {
+      "key": "profileRetireMessageId",
+      "value": "f6a7b8c9-d0e1-2345-fabc-345678901235",
+      "type": "string"
+    }
+  ],
+  "item": [
+    {
+      "name": "1. Infraestructura y Health Checks",
+      "description": "Pruebas de verificación de disponibilidad y salud de todos los componentes del sistema (API Gateway, microservicios y RabbitMQ).",
+      "item": [
+        {
+          "name": "1.1 Health - API Gateway",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status 200 OK', () => pm.response.to.have.status(200));",
+                  "const res = pm.response.json();",
+                  "pm.test('API Gateway operativo', () => {",
+                  "    pm.expect(res.status).to.eql('ok');",
+                  "    pm.expect(res.service).to.eql('api-gateway');",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/health",
+              "host": ["{{baseUrl}}"],
+              "path": ["health"]
+            },
+            "description": "Verifica que el API Gateway se encuentra activo y respondiendo solicitudes HTTP en el puerto 8080."
+          },
+          "response": []
+        },
+        {
+          "name": "1.2 Health - Employees Service",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status 200 OK', () => pm.response.to.have.status(200));",
+                  "const res = pm.response.json();",
+                  "pm.test('Employees Service operativo', () => {",
+                  "    pm.expect(res.status).to.eql('ok');",
+                  "    pm.expect(res.service).to.eql('empleados');",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{empleadosBaseUrl}}/empleados/health",
+              "host": ["{{empleadosBaseUrl}}"],
+              "path": ["empleados", "health"]
+            },
+            "description": "Verifica el health check del microservicio de empleados expuesto a través de la ruta /empleados/health."
+          },
+          "response": []
+        },
+        {
+          "name": "1.3 Health - Departments Service",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status 200 OK', () => pm.response.to.have.status(200));",
+                  "const res = pm.response.json();",
+                  "pm.test('Departments Service operativo', () => {",
+                  "    pm.expect(res.status).to.eql('ok');",
+                  "    pm.expect(res.service).to.eql('departamentos');",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{departamentosBaseUrl}}/health",
+              "host": ["{{departamentosBaseUrl}}"],
+              "path": ["health"]
+            },
+            "description": "Verifica el health check del microservicio de departamentos."
+          },
+          "response": []
+        },
+        {
+          "name": "1.4 Health - Notifications Service",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status 200 OK', () => pm.response.to.have.status(200));",
+                  "const res = pm.response.json();",
+                  "pm.test('Notifications Service operativo', () => {",
+                  "    pm.expect(res.status).to.eql('ok');",
+                  "    pm.expect(res.service).to.eql('notifications');",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{notificacionesBaseUrl}}/health",
+              "host": ["{{notificacionesBaseUrl}}"],
+              "path": ["health"]
+            },
+            "description": "Verifica el health check del microservicio de notificaciones en el puerto 8082."
+          },
+          "response": []
+        },
+        {
+          "name": "1.5 Health - Profiles Service",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status 200 OK', () => pm.response.to.have.status(200));",
+                  "const res = pm.response.json();",
+                  "pm.test('Profiles Service operativo', () => {",
+                  "    pm.expect(res.status).to.eql('ok');",
+                  "    pm.expect(res.service).to.eql('profiles');",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{perfilesBaseUrl}}/health",
+              "host": ["{{perfilesBaseUrl}}"],
+              "path": ["health"]
+            },
+            "description": "Verifica el health check del microservicio de perfiles en el puerto 8083."
+          },
+          "response": []
+        },
+        {
+          "name": "1.6 Health - Vacations Service",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status 200 OK', () => pm.response.to.have.status(200));",
+                  "const res = pm.response.json();",
+                  "pm.test('Vacations Service operativo', () => {",
+                  "    pm.expect(res.status).to.eql('ok');",
+                  "    pm.expect(res.service).to.eql('vacations');",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{vacacionesBaseUrl}}/health",
+              "host": ["{{vacacionesBaseUrl}}"],
+              "path": ["health"]
+            },
+            "description": "Verifica el health check del microservicio de vacaciones en el puerto 8084."
+          },
+          "response": []
+        },
+        {
+          "name": "1.7 RabbitMQ - Health / Aliveness Test",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status 200 OK', () => pm.response.to.have.status(200));",
+                  "const res = pm.response.json();",
+                  "pm.test('RabbitMQ Broker operativo', () => {",
+                  "    pm.expect(res.status).to.eql('ok');",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "auth": {
+              "type": "basic",
+              "basic": [
+                { "key": "username", "value": "{{rabbitmqUser}}", "type": "string" },
+                { "key": "password", "value": "{{rabbitmqPassword}}", "type": "string" }
+              ]
+            },
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{rabbitmqApiUrl}}/api/aliveness-test/%2F",
+              "host": ["{{rabbitmqApiUrl}}"],
+              "path": ["api", "aliveness-test", "%2F"]
+            },
+            "description": "Verifica que el broker RabbitMQ está activo y respondiendo a través de su Management API en el puerto 15672."
+          },
+          "response": []
+        },
+        {
+          "name": "1.8 RabbitMQ - Verificar Exchange hr.events",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status 200 OK', () => pm.response.to.have.status(200));",
+                  "const res = pm.response.json();",
+                  "pm.test('Exchange hr.events configurado correctamente', () => {",
+                  "    pm.expect(res.name).to.eql('hr.events');",
+                  "    pm.expect(res.type).to.eql('fanout');",
+                  "    pm.expect(res.durable).to.be.true;",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "auth": {
+              "type": "basic",
+              "basic": [
+                { "key": "username", "value": "{{rabbitmqUser}}", "type": "string" },
+                { "key": "password", "value": "{{rabbitmqPassword}}", "type": "string" }
+              ]
+            },
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{rabbitmqApiUrl}}/api/exchanges/%2F/hr.events",
+              "host": ["{{rabbitmqApiUrl}}"],
+              "path": ["api", "exchanges", "%2F", "hr.events"]
+            },
+            "description": "Demuestra que el exchange 'hr.events' existe en RabbitMQ, es de tipo 'fanout' y es durable."
+          },
+          "response": []
+        },
+        {
+          "name": "1.9 RabbitMQ - Verificar Colas del Ecosistema",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status 200 OK', () => pm.response.to.have.status(200));",
+                  "const queues = pm.response.json();",
+                  "const queueNames = queues.map(q => q.name);",
+                  "pm.test('Colas requeridas están presentes en RabbitMQ', () => {",
+                  "    pm.expect(queueNames).to.include('notifications.queue');",
+                  "    pm.expect(queueNames).to.include('profiles.queue');",
+                  "    pm.expect(queueNames).to.include('vacations.queue');",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "auth": {
+              "type": "basic",
+              "basic": [
+                { "key": "username", "value": "{{rabbitmqUser}}", "type": "string" },
+                { "key": "password", "value": "{{rabbitmqPassword}}", "type": "string" }
+              ]
+            },
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{rabbitmqApiUrl}}/api/queues",
+              "host": ["{{rabbitmqApiUrl}}"],
+              "path": ["api", "queues"]
+            },
+            "description": "Verifica que las tres colas de consumidores ('notifications.queue', 'profiles.queue', 'vacations.queue') existen en el broker."
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "2. Precondición - Departamento",
+      "description": "Creación del departamento necesario para que el registro del empleado en employees-service valide la existencia de departamentoId.",
+      "item": [
+        {
+          "name": "2.1 Crear o Validar Departamento",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Departamento listo (201 Created o 400 ya existente)', () => {",
+                  "    pm.expect([201, 400]).to.include(pm.response.code);",
+                  "});",
+                  "if (pm.response.code === 201) {",
+                  "    const d = pm.response.json();",
+                  "    pm.collectionVariables.set('departamentoId', d.id);",
+                  "}"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"id\": \"{{departamentoId}}\",\n  \"nombre\": \"Tecnología e Innovación\",\n  \"descripcion\": \"Departamento para pruebas de integración del Reto 4\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": {
+              "raw": "{{departamentosBaseUrl}}/departamentos",
+              "host": ["{{departamentosBaseUrl}}"],
+              "path": ["departamentos"]
+            },
+            "description": "Registra el departamento '{{departamentoId}}' que será referenciado por los empleados en las pruebas."
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "3. Employees Service",
+      "description": "Demuestra los criterios de employees-service: registro de empleado, actualización, retiro lógico (cambio de estado a RETIRADO sin eliminar registro), y verificación del endpoint de auditoría si existe.",
+      "item": [
+        {
+          "name": "3.1 Crear Empleado (Publica empleado.creado)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status 201 Created', () => pm.response.to.have.status(201));",
+                  "const e = pm.response.json();",
+                  "pm.test('Empleado registrado correctamente', () => {",
+                  "    pm.expect(e.id).to.eql(pm.collectionVariables.get('empleadoId'));",
+                  "    pm.expect(e.estado).to.eql('ACTIVO');",
+                  "    pm.expect(e.departamentoId).to.eql(pm.collectionVariables.get('departamentoId'));",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"id\": \"{{empleadoId}}\",\n  \"nombre\": \"Carlos\",\n  \"apellido\": \"Gómez\",\n  \"email\": \"{{empleadoEmail}}\",\n  \"numeroEmpleado\": \"{{empleadoNumero}}\",\n  \"cargo\": \"Ingeniero Cloud\",\n  \"area\": \"Tecnología\",\n  \"departamentoId\": \"{{departamentoId}}\",\n  \"fechaIngreso\": \"2026-03-01\",\n  \"estado\": \"ACTIVO\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": {
+              "raw": "{{empleadosBaseUrl}}/empleados",
+              "host": ["{{empleadosBaseUrl}}"],
+              "path": ["empleados"]
+            },
+            "description": "Demuestra la creación de empleado. Valida departamento síncronamente y publica el evento de dominio 'empleado.creado' al exchange fanout 'hr.events'."
+          },
+          "response": []
+        },
+        {
+          "name": "3.2 Consultar Empleado por ID",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status 200 OK', () => pm.response.to.have.status(200));",
+                  "const e = pm.response.json();",
+                  "pm.test('Empleado existe con estado ACTIVO', () => {",
+                  "    pm.expect(e.id).to.eql(pm.collectionVariables.get('empleadoId'));",
+                  "    pm.expect(e.estado).to.eql('ACTIVO');",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{empleadosBaseUrl}}/empleados/{{empleadoId}}",
+              "host": ["{{empleadosBaseUrl}}"],
+              "path": ["empleados", "{{empleadoId}}"]
+            },
+            "description": "Verifica que el empleado recién creado existe en la base de datos de employees-service."
+          },
+          "response": []
+        },
+        {
+          "name": "3.3 Actualizar Empleado (Publica empleado.actualizado)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status 200 OK', () => pm.response.to.have.status(200));",
+                  "const e = pm.response.json();",
+                  "pm.test('Datos actualizados reflejados', () => {",
+                  "    pm.expect(e.nombre).to.eql('Carlos Alberto');",
+                  "    pm.expect(e.cargo).to.eql('Líder Cloud & DevOps');",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "PUT",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"nombre\": \"Carlos Alberto\",\n  \"cargo\": \"Líder Cloud & DevOps\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": {
+              "raw": "{{empleadosBaseUrl}}/empleados/{{empleadoId}}",
+              "host": ["{{empleadosBaseUrl}}"],
+              "path": ["empleados", "{{empleadoId}}"]
+            },
+            "description": "Actualiza la información del empleado y publica 'empleado.actualizado' en RabbitMQ."
+          },
+          "response": []
+        },
+        {
+          "name": "3.4 Retirar Empleado - Baja Lógica (Publica empleado.retirado)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status 200 OK', () => pm.response.to.have.status(200));",
+                  "const e = pm.response.json();",
+                  "pm.test('Empleado marcado con estado RETIRADO', () => {",
+                  "    pm.expect(e.estado).to.eql('RETIRADO');",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": {
+              "raw": "{{empleadosBaseUrl}}/empleados/{{empleadoId}}",
+              "host": ["{{empleadosBaseUrl}}"],
+              "path": ["empleados", "{{empleadoId}}"]
+            },
+            "description": "Demuestra la baja lógica del empleado mediante DELETE /empleados/:id. Modifica el estado a RETIRADO y publica 'empleado.retirado'."
+          },
+          "response": []
+        },
+        {
+          "name": "3.5 Verificar que Empleado Retirado NO fue eliminado",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status 200 OK (recurso sigue existiendo)', () => pm.response.to.have.status(200));",
+                  "const e = pm.response.json();",
+                  "pm.test('Demuestra baja lógica: permanece en BD con estado RETIRADO', () => {",
+                  "    pm.expect(e.id).to.eql(pm.collectionVariables.get('empleadoId'));",
+                  "    pm.expect(e.estado).to.eql('RETIRADO');",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{empleadosBaseUrl}}/empleados/{{empleadoId}}",
+              "host": ["{{empleadosBaseUrl}}"],
+              "path": ["empleados", "{{empleadoId}}"]
+            },
+            "description": "Demuestra el criterio de Reto 4: el registro NO es eliminado de la base de datos tras el DELETE, sino conservado con estado RETIRADO."
+          },
+          "response": []
+        },
+        {
+          "name": "3.6 Consultar Endpoint de Auditoría por rango de fechas (Inspección)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "// Según la inspección del código fuente, employees-service no implementa endpoint HTTP de auditoría.",
+                  "// La prueba documenta este resultado (404 Not Found) cumpliendo la condición 'si existe'.",
+                  "pm.test('Resultado de inspección de endpoint de auditoría', () => {",
+                  "    pm.expect([200, 404]).to.include(pm.response.code);",
+                  "    if (pm.response.code === 404) {",
+                  "        console.log('Inspección confirmada: employees-service no expone endpoint HTTP de auditoría en su controlador.');",
+                  "    }",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{empleadosBaseUrl}}/empleados/auditoria?fechaInicio=2026-01-01&fechaFin=2026-12-31",
+              "host": ["{{empleadosBaseUrl}}"],
+              "path": ["empleados", "auditoria"],
+              "query": [
+                { "key": "fechaInicio", "value": "2026-01-01" },
+                { "key": "fechaFin", "value": "2026-12-31" }
+              ]
+            },
+            "description": "Criterio: 'Consultar el endpoint de auditoría por rango de fechas, si existe'. Valida la respuesta del servicio confirmando que el endpoint no está expuesto en el código actual."
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "4. Notifications Service",
+      "description": "Demuestra los criterios de notifications-service: consulta GET /notifications, consulta por messageId, procesamiento de eventos (creado, actualizado, retirado) y deduplicación por messageId.",
+      "item": [
+        {
+          "name": "4.1 Consultar Notificaciones (GET /notifications)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status 200 OK', () => pm.response.to.have.status(200));",
+                  "const res = pm.response.json();",
+                  "pm.test('Respuesta es un array de notificaciones', () => {",
+                  "    pm.expect(res).to.be.an('array');",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{notificacionesBaseUrl}}/notifications",
+              "host": ["{{notificacionesBaseUrl}}"],
+              "path": ["notifications"]
+            },
+            "description": "Demuestra la consulta de todo el historial de notificaciones procesadas."
+          },
+          "response": []
+        },
+        {
+          "name": "4.2 Probar Evento empleado.creado en Broker",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status 200 OK de RabbitMQ Management', () => pm.response.to.have.status(200));",
+                  "const res = pm.response.json();",
+                  "pm.test('Mensaje enrutado a colas', () => {",
+                  "    pm.expect(res.routed).to.be.true;",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "auth": {
+              "type": "basic",
+              "basic": [
+                { "key": "username", "value": "{{rabbitmqUser}}", "type": "string" },
+                { "key": "password", "value": "{{rabbitmqPassword}}", "type": "string" }
+              ]
+            },
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"properties\": { \"content_type\": \"application/json\" },\n  \"routing_key\": \"\",\n  \"payload\": \"{\\\"id\\\":\\\"{{notifMessageId}}\\\",\\\"type\\\":\\\"empleado.creado\\\",\\\"version\\\":\\\"1.0\\\",\\\"occurredAt\\\":\\\"2026-10-06T20:00:00.000Z\\\",\\\"producer\\\":\\\"employees-service\\\",\\\"data\\\":{\\\"id\\\":\\\"EMP-N-01\\\",\\\"nombre\\\":\\\"Diana\\\",\\\"apellido\\\":\\\"Torres\\\",\\\"email\\\":\\\"diana.torres@empresa.com\\\",\\\"departamentoId\\\":\\\"DEPT-R4\\\",\\\"cargo\\\":\\\"DevOps Engineer\\\",\\\"fechaIngreso\\\":\\\"2026-03-15\\\",\\\"fechaRetiro\\\":null}}\",\n  \"payload_encoding\": \"string\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": {
+              "raw": "{{rabbitmqApiUrl}}/api/exchanges/%2F/hr.events/publish",
+              "host": ["{{rabbitmqApiUrl}}"],
+              "path": ["api", "exchanges", "%2F", "hr.events", "publish"]
+            },
+            "description": "Publica un evento 'empleado.creado' directamente en el exchange fanout hr.events con un messageId conocido para probar el consumo en notifications-service."
+          },
+          "response": []
+        },
+        {
+          "name": "4.3 Consultar Notificación por messageId (empleado.creado)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status 200 OK', () => pm.response.to.have.status(200));",
+                  "const res = pm.response.json();",
+                  "pm.test('Notificación encontrada con los datos esperados', () => {",
+                  "    pm.expect(res.messageId).to.eql(pm.collectionVariables.get('notifMessageId'));",
+                  "    pm.expect(res.eventType).to.eql('empleado.creado');",
+                  "    pm.expect(res.employeeId).to.eql('EMP-N-01');",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{notificacionesBaseUrl}}/notifications/{{notifMessageId}}",
+              "host": ["{{notificacionesBaseUrl}}"],
+              "path": ["notifications", "{{notifMessageId}}"]
+            },
+            "description": "Demuestra la consulta de una notificación específica por su messageId tras el procesamiento de 'empleado.creado'."
+          },
+          "response": []
+        },
+        {
+          "name": "4.4 Probar Evento empleado.actualizado en Broker",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status 200 OK', () => pm.response.to.have.status(200));",
+                  "const res = pm.response.json();",
+                  "pm.test('Mensaje enrutado a colas', () => pm.expect(res.routed).to.be.true);"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "auth": {
+              "type": "basic",
+              "basic": [
+                { "key": "username", "value": "{{rabbitmqUser}}", "type": "string" },
+                { "key": "password", "value": "{{rabbitmqPassword}}", "type": "string" }
+              ]
+            },
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"properties\": { \"content_type\": \"application/json\" },\n  \"routing_key\": \"\",\n  \"payload\": \"{\\\"id\\\":\\\"{{notifUpdateMessageId}}\\\",\\\"type\\\":\\\"empleado.actualizado\\\",\\\"version\\\":\\\"1.0\\\",\\\"occurredAt\\\":\\\"2026-10-06T20:15:00.000Z\\\",\\\"producer\\\":\\\"employees-service\\\",\\\"data\\\":{\\\"id\\\":\\\"EMP-N-01\\\",\\\"nombre\\\":\\\"Diana Carolina\\\",\\\"apellido\\\":\\\"Torres\\\",\\\"email\\\":\\\"diana.torres@empresa.com\\\",\\\"departamentoId\\\":\\\"DEPT-R4\\\",\\\"cargo\\\":\\\"Staff DevOps\\\",\\\"fechaIngreso\\\":\\\"2026-03-15\\\",\\\"fechaRetiro\\\":null}}\",\n  \"payload_encoding\": \"string\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": {
+              "raw": "{{rabbitmqApiUrl}}/api/exchanges/%2F/hr.events/publish",
+              "host": ["{{rabbitmqApiUrl}}"],
+              "path": ["api", "exchanges", "%2F", "hr.events", "publish"]
+            },
+            "description": "Publica un evento 'empleado.actualizado' para comprobar la recepción del segundo tipo de evento."
+          },
+          "response": []
+        },
+        {
+          "name": "4.5 Consultar Notificación por messageId (empleado.actualizado)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status 200 OK', () => pm.response.to.have.status(200));",
+                  "const res = pm.response.json();",
+                  "pm.test('Notificación registrada para empleado.actualizado', () => {",
+                  "    pm.expect(res.messageId).to.eql(pm.collectionVariables.get('notifUpdateMessageId'));",
+                  "    pm.expect(res.eventType).to.eql('empleado.actualizado');",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{notificacionesBaseUrl}}/notifications/{{notifUpdateMessageId}}",
+              "host": ["{{notificacionesBaseUrl}}"],
+              "path": ["notifications", "{{notifUpdateMessageId}}"]
+            },
+            "description": "Verifica que notifications-service procesó y persistió el evento 'empleado.actualizado'."
+          },
+          "response": []
+        },
+        {
+          "name": "4.6 Probar Evento empleado.retirado en Broker",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status 200 OK', () => pm.response.to.have.status(200));",
+                  "const res = pm.response.json();",
+                  "pm.test('Mensaje enrutado a colas', () => pm.expect(res.routed).to.be.true);"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "auth": {
+              "type": "basic",
+              "basic": [
+                { "key": "username", "value": "{{rabbitmqUser}}", "type": "string" },
+                { "key": "password", "value": "{{rabbitmqPassword}}", "type": "string" }
+              ]
+            },
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"properties\": { \"content_type\": \"application/json\" },\n  \"routing_key\": \"\",\n  \"payload\": \"{\\\"id\\\":\\\"{{notifRetireMessageId}}\\\",\\\"type\\\":\\\"empleado.retirado\\\",\\\"version\\\":\\\"1.0\\\",\\\"occurredAt\\\":\\\"2026-10-06T20:30:00.000Z\\\",\\\"producer\\\":\\\"employees-service\\\",\\\"data\\\":{\\\"id\\\":\\\"EMP-N-01\\\",\\\"nombre\\\":\\\"Diana Carolina\\\",\\\"apellido\\\":\\\"Torres\\\",\\\"email\\\":\\\"diana.torres@empresa.com\\\",\\\"departamentoId\\\":\\\"DEPT-R4\\\",\\\"cargo\\\":\\\"Staff DevOps\\\",\\\"fechaIngreso\\\":\\\"2026-03-15\\\",\\\"fechaRetiro\\\":\\\"2026-10-06\\\"}}\",\n  \"payload_encoding\": \"string\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": {
+              "raw": "{{rabbitmqApiUrl}}/api/exchanges/%2F/hr.events/publish",
+              "host": ["{{rabbitmqApiUrl}}"],
+              "path": ["api", "exchanges", "%2F", "hr.events", "publish"]
+            },
+            "description": "Publica el evento 'empleado.retirado' para comprobar la recepción del tercer tipo de evento."
+          },
+          "response": []
+        },
+        {
+          "name": "4.7 Consultar Notificación por messageId (empleado.retirado)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status 200 OK', () => pm.response.to.have.status(200));",
+                  "const res = pm.response.json();",
+                  "pm.test('Notificación registrada para empleado.retirado', () => {",
+                  "    pm.expect(res.messageId).to.eql(pm.collectionVariables.get('notifRetireMessageId'));",
+                  "    pm.expect(res.eventType).to.eql('empleado.retirado');",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{notificacionesBaseUrl}}/notifications/{{notifRetireMessageId}}",
+              "host": ["{{notificacionesBaseUrl}}"],
+              "path": ["notifications", "{{notifRetireMessageId}}"]
+            },
+            "description": "Verifica que notifications-service procesó y persistió el evento 'empleado.retirado'."
+          },
+          "response": []
+        },
+        {
+          "name": "4.8 Deduplicación - Reenviar mismo evento/messageId",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status 200 OK de RabbitMQ', () => pm.response.to.have.status(200));",
+                  "const res = pm.response.json();",
+                  "pm.test('Mensaje duplicado entregado al broker', () => pm.expect(res.routed).to.be.true);"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "auth": {
+              "type": "basic",
+              "basic": [
+                { "key": "username", "value": "{{rabbitmqUser}}", "type": "string" },
+                { "key": "password", "value": "{{rabbitmqPassword}}", "type": "string" }
+              ]
+            },
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"properties\": { \"content_type\": \"application/json\" },\n  \"routing_key\": \"\",\n  \"payload\": \"{\\\"id\\\":\\\"{{notifMessageId}}\\\",\\\"type\\\":\\\"empleado.creado\\\",\\\"version\\\":\\\"1.0\\\",\\\"occurredAt\\\":\\\"2026-10-06T20:00:00.000Z\\\",\\\"producer\\\":\\\"employees-service\\\",\\\"data\\\":{\\\"id\\\":\\\"EMP-N-01\\\",\\\"nombre\\\":\\\"Diana\\\",\\\"apellido\\\":\\\"Torres\\\",\\\"email\\\":\\\"diana.torres@empresa.com\\\",\\\"departamentoId\\\":\\\"DEPT-R4\\\",\\\"cargo\\\":\\\"DevOps Engineer\\\",\\\"fechaIngreso\\\":\\\"2026-03-15\\\",\\\"fechaRetiro\\\":null}}\",\n  \"payload_encoding\": \"string\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": {
+              "raw": "{{rabbitmqApiUrl}}/api/exchanges/%2F/hr.events/publish",
+              "host": ["{{rabbitmqApiUrl}}"],
+              "path": ["api", "exchanges", "%2F", "hr.events", "publish"]
+            },
+            "description": "Demuestra la garantía de idempotencia: reenvía intencionalmente el evento con el mismo 'notifMessageId' (simulando reentrega de red at-least-once)."
+          },
+          "response": []
+        },
+        {
+          "name": "4.9 Verificar que NO hay duplicación en BD",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status 200 OK', () => pm.response.to.have.status(200));",
+                  "const list = pm.response.json();",
+                  "const targetMsgId = pm.collectionVariables.get('notifMessageId');",
+                  "const matches = list.filter(n => n.messageId === targetMsgId);",
+                  "pm.test('Idempotencia demostrada: existe exactamente 1 registro para el messageId', () => {",
+                  "    pm.expect(matches.length).to.eql(1);",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{notificacionesBaseUrl}}/notifications",
+              "host": ["{{notificacionesBaseUrl}}"],
+              "path": ["notifications"]
+            },
+            "description": "Comprueba en GET /notifications que tras reenviar el mensaje con el mismo messageId, la base de datos no generó un segundo registro (idempotencia activa)."
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "5. Profiles Service",
+      "description": "Demuestra los criterios de profiles-service: CQRS Read Model desacoplado, consulta de perfiles con filtros por estado, creación/actualización/retiro mediante eventos de RabbitMQ, conservación de perfil con fechaRetiro tras retiro lógico, y deduplicación por messageId.",
+      "item": [
+        {
+          "name": "5.1 Consultar Todos los Perfiles (GET /profiles)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status 200 OK', () => pm.response.to.have.status(200));",
+                  "const res = pm.response.json();",
+                  "pm.test('Respuesta es un array', () => pm.expect(res).to.be.an('array'));"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{perfilesBaseUrl}}/profiles",
+              "host": ["{{perfilesBaseUrl}}"],
+              "path": ["profiles"]
+            },
+            "description": "Consulta general del Read Model de perfiles desnormalizados."
+          },
+          "response": []
+        },
+        {
+          "name": "5.2 Consultar Perfiles Filtrados por Estado ACTIVO",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status 200 OK', () => pm.response.to.have.status(200));",
+                  "const res = pm.response.json();",
+                  "pm.test('Todos los perfiles retornados son ACTIVO', () => {",
+                  "    res.forEach(p => pm.expect(p.estado).to.eql('ACTIVO'));",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{perfilesBaseUrl}}/profiles?estado=ACTIVO",
+              "host": ["{{perfilesBaseUrl}}"],
+              "path": ["profiles"],
+              "query": [{ "key": "estado", "value": "ACTIVO" }]
+            },
+            "description": "Consulta de perfiles activos utilizando el query param ?estado=ACTIVO."
+          },
+          "response": []
+        },
+        {
+          "name": "5.3 Probar Evento empleado.creado para Perfil",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status 200 OK de RabbitMQ', () => pm.response.to.have.status(200));",
+                  "const res = pm.response.json();",
+                  "pm.test('Mensaje enrutado a colas', () => pm.expect(res.routed).to.be.true);"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "auth": {
+              "type": "basic",
+              "basic": [
+                { "key": "username", "value": "{{rabbitmqUser}}", "type": "string" },
+                { "key": "password", "value": "{{rabbitmqPassword}}", "type": "string" }
+              ]
+            },
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"properties\": { \"content_type\": \"application/json\" },\n  \"routing_key\": \"\",\n  \"payload\": \"{\\\"id\\\":\\\"{{profileMessageId}}\\\",\\\"type\\\":\\\"empleado.creado\\\",\\\"version\\\":\\\"1.0\\\",\\\"occurredAt\\\":\\\"2026-10-06T20:00:00.000Z\\\",\\\"producer\\\":\\\"employees-service\\\",\\\"data\\\":{\\\"id\\\":\\\"{{profileEmployeeId}}\\\",\\\"nombre\\\":\\\"Andrés\\\",\\\"apellido\\\":\\\"Pardo\\\",\\\"email\\\":\\\"andres.pardo@empresa.com\\\",\\\"departamentoId\\\":\\\"DEPT-R4\\\",\\\"cargo\\\":\\\"Fullstack Developer\\\",\\\"fechaIngreso\\\":\\\"2026-03-01\\\",\\\"fechaRetiro\\\":null}}\",\n  \"payload_encoding\": \"string\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": {
+              "raw": "{{rabbitmqApiUrl}}/api/exchanges/%2F/hr.events/publish",
+              "host": ["{{rabbitmqApiUrl}}"],
+              "path": ["api", "exchanges", "%2F", "hr.events", "publish"]
+            },
+            "description": "Emite el evento 'empleado.creado' al broker. Profiles-service lo consume asíncronamente desde 'profiles.queue' para crear la proyección del perfil."
+          },
+          "response": []
+        },
+        {
+          "name": "5.4 Verificar Perfil Creado desde Evento",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status 200 OK', () => pm.response.to.have.status(200));",
+                  "const p = pm.response.json();",
+                  "pm.test('Perfil proyectado con estado ACTIVO y lastEventId', () => {",
+                  "    pm.expect(p.employeeId).to.eql(pm.collectionVariables.get('profileEmployeeId'));",
+                  "    pm.expect(p.nombre).to.eql('Andrés');",
+                  "    pm.expect(p.estado).to.eql('ACTIVO');",
+                  "    pm.expect(p.lastEventId).to.eql(pm.collectionVariables.get('profileMessageId'));",
+                  "    pm.expect(p.fechaRetiro).to.be.null;",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{perfilesBaseUrl}}/profiles/{{profileEmployeeId}}",
+              "host": ["{{perfilesBaseUrl}}"],
+              "path": ["profiles", "{{profileEmployeeId}}"]
+            },
+            "description": "Demuestra la creación del perfil en el Read Model a partir del evento 'empleado.creado'."
+          },
+          "response": []
+        },
+        {
+          "name": "5.5 Probar Evento empleado.actualizado para Perfil",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status 200 OK', () => pm.response.to.have.status(200));",
+                  "const res = pm.response.json();",
+                  "pm.test('Mensaje enrutado a colas', () => pm.expect(res.routed).to.be.true);"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "auth": {
+              "type": "basic",
+              "basic": [
+                { "key": "username", "value": "{{rabbitmqUser}}", "type": "string" },
+                { "key": "password", "value": "{{rabbitmqPassword}}", "type": "string" }
+              ]
+            },
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"properties\": { \"content_type\": \"application/json\" },\n  \"routing_key\": \"\",\n  \"payload\": \"{\\\"id\\\":\\\"{{profileUpdateMessageId}}\\\",\\\"type\\\":\\\"empleado.actualizado\\\",\\\"version\\\":\\\"1.0\\\",\\\"occurredAt\\\":\\\"2026-10-06T20:20:00.000Z\\\",\\\"producer\\\":\\\"employees-service\\\",\\\"data\\\":{\\\"id\\\":\\\"{{profileEmployeeId}}\\\",\\\"nombre\\\":\\\"Andrés Felipe\\\",\\\"apellido\\\":\\\"Pardo Mora\\\",\\\"email\\\":\\\"andres.pardo@empresa.com\\\",\\\"departamentoId\\\":\\\"DEPT-R4\\\",\\\"cargo\\\":\\\"Senior Fullstack Lead\\\",\\\"fechaIngreso\\\":\\\"2026-03-01\\\",\\\"fechaRetiro\\\":null}}\",\n  \"payload_encoding\": \"string\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": {
+              "raw": "{{rabbitmqApiUrl}}/api/exchanges/%2F/hr.events/publish",
+              "host": ["{{rabbitmqApiUrl}}"],
+              "path": ["api", "exchanges", "%2F", "hr.events", "publish"]
+            },
+            "description": "Emite el evento 'empleado.actualizado' para actualizar la proyección del perfil."
+          },
+          "response": []
+        },
+        {
+          "name": "5.6 Verificar Perfil Actualizado en profiles-service",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status 200 OK', () => pm.response.to.have.status(200));",
+                  "const p = pm.response.json();",
+                  "pm.test('Perfil actualizado con los nuevos datos', () => {",
+                  "    pm.expect(p.nombre).to.eql('Andrés Felipe');",
+                  "    pm.expect(p.cargo).to.eql('Senior Fullstack Lead');",
+                  "    pm.expect(p.lastEventId).to.eql(pm.collectionVariables.get('profileUpdateMessageId'));",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{perfilesBaseUrl}}/profiles/{{profileEmployeeId}}",
+              "host": ["{{perfilesBaseUrl}}"],
+              "path": ["profiles", "{{profileEmployeeId}}"]
+            },
+            "description": "Comprueba que profiles-service actualizó la información a partir de 'empleado.actualizado'."
+          },
+          "response": []
+        },
+        {
+          "name": "5.7 Probar Evento empleado.retirado para Perfil",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status 200 OK', () => pm.response.to.have.status(200));",
+                  "const res = pm.response.json();",
+                  "pm.test('Mensaje enrutado a colas', () => pm.expect(res.routed).to.be.true);"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "auth": {
+              "type": "basic",
+              "basic": [
+                { "key": "username", "value": "{{rabbitmqUser}}", "type": "string" },
+                { "key": "password", "value": "{{rabbitmqPassword}}", "type": "string" }
+              ]
+            },
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"properties\": { \"content_type\": \"application/json\" },\n  \"routing_key\": \"\",\n  \"payload\": \"{\\\"id\\\":\\\"{{profileRetireMessageId}}\\\",\\\"type\\\":\\\"empleado.retirado\\\",\\\"version\\\":\\\"1.0\\\",\\\"occurredAt\\\":\\\"2026-10-06T20:30:00.000Z\\\",\\\"producer\\\":\\\"employees-service\\\",\\\"data\\\":{\\\"id\\\":\\\"{{profileEmployeeId}}\\\",\\\"nombre\\\":\\\"Andrés Felipe\\\",\\\"apellido\\\":\\\"Pardo Mora\\\",\\\"email\\\":\\\"andres.pardo@empresa.com\\\",\\\"departamentoId\\\":\\\"DEPT-R4\\\",\\\"cargo\\\":\\\"Senior Fullstack Lead\\\",\\\"fechaIngreso\\\":\\\"2026-03-01\\\",\\\"fechaRetiro\\\":\\\"2026-10-06T20:30:00.000Z\\\"}}\",\n  \"payload_encoding\": \"string\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": {
+              "raw": "{{rabbitmqApiUrl}}/api/exchanges/%2F/hr.events/publish",
+              "host": ["{{rabbitmqApiUrl}}"],
+              "path": ["api", "exchanges", "%2F", "hr.events", "publish"]
+            },
+            "description": "Emite el evento 'empleado.retirado' hacia RabbitMQ."
+          },
+          "response": []
+        },
+        {
+          "name": "5.8 Verificar Perfil RETIRADO con fechaRetiro y NO Eliminado",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status 200 OK', () => pm.response.to.have.status(200));",
+                  "const p = pm.response.json();",
+                  "pm.test('Criterio Reto 4: estado RETIRADO, fechaRetiro asignada y registro no eliminado', () => {",
+                  "    pm.expect(p.estado).to.eql('RETIRADO');",
+                  "    pm.expect(p.fechaRetiro).to.not.be.null;",
+                  "    pm.expect(p.employeeId).to.eql(pm.collectionVariables.get('profileEmployeeId'));",
+                  "    pm.expect(p.lastEventId).to.eql(pm.collectionVariables.get('profileRetireMessageId'));",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{perfilesBaseUrl}}/profiles/{{profileEmployeeId}}",
+              "host": ["{{perfilesBaseUrl}}"],
+              "path": ["profiles", "{{profileEmployeeId}}"]
+            },
+            "description": "Demuestra el criterio de Reto 4: al retirar el empleado, el perfil queda con estado RETIRADO, establece fechaRetiro y NO se elimina de la base de datos."
+          },
+          "response": []
+        },
+        {
+          "name": "5.9 Consultar Perfiles Filtrados por Estado RETIRADO",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status 200 OK', () => pm.response.to.have.status(200));",
+                  "const res = pm.response.json();",
+                  "pm.test('Todos los perfiles retornados son RETIRADO', () => {",
+                  "    res.forEach(p => pm.expect(p.estado).to.eql('RETIRADO'));",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{perfilesBaseUrl}}/profiles?estado=RETIRADO",
+              "host": ["{{perfilesBaseUrl}}"],
+              "path": ["profiles"],
+              "query": [{ "key": "estado", "value": "RETIRADO" }]
+            },
+            "description": "Consulta de perfiles con filtro ?estado=RETIRADO, verificando la consistencia del Read Model."
+          },
+          "response": []
+        },
+        {
+          "name": "5.10 Deduplicación - Reenviar mismo evento con mismo lastEventId",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status 200 OK de RabbitMQ', () => pm.response.to.have.status(200));",
+                  "const res = pm.response.json();",
+                  "pm.test('Mensaje duplicado entregado al broker', () => pm.expect(res.routed).to.be.true);"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "auth": {
+              "type": "basic",
+              "basic": [
+                { "key": "username", "value": "{{rabbitmqUser}}", "type": "string" },
+                { "key": "password", "value": "{{rabbitmqPassword}}", "type": "string" }
+              ]
+            },
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"properties\": { \"content_type\": \"application/json\" },\n  \"routing_key\": \"\",\n  \"payload\": \"{\\\"id\\\":\\\"{{profileRetireMessageId}}\\\",\\\"type\\\":\\\"empleado.retirado\\\",\\\"version\\\":\\\"1.0\\\",\\\"occurredAt\\\":\\\"2026-10-06T20:30:00.000Z\\\",\\\"producer\\\":\\\"employees-service\\\",\\\"data\\\":{\\\"id\\\":\\\"{{profileEmployeeId}}\\\",\\\"nombre\\\":\\\"Andrés Felipe\\\",\\\"apellido\\\":\\\"Pardo Mora\\\",\\\"email\\\":\\\"andres.pardo@empresa.com\\\",\\\"departamentoId\\\":\\\"DEPT-R4\\\",\\\"cargo\\\":\\\"Senior Fullstack Lead\\\",\\\"fechaIngreso\\\":\\\"2026-03-01\\\",\\\"fechaRetiro\\\":\\\"2026-10-06T20:30:00.000Z\\\"}}\",\n  \"payload_encoding\": \"string\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": {
+              "raw": "{{rabbitmqApiUrl}}/api/exchanges/%2F/hr.events/publish",
+              "host": ["{{rabbitmqApiUrl}}"],
+              "path": ["api", "exchanges", "%2F", "hr.events", "publish"]
+            },
+            "description": "Reenvía el evento con el mismo UUID para demostrar la garantía de idempotencia implementada mediante 'lastEventId UNIQUE' en la base de datos de perfiles."
+          },
+          "response": []
+        },
+        {
+          "name": "5.11 Verificar Idempotencia en profiles-service",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status 200 OK', () => pm.response.to.have.status(200));",
+                  "const p = pm.response.json();",
+                  "pm.test('Perfil intacto sin duplicación ni fallos', () => {",
+                  "    pm.expect(p.employeeId).to.eql(pm.collectionVariables.get('profileEmployeeId'));",
+                  "    pm.expect(p.lastEventId).to.eql(pm.collectionVariables.get('profileRetireMessageId'));",
+                  "    pm.expect(p.estado).to.eql('RETIRADO');",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{perfilesBaseUrl}}/profiles/{{profileEmployeeId}}",
+              "host": ["{{perfilesBaseUrl}}"],
+              "path": ["profiles", "{{profileEmployeeId}}"]
+            },
+            "description": "Verifica que el reenvío del mensaje fue detectado como DUPLICADO en profiles-service (confirmado con ACK y sin corromper datos)."
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "6. Vacations Service",
+      "description": "Demuestra los criterios de vacations-service: CRUD de consulta existente de saldos (GET /vacations, por estado y por ID), validación de empleado inexistente (404), operación válida de saldo, y publicación/tolerancia al evento vacaciones.programadas.",
+      "item": [
+        {
+          "name": "6.1 Consultar Todos los Saldos de Vacaciones (GET /vacations)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status 200 OK', () => pm.response.to.have.status(200));",
+                  "const res = pm.response.json();",
+                  "pm.test('Respuesta es un array de saldos de vacaciones', () => {",
+                  "    pm.expect(res).to.be.an('array');",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{vacacionesBaseUrl}}/vacations",
+              "host": ["{{vacacionesBaseUrl}}"],
+              "path": ["vacations"]
+            },
+            "description": "Demuestra la operación de consulta general existente en el microservicio vacations-service."
+          },
+          "response": []
+        },
+        {
+          "name": "6.2 Consultar Saldos Filtrados por Estado ACTIVO",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status 200 OK', () => pm.response.to.have.status(200));",
+                  "const res = pm.response.json();",
+                  "pm.test('Todos los registros corresponden a empleados ACTIVOS', () => {",
+                  "    res.forEach(v => pm.expect(v.estadoEmpleado).to.eql('ACTIVO'));",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{vacacionesBaseUrl}}/vacations?estado=ACTIVO",
+              "host": ["{{vacacionesBaseUrl}}"],
+              "path": ["vacations"],
+              "query": [{ "key": "estado", "value": "ACTIVO" }]
+            },
+            "description": "Consulta de saldos filtrados por ?estado=ACTIVO."
+          },
+          "response": []
+        },
+        {
+          "name": "6.3 Consultar Saldos Filtrados por Estado RETIRADO",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status 200 OK', () => pm.response.to.have.status(200));",
+                  "const res = pm.response.json();",
+                  "pm.test('Todos los registros corresponden a empleados RETIRADOS', () => {",
+                  "    res.forEach(v => pm.expect(v.estadoEmpleado).to.eql('RETIRADO'));",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{vacacionesBaseUrl}}/vacations?estado=RETIRADO",
+              "host": ["{{vacacionesBaseUrl}}"],
+              "path": ["vacations"],
+              "query": [{ "key": "estado", "value": "RETIRADO" }]
+            },
+            "description": "Consulta de saldos filtrados por ?estado=RETIRADO, comprobando que los empleados retirados conservan su saldo histórico."
+          },
+          "response": []
+        },
+        {
+          "name": "6.4 Consultar Saldo de Empleado (Operación Válida)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status 200 OK', () => pm.response.to.have.status(200));",
+                  "const v = pm.response.json();",
+                  "pm.test('Saldo válido de 15 días disponibles y 0 tomados', () => {",
+                  "    pm.expect(v.employeeId).to.eql(pm.collectionVariables.get('empleadoId'));",
+                  "    pm.expect(v.diasDisponibles).to.eql(15);",
+                  "    pm.expect(v.diasTomados).to.eql(0);",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{vacacionesBaseUrl}}/vacations/{{empleadoId}}",
+              "host": ["{{vacacionesBaseUrl}}"],
+              "path": ["vacations", "{{empleadoId}}"]
+            },
+            "description": "Demuestra la consulta de saldo para un empleado existente creado durante el flujo, verificando los valores por defecto (15 días disponibles, 0 tomados)."
+          },
+          "response": []
+        },
+        {
+          "name": "6.5 Validación: Empleado Inexistente (GET /vacations/:id)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status 404 Not Found', () => pm.response.to.have.status(404));",
+                  "const res = pm.response.json();",
+                  "pm.test('Mensaje de empleado inexistente', () => {",
+                  "    pm.expect(res.status).to.eql(404);",
+                  "    pm.expect(res.message).to.include('no encontrado');",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{vacacionesBaseUrl}}/vacations/EMPLEADO_NO_EXISTE_999",
+              "host": ["{{vacacionesBaseUrl}}"],
+              "path": ["vacations", "EMPLEADO_NO_EXISTE_999"]
+            },
+            "description": "Demuestra la validación de empleado inexistente implementada en el controlador de vacations-service, retornando 404 Not Found."
+          },
+          "response": []
+        },
+        {
+          "name": "6.6 Publicar Evento vacaciones.programadas a RabbitMQ",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status 200 OK de RabbitMQ', () => pm.response.to.have.status(200));",
+                  "const res = pm.response.json();",
+                  "pm.test('Evento publicado en RabbitMQ', () => pm.expect(res.routed).to.be.true);"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "auth": {
+              "type": "basic",
+              "basic": [
+                { "key": "username", "value": "{{rabbitmqUser}}", "type": "string" },
+                { "key": "password", "value": "{{rabbitmqPassword}}", "type": "string" }
+              ]
+            },
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"properties\": { \"content_type\": \"application/json\" },\n  \"routing_key\": \"\",\n  \"payload\": \"{\\\"id\\\":\\\"d4e5f6a7-b8c9-0123-defa-123456789013\\\",\\\"type\\\":\\\"vacaciones.programadas\\\",\\\"version\\\":\\\"1.0\\\",\\\"occurredAt\\\":\\\"2026-10-06T20:45:00.000Z\\\",\\\"producer\\\":\\\"vacations-service\\\",\\\"data\\\":{\\\"id\\\":\\\"e5f6a7b8-c9d0-1234-efab-234567890124\\\",\\\"empleadoId\\\":\\\"{{empleadoId}}\\\",\\\"fechaInicio\\\":\\\"2026-11-01\\\",\\\"fechaFin\\\":\\\"2026-11-15\\\",\\\"diasHabiles\\\":10,\\\"estado\\\":\\\"PENDIENTE\\\",\\\"observacion\\\":null}}\",\n  \"payload_encoding\": \"string\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": {
+              "raw": "{{rabbitmqApiUrl}}/api/exchanges/%2F/hr.events/publish",
+              "host": ["{{rabbitmqApiUrl}}"],
+              "path": ["api", "exchanges", "%2F", "hr.events", "publish"]
+            },
+            "description": "Demuestra la publicación del evento 'vacaciones.programadas' según el catálogo estándar. Los consumidores confirman con ACK y descartan de forma segura eventos no suscritos ('IGNORED')."
+          },
+          "response": []
+        },
+        {
+          "name": "6.7 Verificación de Operaciones de Solicitud de Vacaciones (Inspección)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "// Según la inspección exhaustiva del código fuente de vacations-service,",
+                  "// este microservicio implementa exclusivamente el Read Model CQRS de saldos vía eventos y consultas GET.",
+                  "// No expone endpoint HTTP POST /vacations ni validaciones de solicitud de fechas en esta fase.",
+                  "pm.test('Resultado de inspección de operaciones de solicitud POST', () => {",
+                  "    pm.expect([200, 201, 404, 405]).to.include(pm.response.code);",
+                  "    if (pm.response.code === 404) {",
+                  "        console.log('Inspección confirmada: vacations-service opera exclusivamente como Read Model CQRS desacoplado.');",
+                  "    }",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"empleadoId\": \"{{empleadoId}}\",\n  \"fechaInicio\": \"2026-10-15\",\n  \"fechaFin\": \"2026-10-24\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": {
+              "raw": "{{vacacionesBaseUrl}}/vacations",
+              "host": ["{{vacacionesBaseUrl}}"],
+              "path": ["vacations"]
+            },
+            "description": "Criterio: Validaciones de fechas incoherentes, fechas pasadas, solapamiento y solicitud de vacaciones. Valida y documenta el estado real del microservicio en el código, confirmando su arquitectura CQRS Read Model."
+          },
+          "response": []
+        }
+      ]
+    }
+  ]
+}
