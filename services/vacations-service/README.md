@@ -1,179 +1,170 @@
-# Servicio de Vacaciones (vacations-service)
+# vacations-service
 
-Microservicio desarrollado con **Node.js 22**, **TypeScript**, **Express**, **Prisma** y **PostgreSQL**.
+Microservicio de gestión de períodos y saldos de vacaciones. Está implementado con Node.js 22, TypeScript, Express, Prisma y PostgreSQL; publica y consume eventos a través de RabbitMQ.
 
-Funciona como un **consumidor asíncrono** y modelo de consulta en una arquitectura **CQRS**: mantiene el saldo e historial de vacaciones de cada empleado construido **exclusivamente** mediante eventos de RabbitMQ. Nunca realiza llamadas HTTP a otros microservicios.
+## API y Swagger
 
----
+La ruta canónica es `/vacaciones`; `/vacations` se conserva como alias.
 
-## Arquitectura
-
-```text
-[employees-service]  (Productor)
-        │
-        ▼ (Fanout)
-   [hr.events] (Exchange)
-        │
-        ├──► [notifications.queue]  → notifications-service
-        │
-        ├──► [profiles.queue]       → profiles-service
-        │
-        └──► [vacations.queue]       ← ★ ESTE SERVICIO
-                     │
-                     ▼ (amqplib — sin modificar topología)
-             [vacations-service]
-                     │
-                     ▼ (Prisma ORM)
-             [PostgreSQL: database-vacaciones]
-                     └── Tabla: VacationBalance
-                           ├── employeeId  (UNIQUE)
-                           └── lastEventId (UNIQUE — idempotencia)
-```
-
-### Principios CQRS aplicados
-
-| Aspecto | Detalle |
-|---|---|
-| **Escritura (Command)** | Exclusivamente mediante eventos asíncronos de RabbitMQ (`vacations.queue`) |
-| **Lectura (Query)** | API REST interna sobre PostgreSQL (`database-vacaciones`) |
-| **Consistencia** | Eventual — el balance de vacaciones se actualiza al procesar eventos |
-| **Independencia** | Totalmente desacoplado de `employees-service` (cero llamadas HTTP síncronas) |
-
----
-
-## Modelo de Datos — `VacationBalance`
-
-| Campo | Tipo | Restricción / Default | Descripción |
-|---|---|---|---|
-| `id` | UUID (String) | PK (`@id @default(uuid())`) | Identificador interno |
-| `employeeId` | String | `UNIQUE` | Identificador del empleado (clave de negocio) |
-| `nombre` | String | NOT NULL | Nombre del empleado |
-| `apellido` | String | NOT NULL | Apellido del empleado |
-| `email` | String | NOT NULL | Correo electrónico |
-| `departamentoId` | String | NOT NULL | ID del departamento |
-| `diasDisponibles` | Integer | NOT NULL, `DEFAULT 15` | Días hábiles de vacaciones disponibles |
-| `diasTomados` | Integer | NOT NULL, `DEFAULT 0` | Días de vacaciones ya disfrutados |
-| `estadoEmpleado` | String | NOT NULL, `DEFAULT 'ACTIVO'` | Estado del empleado: `ACTIVO` \| `RETIRADO` |
-| `lastEventId` | String | `UNIQUE` | UUID del último evento aplicado (garantía de idempotencia) |
-| `updatedAt` | DateTime | `@updatedAt` | Timestamp de última modificación |
-
----
-
-## Eventos Consumidos de RabbitMQ
-
-El servicio consume exclusivamente de la cola `vacations.queue` sin alterar exchanges ni colas preexistentes.
-
-### 1. `empleado.creado`
-- Crea un nuevo registro en `VacationBalance`.
-- Inicializa con `diasDisponibles = 15`, `diasTomados = 0`, `estadoEmpleado = ACTIVO`.
-- Guarda el `lastEventId`.
-
-### 2. `empleado.actualizado`
-- Actualiza únicamente: `nombre`, `apellido`, `email`, `departamentoId`.
-- **NO modifica** `diasDisponibles` ni `diasTomados`.
-- Actualiza el `lastEventId`.
-
-### 3. `empleado.retirado`
-- Actualiza: `estadoEmpleado = RETIRADO`.
-- **NO elimina** el registro de la base de datos (conserva el saldo histórico).
-- Actualiza el `lastEventId`.
-
----
-
-## Idempotencia
-
-Para evitar duplicación y efectos adversos por reentrega de mensajes en RabbitMQ:
-1. **Verificación previa**: Antes de procesar cualquier evento, busca si `lastEventId` ya existe en la base de datos.
-2. **Si existe**:
-   - Registra `[VACATIONS] [DUPLICADO] Evento ya procesado...`.
-   - Envía `ACK` a RabbitMQ.
-   - No modifica la base de datos.
-3. **Si no existe**:
-   - Aplica la mutación correspondiente.
-   - Guarda el `lastEventId`.
-   - Envía `ACK` a RabbitMQ.
-4. **Protección a nivel de base de datos**: Restricción `UNIQUE` sobre `lastEventId` para evitar carreras entre réplicas.
-
----
-
-## Formato de Logs
-
-Todos los logs siguen el prefijo estándar:
-- `[VACATIONS] Mensaje recibido | UUID: ... | Evento: ... | Empleado: ...`
-- `[VACATIONS] [CREADO] Registro de vacaciones inicializado...`
-- `[VACATIONS] [ACTUALIZADO] Información de empleado actualizada (días de vacaciones intactos)...`
-- `[VACATIONS] [RETIRADO] Empleado marcado como RETIRADO (saldo histórico conservado)...`
-- `[VACATIONS] [DUPLICADO] Evento ya procesado anteriormente...`
-- `[VACATIONS] [ERROR] Excepción procesando evento...`
-
----
-
-## Variables de Entorno
-
-| Variable | Descripción | Valor por defecto en Docker |
+| Recurso | Método y ruta | Descripción |
 |---|---|---|
-| `PORT` | Puerto HTTP del servicio | `8084` |
-| `DATABASE_URL` | Cadena de conexión PostgreSQL | `postgresql://postgres:postgres@database-vacaciones:5432/gestion_vacaciones` |
-| `RABBITMQ_HOST` | Host del broker RabbitMQ | `rabbitmq` |
-| `RABBITMQ_PORT` | Puerto AMQP | `5672` |
-| `RABBITMQ_USER` | Usuario RabbitMQ | `admin` |
-| `RABBITMQ_PASSWORD` | Contraseña RabbitMQ | `admin` |
+| Períodos | `POST /vacaciones` | Programa un período y publica `vacaciones.programadas` |
+| Períodos | `GET /vacaciones` | Lista períodos |
+| Períodos | `GET /vacaciones?empleadoId={id}` | Filtra por empleado |
+| Períodos | `GET /vacaciones/{id}` | Consulta por ID |
+| Períodos | `DELETE /vacaciones/{id}` | Cancela períodos cuya fecha de inicio aún es futura |
+| Saldos | `GET /vacaciones/balances` | Lista saldos; admite `?estado=ACTIVO` o `?estado=RETIRADO` |
+| Saldos | `GET /vacaciones/balances/{employeeId}` | Consulta el saldo de un empleado |
 
----
+- Swagger UI: `http://localhost:8080/vacaciones/docs`
+- Especificación OpenAPI JSON: `http://localhost:8080/vacaciones/openapi.json` (también disponible en `/api-docs`)
 
-## API REST
+La especificación documenta el `200` esperado por el contrato del reto y el `201` que devuelve actualmente el `POST`. Asimismo, el reto solicita `400` para empleado inexistente, pero la implementación actual responde `404`; ambas respuestas están señaladas en OpenAPI.
 
-### 1. Healthcheck
-```http
-GET /health
-```
-Respuesta:
+## Justificación técnica: validación de empleados
+
+El servicio valida la existencia del empleado consultando su réplica local, alimentada mediante eventos de RabbitMQ, en lugar de depender de una consulta REST síncrona a `empleados-service`. Esta estrategia prioriza la disponibilidad y autonomía del servicio: una caída o latencia del servicio de empleados no bloquea las operaciones de vacaciones y evita acoplamiento en tiempo de ejecución.
+
+La contrapartida es la consistencia eventual: después de crear o retirar un empleado, la réplica puede tardar en reflejar el cambio hasta que se procese el evento. La validación consulta el estado local disponible en ese momento, no una lectura inmediata de la fuente autoritativa.
+
+## Diversidad tecnológica del ecosistema
+
+| Servicio / componente | Lenguaje de programación / framework |
+|---|---|
+| `api-gateway` | Java 17, Spring Boot, Spring Cloud Gateway |
+| `employees-service` | Java 21, Spring Boot |
+| `departments-service` | TypeScript, Node.js, Express, Prisma |
+| `notifications-service` | TypeScript, Node.js, Express, Prisma |
+| `profiles-service` | TypeScript, Node.js, Express, Prisma |
+| `vacations-service` | TypeScript, Node.js, Express, Prisma |
+| Pruebas de humo (`tests/reto3_smoke.py`) | Python 3 |
+| Migraciones de base de datos | SQL, PostgreSQL |
+
+El ecosistema incluye Java, TypeScript, Python y SQL. Python se utiliza en automatización de pruebas y SQL en las migraciones; no se presentan como microservicios adicionales.
+
+## Catálogo de eventos del servicio
+
+Los envelopes siguen el esquema `id`, `type`, `version`, `occurredAt`, `producer` y `data`.
+
+### Publicado
+
+`vacaciones.programadas` se publica en el exchange fanout `hr.events` tras programar un período. El payload `data` contiene `id`, `empleadoId`, `fechaInicio`, `fechaFin`, `estado` y `fechaCreacion`.
+
 ```json
 {
-  "status": "ok",
-  "service": "vacations"
+  "id": "vac-1791490000000-1234",
+  "type": "vacaciones.programadas",
+  "version": "1.0",
+  "occurredAt": "2026-10-08T20:00:00.000Z",
+  "producer": "vacations-service",
+  "data": {
+    "id": "uuid-del-periodo",
+    "empleadoId": "E401",
+    "fechaInicio": "2026-11-01",
+    "fechaFin": "2026-11-15",
+    "estado": "PROGRAMADA",
+    "fechaCreacion": "2026-10-08T20:00:00.000Z"
+  }
 }
 ```
 
-### 2. Listar todos los saldos de vacaciones
-```http
-GET /vacations
+### Consumidos
+
+El consumidor escucha `vacations.queue` y procesa eventos de empleados para mantener `VacationBalance` actualizado:
+
+- `empleado.creado`: inicializa el saldo local.
+- `empleado.retirado`: marca el registro local como `RETIRADO` y conserva su historial.
+- `empleado.actualizado`: actualiza los datos personales y conserva los días de vacaciones.
+
+La tabla `eventos_procesados` persiste el ID del envelope y su timestamp. El procesamiento y el registro del ID se hacen en una transacción. Una repetición del mismo ID se omite, se registra en el log y recibe ACK.
+
+## Pruebas HTTP: validaciones y cancelación
+
+Las llamadas siguientes están escritas para PowerShell y usan el Gateway. Requieren servicios iniciados y, para crear períodos, un empleado existente en la réplica local. Las fechas se calculan dinámicamente.
+
+```powershell
+$base = "http://localhost:8080"
+$empleado = "E401" # Sustituir por un ID existente en la réplica de vacaciones
+$hoy = (Get-Date).ToUniversalTime().ToString("yyyy-MM-dd")
+$inicio = (Get-Date).ToUniversalTime().AddDays(10).ToString("yyyy-MM-dd")
+$fin = (Get-Date).ToUniversalTime().AddDays(15).ToString("yyyy-MM-dd")
 ```
 
-### 3. Filtrar por estado del empleado
-```http
-GET /vacations?estado=ACTIVO
-GET /vacations?estado=RETIRADO
+**Fecha fin igual a fecha de inicio — espera `400 Bad Request`:**
+
+```powershell
+$body = @{ empleadoId = $empleado; fechaInicio = $inicio; fechaFin = $inicio } | ConvertTo-Json -Compress
+curl.exe -i -X POST "$base/vacaciones" -H "Content-Type: application/json" --data-raw $body
 ```
 
-### 4. Consultar saldo de un empleado por ID
-```http
-GET /vacations/:employeeId
+**Fecha de inicio pasada — espera `400 Bad Request`:**
+
+```powershell
+$body = @{ empleadoId = $empleado; fechaInicio = "2000-01-01"; fechaFin = "2000-01-05" } | ConvertTo-Json -Compress
+curl.exe -i -X POST "$base/vacaciones" -H "Content-Type: application/json" --data-raw $body
 ```
 
----
+**Solapamiento — programar el período una vez y repetir una solicitud con fechas coincidentes. La segunda debe responder `400 Bad Request`:**
 
-## Pruebas de Funcionamiento
+```powershell
+$body = @{ empleadoId = $empleado; fechaInicio = $inicio; fechaFin = $fin } | ConvertTo-Json -Compress
+curl.exe -i -X POST "$base/vacaciones" -H "Content-Type: application/json" --data-raw $body
+curl.exe -i -X POST "$base/vacaciones" -H "Content-Type: application/json" --data-raw $body
+```
 
-### 1. Construir y levantar el contenedor
+**Crear y cancelar un período futuro:**
+
+```powershell
+$body = @{ empleadoId = $empleado; fechaInicio = $inicio; fechaFin = $fin } | ConvertTo-Json -Compress
+$periodo = curl.exe -s -X POST "$base/vacaciones" -H "Content-Type: application/json" --data-raw $body | ConvertFrom-Json
+$periodoId = $periodo.id
+curl.exe -i -X DELETE "$base/vacaciones/$periodoId"
+```
+
+La cancelación válida responde `200 OK` y devuelve el período en estado `CANCELADA`. Para verificar que un período inexistente responde `404`, se puede usar un UUID que no exista:
+
+```powershell
+curl.exe -i -X DELETE "$base/vacaciones/00000000-0000-0000-0000-000000000000"
+```
+
+Una cancelación cuya `fechaInicio` sea hoy o anterior responde `400` con el mensaje `No es posible cancelar un período de vacaciones que ya ha iniciado o finalizado`.
+
+**Empleado inexistente:** el contrato del reto solicita `400`, pero el comportamiento implementado actualmente devuelve `404`. Para verificarlo, enviar un `POST` con un `empleadoId` que no esté en la réplica local y fechas futuras válidas.
+
+## Prueba de deduplicación desde RabbitMQ Management
+
+1. Abrir `http://localhost:15672`, entrar en **Exchanges** y seleccionar `hr.events`.
+2. En **Publish message**, usar routing key vacía y `Content type` `application/json`.
+3. Publicar un envelope `empleado.creado` con un `id` estable y un `data.id` nuevo, por ejemplo:
+
+   ```json
+   {
+     "id": "dedup-vacaciones-001",
+     "type": "empleado.creado",
+     "version": "1.0",
+     "occurredAt": "2026-10-08T20:00:00.000Z",
+     "producer": "employees-service",
+     "data": {
+       "id": "DEDUP-001",
+       "nombre": "Prueba",
+       "apellido": "Deduplicacion",
+       "email": "dedup@example.test",
+       "departamentoId": "D001"
+     }
+   }
+   ```
+
+4. Publicar exactamente el mismo JSON una segunda vez, conservando el mismo `id` del envelope.
+5. Consultar `docker compose logs vacations-service`. El segundo mensaje debe registrar `Evento duplicado omitido: dedup-vacaciones-001`; en la réplica debe existir una sola aplicación del evento. La tabla `eventos_procesados` guarda una única fila para ese ID.
+
+Para probar `empleado.retirado`, crear primero el empleado en la réplica con un evento `empleado.creado`, enviar un `empleado.retirado` con un envelope ID nuevo y publicarlo dos veces sin cambiar ese ID.
+
+## Ejecución local con Docker Compose
+
 ```bash
-docker compose up --build -d vacations-service
-```
-
-### 2. Verificar estado y logs
-```bash
-docker compose ps vacations-service
+docker compose up --build -d db-vacaciones rabbitmq vacations-service api-gateway
+docker compose ps vacations-service db-vacaciones rabbitmq
 docker compose logs -f vacations-service
 ```
 
-### 3. Probar el endpoint de salud
-```bash
-docker compose exec api-gateway curl -s http://vacations-service:8084/health
-```
-
-### 4. Consultar saldos de vacaciones
-```bash
-docker compose exec api-gateway curl -s http://vacations-service:8084/vacations
-docker compose exec api-gateway curl -s http://vacations-service:8084/vacations?estado=ACTIVO
-docker compose exec api-gateway curl -s http://vacations-service:8084/vacations?estado=RETIRADO
-```
+`vacations-service` y `db-vacaciones` solo se exponen en la red interna de Compose; el acceso HTTP externo se realiza a través del API Gateway en el puerto `8080`.

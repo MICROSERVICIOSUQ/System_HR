@@ -49,3 +49,10 @@ model VacationPeriod {
   @@index([empleadoId])
   @@index([estado])
 }
+
+model ProcessedEvent {
+  id        String   @id
+  timestamp DateTime @default(now()) @db.Timestamp(3)
+
+  @@map("eventos_procesados")
+}

@@ -78,17 +78,18 @@ export class RabbitMQConsumer {
         return;
       }
 
-      await this.service.processEvent(envelope);
+      const result = await this.service.processEvent(envelope);
 
-      // ACK del mensaje procesado o duplicado
+      if (result === 'DUPLICATE') {
+        console.log(`Evento duplicado omitido: ${envelope.id}`);
+      }
       this.channel.ack(msg);
     } catch (error: any) {
       console.error(
         '[VACATIONS] [ERROR] Excepción no controlada procesando mensaje:',
         error.message
       );
-      // ACK para evitar encolamiento infinito
-      this.channel.ack(msg);
+      this.channel.nack(msg, false, true);
     }
   }
 

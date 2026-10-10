@@ -1,4 +1,5 @@
 import prisma from '../config/db.ts';
+import type { Prisma } from '../generated/prisma/client.ts';
 
 export interface CreateVacationBalanceDto {
   employeeId: string;
@@ -36,14 +37,31 @@ export interface CreateVacationPeriodDto {
 }
 
 export class VacationRepository {
-  // ── VacationBalance (CQRS Read Model) ──────────────────────────────────────
+  async processOnce<T>(
+    eventId: string,
+    process: (transaction: Prisma.TransactionClient) => Promise<T>
+  ): Promise<{ duplicate: true } | { duplicate: false; result: T }> {
+    return prisma.$transaction(async (transaction) => {
+      const existing = await transaction.processedEvent.findUnique({
+        where: { id: eventId },
+      });
+      if (existing) return { duplicate: true as const };
 
-  /** Buscar por lastEventId para garantía de idempotencia */
-  async findByLastEventId(eventId: string) {
-    return prisma.vacationBalance.findUnique({
-      where: { lastEventId: eventId },
+      const result = await process(transaction);
+      await transaction.processedEvent.create({ data: { id: eventId } });
+      return { duplicate: false as const, result };
     });
   }
+
+  async isEventProcessed(eventId: string): Promise<boolean> {
+    return Boolean(
+      await prisma.processedEvent.findUnique({
+        where: { id: eventId },
+      })
+    );
+  }
+
+  // ── VacationBalance (CQRS Read Model) ──────────────────────────────────────
 
   /** Buscar saldo de vacaciones por ID de empleado */
   async findByEmployeeId(employeeId: string) {
@@ -61,8 +79,8 @@ export class VacationRepository {
   }
 
   /** Crear un nuevo registro de saldo de vacaciones */
-  async create(data: CreateVacationBalanceDto) {
-    return prisma.vacationBalance.create({
+  async create(data: CreateVacationBalanceDto, transaction?: Prisma.TransactionClient) {
+    return (transaction ?? prisma).vacationBalance.create({
       data: {
         employeeId: data.employeeId,
         nombre: data.nombre,
@@ -78,8 +96,12 @@ export class VacationRepository {
   }
 
   /** Actualizar información personal y departamento sin alterar días de vacaciones */
-  async updateInfo(employeeId: string, data: UpdateVacationInfoDto) {
-    return prisma.vacationBalance.update({
+  async updateInfo(
+    employeeId: string,
+    data: UpdateVacationInfoDto,
+    transaction?: Prisma.TransactionClient
+  ) {
+    return (transaction ?? prisma).vacationBalance.update({
       where: { employeeId },
       data: {
         ...(data.nombre !== undefined && { nombre: data.nombre }),
@@ -92,8 +114,12 @@ export class VacationRepository {
   }
 
   /** Actualizar estado a RETIRADO conservando el saldo histórico (nunca eliminar) */
-  async retire(employeeId: string, data: RetireVacationDto) {
-    return prisma.vacationBalance.update({
+  async retire(
+    employeeId: string,
+    data: RetireVacationDto,
+    transaction?: Prisma.TransactionClient
+  ) {
+    return (transaction ?? prisma).vacationBalance.update({
       where: { employeeId },
       data: {
         estadoEmpleado: 'RETIRADO',
@@ -131,10 +157,10 @@ export class VacationRepository {
     });
   }
 
-  /** Eliminar un período por ID */
-  async deletePeriod(id: string) {
-    return prisma.vacationPeriod.delete({
+  async cancelPeriod(id: string) {
+    return prisma.vacationPeriod.update({
       where: { id },
+      data: { estado: 'CANCELADA' },
     });
   }
 

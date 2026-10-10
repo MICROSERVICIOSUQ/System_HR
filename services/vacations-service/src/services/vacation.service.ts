@@ -1,5 +1,6 @@
 import { VacationRepository, EstadoFiltro } from '../repositories/vacation.repository.ts';
 import { RabbitMQPublisher } from '../messaging/rabbitmq.publisher.ts';
+import type { Prisma } from '../generated/prisma/client.ts';
 
 export interface EventEnvelope {
   id: string;
@@ -170,8 +171,19 @@ export class VacationService {
       throw new ValidationError(`Período de vacaciones con id '${id}' no encontrado`, 404);
     }
 
-    const deleted = await this.repository.deletePeriod(id);
-    return this.mapPeriod(deleted);
+    const today = new Date();
+    today.setUTCHours(0, 0, 0, 0);
+    const fechaInicio = new Date(existing.fechaInicio.getTime());
+    fechaInicio.setUTCHours(0, 0, 0, 0);
+
+    if (fechaInicio <= today) {
+      throw new ValidationError(
+        'No es posible cancelar un período de vacaciones que ya ha iniciado o finalizado'
+      );
+    }
+
+    const cancelled = await this.repository.cancelPeriod(id);
+    return this.mapPeriod(cancelled);
   }
 
   // ── Procesamiento de eventos RabbitMQ (CQRS Consumer) ──────────────────────
@@ -192,37 +204,32 @@ export class VacationService {
       return 'IGNORED';
     }
 
-    // ── Idempotencia: Verificar si lastEventId ya existe ───────────────────────
-    const existingByEvent = await this.repository.findByLastEventId(eventId);
-    if (existingByEvent) {
-      console.warn(
-        `[VACATIONS] [DUPLICADO] Evento ya procesado anteriormente | UUID: ${eventId} | Evento: ${eventType} | Empleado: ${employeeId}`
-      );
-      return 'DUPLICATE';
-    }
-
-    // ── Aplicar operación según el evento ─────────────────────────────────────
     try {
-      switch (eventType) {
-        case 'empleado.creado':
-          return await this.handleEmpleadoCreado(eventId, employeeId, data);
+      const processed = await this.repository.processOnce(eventId, async (transaction) => {
+        switch (eventType) {
+          case 'empleado.creado':
+            return this.handleEmpleadoCreado(eventId, employeeId, data, transaction);
 
-        case 'empleado.actualizado':
-          return await this.handleEmpleadoActualizado(eventId, employeeId, data);
+          case 'empleado.actualizado':
+            return this.handleEmpleadoActualizado(eventId, employeeId, data, transaction);
 
-        case 'empleado.retirado':
-          return await this.handleEmpleadoRetirado(eventId, employeeId, data);
+          case 'empleado.retirado':
+            return this.handleEmpleadoRetirado(eventId, employeeId, data, transaction);
 
-        default:
-          return 'IGNORED';
-      }
-    } catch (error: any) {
-      // Conflicto de restricción UNIQUE (condición de carrera o reentrega concurrente)
-      if (error?.code === 'P2002') {
-        console.warn(
-          `[VACATIONS] [DUPLICADO] Conflicto UNIQUE detectado al procesar | UUID: ${eventId} | Empleado: ${employeeId}`
-        );
+          default:
+            return 'IGNORED';
+        }
+      });
+
+      if (processed.duplicate) {
         return 'DUPLICATE';
+      }
+      return processed.result;
+    } catch (error: any) {
+      if (error?.code === 'P2002') {
+        if (await this.repository.isEventProcessed(eventId)) {
+          return 'DUPLICATE';
+        }
       }
 
       console.error(
@@ -238,7 +245,8 @@ export class VacationService {
   private async handleEmpleadoCreado(
     eventId: string,
     employeeId: string,
-    data: EventEnvelope['data']
+    data: EventEnvelope['data'],
+    transaction: Prisma.TransactionClient
   ): Promise<ProcessingResult> {
     await this.repository.create({
       employeeId,
@@ -250,7 +258,7 @@ export class VacationService {
       diasTomados: 0,
       estadoEmpleado: 'ACTIVO',
       lastEventId: eventId,
-    });
+    }, transaction);
 
     console.log(
       `[VACATIONS] [CREADO] Registro de vacaciones inicializado | UUID: ${eventId} | Empleado: ${employeeId} | ` +
@@ -262,9 +270,12 @@ export class VacationService {
   private async handleEmpleadoActualizado(
     eventId: string,
     employeeId: string,
-    data: EventEnvelope['data']
+    data: EventEnvelope['data'],
+    transaction: Prisma.TransactionClient
   ): Promise<ProcessingResult> {
-    const existing = await this.repository.findByEmployeeId(employeeId);
+    const existing = await transaction.vacationBalance.findUnique({
+      where: { employeeId },
+    });
 
     if (!existing) {
       console.warn(
@@ -281,7 +292,7 @@ export class VacationService {
         diasTomados: 0,
         estadoEmpleado: 'ACTIVO',
         lastEventId: eventId,
-      });
+      }, transaction);
       return 'CREATED';
     }
 
@@ -292,7 +303,7 @@ export class VacationService {
       email: data.email,
       departamentoId: data.departamentoId,
       lastEventId: eventId,
-    });
+    }, transaction);
 
     console.log(
       `[VACATIONS] [ACTUALIZADO] Información de empleado actualizada (días de vacaciones intactos) | ` +
@@ -304,9 +315,12 @@ export class VacationService {
   private async handleEmpleadoRetirado(
     eventId: string,
     employeeId: string,
-    _data: EventEnvelope['data']
+    _data: EventEnvelope['data'],
+    transaction: Prisma.TransactionClient
   ): Promise<ProcessingResult> {
-    const existing = await this.repository.findByEmployeeId(employeeId);
+    const existing = await transaction.vacationBalance.findUnique({
+      where: { employeeId },
+    });
 
     if (!existing) {
       console.warn(
@@ -318,7 +332,7 @@ export class VacationService {
     // Actualizar estadoEmpleado = RETIRADO, NO eliminar el registro, conservar el saldo histórico.
     await this.repository.retire(employeeId, {
       lastEventId: eventId,
-    });
+    }, transaction);
 
     console.log(
       `[VACATIONS] [RETIRADO] Empleado marcado como RETIRADO (saldo histórico conservado) | ` +

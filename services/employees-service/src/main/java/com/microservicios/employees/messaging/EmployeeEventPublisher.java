@@ -22,6 +22,7 @@ public class EmployeeEventPublisher {
 
     private final RabbitTemplate rabbitTemplate;
 
+    
     public EmployeeEventPublisher(RabbitTemplate rabbitTemplate) {
         this.rabbitTemplate = rabbitTemplate;
     }

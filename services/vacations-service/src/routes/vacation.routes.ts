@@ -9,7 +9,7 @@ const controller = new VacationController();
 // GET   /vacations                       → Listar todos los períodos
 // GET   /vacations?empleadoId=EMP-001    → Filtrar períodos por empleado
 // GET   /vacations/:id                   → Obtener período por UUID
-// DELETE /vacations/:id                  → Eliminar período por UUID
+// DELETE /vacaciones/:id (alias /vacations/:id) → Cancelar período futuro por UUID
 
 router.post('/', controller.createPeriod);
 router.get('/', controller.getAllPeriods);

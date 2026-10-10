@@ -151,14 +151,14 @@ services:
       context: ./services/vacations-service
       dockerfile: Dockerfile
     depends_on:
-      database-vacaciones:
+      db-vacaciones:
         condition: service_healthy
       rabbitmq:
         condition: service_healthy
     environment:
       NODE_ENV: production
       PORT: ${VACACIONES_PORT:-8084}
-      DATABASE_URL: postgresql://${VACACIONES_DB_USER:-postgres}:${VACACIONES_DB_PASSWORD:-postgres}@database-vacaciones:5432/${VACACIONES_DB_NAME:-gestion_vacaciones}
+      DATABASE_URL: postgresql://${VACACIONES_DB_USER:-postgres}:${VACACIONES_DB_PASSWORD:-postgres}@db-vacaciones:5432/${VACACIONES_DB_NAME:-gestion_vacaciones}
       RABBITMQ_HOST: ${RABBITMQ_HOST:-rabbitmq}
       RABBITMQ_PORT: ${RABBITMQ_PORT:-5672}
       RABBITMQ_USER: ${RABBITMQ_USER:-admin}

@@ -35,7 +35,7 @@ export class VacationController {
    */
   getBalanceByEmployeeId = async (req: Request, res: Response, next: NextFunction) => {
     try {
-      const employeeId = req.params.employeeId;
+      const employeeId = String(req.params.employeeId);
       const balance = await this.service.getByEmployeeId(employeeId);
       if (!balance) {
         return res.status(404).json({
@@ -103,7 +103,7 @@ export class VacationController {
    */
   getPeriodById = async (req: Request, res: Response, next: NextFunction) => {
     try {
-      const { id } = req.params;
+      const id = String(req.params.id);
       const period = await this.service.getPeriodById(id);
       if (!period) {
         return res.status(404).json({
@@ -123,14 +123,14 @@ export class VacationController {
    */
   deletePeriod = async (req: Request, res: Response, next: NextFunction) => {
     try {
-      const { id } = req.params;
+      const id = String(req.params.id);
       const deleted = await this.service.deletePeriod(id);
-      return res.json({ message: 'Período de vacaciones eliminado correctamente', data: deleted });
+      return res.json({ message: 'Período de vacaciones cancelado correctamente', data: deleted });
     } catch (error) {
       if (error instanceof ValidationError) {
         return res.status(error.statusCode).json({
           status: error.statusCode,
-          error: 'Not Found',
+          error: error.statusCode === 404 ? 'Not Found' : 'Bad Request',
           message: error.message,
         });
       }

@@ -30,7 +30,7 @@ spring:
         - id: vacaciones-route
           uri: ${VACACIONES_URL:http://vacations-service:8084}
           predicates:
-            - Path=/vacations,/vacations/**
+            - Path=/vacations,/vacations/**,/vacaciones,/vacaciones/**
 
 management:
   endpoints:
