@@ -10,6 +10,16 @@ export interface VacacionesProgramadasEvent {
   fechaCreacion: string; // ISO datetime string
 }
 
+export interface EventEnvelope<T> {
+  id: string;
+  type: string;
+  version: string;
+  occurredAt: string;
+  producer: string;
+  correlationId?: string;
+  data: T;
+}
+
 export class RabbitMQPublisher {
   private connection: ChannelModel | null = null;
   private channel: Channel | null = null;
@@ -45,19 +55,38 @@ export class RabbitMQPublisher {
     }
   }
 
-  async publishVacacionesProgramadas(data: VacacionesProgramadasEvent): Promise<void> {
+  async publishVacacionesProgramadas(
+    data: VacacionesProgramadasEvent,
+    correlationId?: string
+  ): Promise<void> {
+    await this.publishEvent('vacaciones.programadas', data, correlationId);
+  }
+
+  async publishVacacionesReprogramadas(
+    data: VacacionesProgramadasEvent,
+    correlationId?: string
+  ): Promise<void> {
+    await this.publishEvent('vacaciones.reprogramadas', data, correlationId);
+  }
+
+  private async publishEvent(
+    type: string,
+    data: VacacionesProgramadasEvent,
+    correlationId?: string
+  ): Promise<void> {
     await this.ensureConnected();
 
     if (!this.channel) {
       throw new Error('[RABBITMQ-PUBLISHER] Canal no disponible');
     }
 
-    const envelope = {
+    const envelope: EventEnvelope<VacacionesProgramadasEvent> = {
       id: `vac-${Date.now()}-${Math.floor(Math.random() * 10000)}`,
-      type: 'vacaciones.programadas',
+      type,
       version: '1.0',
       occurredAt: new Date().toISOString(),
       producer: 'vacations-service',
+      ...(correlationId && { correlationId }),
       data: {
         id: data.id,
         empleadoId: data.empleadoId,
@@ -77,7 +106,7 @@ export class RabbitMQPublisher {
     });
 
     console.log(
-      `[VACATIONS] [PUBLICADO] vacaciones.programadas | VacationPeriod: ${data.id} | Empleado: ${data.empleadoId}`
+      `[VACATIONS] [PUBLICADO] ${type} | VacationPeriod: ${data.id} | Empleado: ${data.empleadoId}`
     );
   }
 

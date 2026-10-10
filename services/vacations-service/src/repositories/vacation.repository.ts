@@ -1,6 +1,26 @@
 import prisma from '../config/db.ts';
 import type { Prisma } from '../generated/prisma/client.ts';
 
+export type VacationPeriodSortField =
+  | 'id'
+  | 'empleadoId'
+  | 'fechaInicio'
+  | 'fechaFin'
+  | 'estado'
+  | 'fechaCreacion';
+
+export interface VacationPeriodFilters {
+  empleadoId?: string;
+  estado?: string;
+}
+
+export interface VacationPeriodPagination {
+  page: number;
+  limit: number;
+  sortBy: VacationPeriodSortField;
+  order: 'asc' | 'desc';
+}
+
 export interface CreateVacationBalanceDto {
   employeeId: string;
   nombre: string;
@@ -142,12 +162,30 @@ export class VacationRepository {
     });
   }
 
-  /** Listar todos los períodos. Filtro opcional por empleadoId. */
-  async findAllPeriods(empleadoId?: string) {
-    return prisma.vacationPeriod.findMany({
-      where: empleadoId ? { empleadoId } : undefined,
-      orderBy: { fechaCreacion: 'desc' },
-    });
+  /** Listar períodos filtrados con conteo y página en una transacción Prisma. */
+  async findAllPeriods(
+    filters: VacationPeriodFilters,
+    pagination: VacationPeriodPagination
+  ) {
+    const where: Prisma.VacationPeriodWhereInput = {
+      ...(filters.empleadoId && { empleadoId: filters.empleadoId }),
+      ...(filters.estado && { estado: filters.estado }),
+    };
+    const orderBy: Prisma.VacationPeriodOrderByWithRelationInput = {
+      [pagination.sortBy]: pagination.order,
+    };
+
+    const [total, periods] = await prisma.$transaction([
+      prisma.vacationPeriod.count({ where }),
+      prisma.vacationPeriod.findMany({
+        where,
+        skip: (pagination.page - 1) * pagination.limit,
+        take: pagination.limit,
+        orderBy,
+      }),
+    ]);
+
+    return { total, periods };
   }
 
   /** Buscar un período por ID */
@@ -164,6 +202,29 @@ export class VacationRepository {
     });
   }
 
+  async updatePeriod(id: string, data: { fechaInicio: Date; fechaFin: Date }) {
+    return prisma.vacationPeriod.update({
+      where: { id },
+      data: {
+        fechaInicio: data.fechaInicio,
+        fechaFin: data.fechaFin,
+      },
+    });
+  }
+
+  async cancelPendingVacations(
+    transaction: Prisma.TransactionClient,
+    empleadoId: string
+  ) {
+    return transaction.vacationPeriod.updateMany({
+      where: {
+        empleadoId,
+        estado: 'PROGRAMADA',
+      },
+      data: { estado: 'CANCELADA' },
+    });
+  }
+
   /**
    * Detectar solapamientos con períodos PROGRAMADA o EN_CURSO para un empleado.
    * Un solapamiento existe cuando los rangos se cruzan: inicio1 <= fin2 AND fin1 >= inicio2
@@ -173,13 +234,13 @@ export class VacationRepository {
     empleadoId: string,
     fechaInicio: Date,
     fechaFin: Date,
-    excludeId?: string
+    excludePeriodId?: string
   ) {
     return prisma.vacationPeriod.findMany({
       where: {
         empleadoId,
         estado: { in: ['PROGRAMADA', 'EN_CURSO'] },
-        id: excludeId ? { not: excludeId } : undefined,
+        ...(excludePeriodId && { id: { not: excludePeriodId } }),
         AND: [
           { fechaInicio: { lte: fechaFin } },
           { fechaFin: { gte: fechaInicio } },

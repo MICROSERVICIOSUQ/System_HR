@@ -13,6 +13,8 @@ const controller = new VacationController();
 
 router.post('/', controller.createPeriod);
 router.get('/', controller.getAllPeriods);
+router.put('/:id', controller.updatePeriod);
+router.patch('/:id', controller.updatePeriod);
 router.get('/:id', controller.getPeriodById);
 router.delete('/:id', controller.deletePeriod);
 

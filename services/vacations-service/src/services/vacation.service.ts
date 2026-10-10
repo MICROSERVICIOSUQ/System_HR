@@ -1,6 +1,12 @@
-import { VacationRepository, EstadoFiltro } from '../repositories/vacation.repository.ts';
+import {
+  VacationRepository,
+  EstadoFiltro,
+  type VacationPeriodFilters,
+  type VacationPeriodSortField,
+} from '../repositories/vacation.repository.ts';
 import { RabbitMQPublisher } from '../messaging/rabbitmq.publisher.ts';
 import type { Prisma } from '../generated/prisma/client.ts';
+import type { PaginatedResponse } from '../types/pagination.ts';
 
 export interface EventEnvelope {
   id: string;
@@ -21,6 +27,20 @@ export interface EventEnvelope {
 export type ProcessingResult = 'CREATED' | 'UPDATED' | 'RETIRED' | 'DUPLICATE' | 'IGNORED' | 'ERROR';
 
 const ALLOWED_EVENTS = ['empleado.creado', 'empleado.actualizado', 'empleado.retirado'] as const;
+
+const VACATION_PERIOD_SORT_FIELDS = [
+  'id',
+  'empleadoId',
+  'fechaInicio',
+  'fechaFin',
+  'estado',
+  'fechaCreacion',
+] as const satisfies readonly VacationPeriodSortField[];
+
+const isVacationPeriodSortField = (
+  value: string | undefined
+): value is VacationPeriodSortField =>
+  value !== undefined && VACATION_PERIOD_SORT_FIELDS.some((field) => field === value);
 
 // ── DTOs de período ─────────────────────────────────────────────────────────
 
@@ -76,9 +96,12 @@ export class VacationService {
    * Programa un nuevo período de vacaciones aplicando las 4 validaciones de negocio.
    * Si todo es válido, persiste el período y publica vacaciones.programadas en RabbitMQ.
    */
-  async createPeriod(dto: CreatePeriodDto): Promise<VacationPeriodResult> {
+  async createPeriod(
+    dto: CreatePeriodDto,
+    correlationId?: string
+  ): Promise<VacationPeriodResult> {
     const today = new Date();
-    today.setHours(0, 0, 0, 0);
+    today.setUTCHours(0, 0, 0, 0);
 
     const inicio = this.parseDate(dto.fechaInicio, 'fechaInicio');
     const fin = this.parseDate(dto.fechaFin, 'fechaFin');
@@ -144,7 +167,7 @@ export class VacationService {
         fechaFin: result.fechaFin,
         estado: result.estado,
         fechaCreacion: result.fechaCreacion,
-      })
+      }, correlationId)
       .catch((err) => {
         console.error(
           `[VACATIONS] [WARN] No se pudo publicar evento para período ${result.id}:`,
@@ -155,9 +178,133 @@ export class VacationService {
     return result;
   }
 
-  async getAllPeriods(empleadoId?: string): Promise<VacationPeriodResult[]> {
-    const periods = await this.repository.findAllPeriods(empleadoId);
-    return periods.map(this.mapPeriod);
+  async getAllPeriods(
+    filters: VacationPeriodFilters,
+    pagination: {
+      page?: number;
+      limit?: number;
+      sortBy?: string;
+      order?: string;
+    } = {}
+  ): Promise<PaginatedResponse<VacationPeriodResult>> {
+    const requestedPage = pagination.page;
+    const page = requestedPage !== undefined &&
+      Number.isSafeInteger(requestedPage) &&
+      requestedPage > 0
+      ? requestedPage
+      : 1;
+    const requestedLimit = pagination.limit;
+    const validLimit = requestedLimit !== undefined &&
+      Number.isSafeInteger(requestedLimit) &&
+      requestedLimit > 0
+      ? requestedLimit
+      : 10;
+    const limit = Math.min(validLimit, 100);
+    const sortBy = isVacationPeriodSortField(pagination.sortBy)
+      ? pagination.sortBy
+      : 'fechaCreacion';
+    const order = pagination.order === 'asc' ? 'asc' : 'desc';
+
+    const { total, periods } = await this.repository.findAllPeriods(filters, {
+      page,
+      limit,
+      sortBy,
+      order,
+    });
+    const totalPages = Math.ceil(total / limit);
+
+    return {
+      data: periods.map(this.mapPeriod),
+      meta: {
+        total,
+        page,
+        limit,
+        totalPages,
+        hasNextPage: page < totalPages,
+        hasPrevPage: page > 1,
+      },
+    };
+  }
+
+  async updatePeriod(
+    id: string,
+    dto: { fechaInicio?: string; fechaFin?: string },
+    correlationId?: string
+  ): Promise<VacationPeriodResult> {
+    const existing = await this.repository.findPeriodById(id);
+    if (!existing) {
+      throw new ValidationError('Período no encontrado', 404);
+    }
+
+    if (existing.estado !== 'PROGRAMADA') {
+      throw new ValidationError('Solo se pueden reprogramar vacaciones en estado PROGRAMADA');
+    }
+
+    if (dto.fechaInicio === undefined && dto.fechaFin === undefined) {
+      throw new ValidationError('Debe proporcionar fechaInicio o fechaFin para reprogramar');
+    }
+
+    const existingStart = existing.fechaInicio.toISOString().split('T')[0];
+    const existingEnd = existing.fechaFin.toISOString().split('T')[0];
+    const fechaInicioInput = dto.fechaInicio ?? existingStart;
+    const fechaFinInput = dto.fechaFin ?? existingEnd;
+    const inicio = this.parseDate(fechaInicioInput, 'fechaInicio');
+    const fin = this.parseDate(fechaFinInput, 'fechaFin');
+
+    if (fin <= inicio) {
+      throw new ValidationError(
+        `fechaFin (${fechaFinInput}) debe ser posterior a fechaInicio (${fechaInicioInput})`
+      );
+    }
+
+    const today = new Date();
+    today.setUTCHours(0, 0, 0, 0);
+    if (inicio < today) {
+      throw new ValidationError(`fechaInicio (${fechaInicioInput}) no puede ser una fecha pasada`);
+    }
+
+    const overlaps = await this.repository.findOverlappingPeriods(
+      existing.empleadoId,
+      inicio,
+      fin,
+      id
+    );
+    if (overlaps.length > 0) {
+      const conflict = overlaps[0];
+      throw new ValidationError(
+        `El período solicitado se solapa con uno existente: ${JSON.stringify({
+          id: conflict.id,
+          empleadoId: conflict.empleadoId,
+          fechaInicio: this.mapPeriod(conflict).fechaInicio,
+          fechaFin: this.mapPeriod(conflict).fechaFin,
+          estado: conflict.estado,
+        })}`
+      );
+    }
+
+    const updated = await this.repository.updatePeriod(id, {
+      fechaInicio: inicio,
+      fechaFin: fin,
+    });
+    const result = this.mapPeriod(updated);
+
+    this.publisher
+      .publishVacacionesReprogramadas({
+        id: result.id,
+        empleadoId: result.empleadoId,
+        fechaInicio: result.fechaInicio,
+        fechaFin: result.fechaFin,
+        estado: result.estado,
+        fechaCreacion: result.fechaCreacion,
+      }, correlationId)
+      .catch((err) => {
+        console.error(
+          `[VACATIONS] [WARN] No se pudo publicar evento de reprogramación para período ${result.id}:`,
+          err.message
+        );
+      });
+
+    return result;
   }
 
   async getPeriodById(id: string): Promise<VacationPeriodResult | null> {
@@ -318,13 +465,15 @@ export class VacationService {
     _data: EventEnvelope['data'],
     transaction: Prisma.TransactionClient
   ): Promise<ProcessingResult> {
+    const cancelled = await this.repository.cancelPendingVacations(transaction, employeeId);
     const existing = await transaction.vacationBalance.findUnique({
       where: { employeeId },
     });
 
     if (!existing) {
       console.warn(
-        `[VACATIONS] [RETIRADO] Empleado no encontrado para retirar | UUID: ${eventId} | Empleado: ${employeeId}. Ignorando.`
+        `[VACATIONS] [RETIRADO] Réplica de empleado no encontrada | UUID: ${eventId} | ` +
+          `Empleado: ${employeeId}. Vacaciones PROGRAMADA canceladas: ${cancelled.count}.`
       );
       return 'IGNORED';
     }
@@ -336,7 +485,8 @@ export class VacationService {
 
     console.log(
       `[VACATIONS] [RETIRADO] Empleado marcado como RETIRADO (saldo histórico conservado) | ` +
-        `UUID: ${eventId} | Empleado: ${employeeId} | Disponibles: ${existing.diasDisponibles} | Tomados: ${existing.diasTomados}`
+        `UUID: ${eventId} | Empleado: ${employeeId} | Disponibles: ${existing.diasDisponibles} | ` +
+        `Tomados: ${existing.diasTomados} | Vacaciones PROGRAMADA canceladas: ${cancelled.count}`
     );
     return 'RETIRED';
   }

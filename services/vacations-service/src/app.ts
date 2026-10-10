@@ -1,12 +1,34 @@
 import express, { Request, Response, NextFunction } from 'express';
+import cors from 'cors';
+import { rateLimit } from 'express-rate-limit';
+import helmet from 'helmet';
 import vacationRoutes from './routes/vacation.routes.ts';
 import balanceRoutes from './routes/balance.routes.ts';
 import { VacationController } from './controllers/vacation.controller.ts';
+import { correlationMiddleware } from './middlewares/correlation.middleware.ts';
+import { idempotencyMiddleware } from './middlewares/idempotency.middleware.ts';
 
 const app = express();
 const controller = new VacationController();
+const rateLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 100,
+  standardHeaders: true,
+  legacyHeaders: false,
+  handler: (_req, res) =>
+    res.status(429).json({
+      status: 429,
+      error: 'Too Many Requests',
+      message: 'Límite de peticiones excedido. Por favor, intente más tarde.',
+    }),
+});
 
+app.use(cors());
+app.use(helmet());
+app.use(rateLimiter);
 app.use(express.json());
+app.use(correlationMiddleware);
+app.use(idempotencyMiddleware);
 
 // ── OpenAPI / Swagger ──────────────────────────────────────────────────────────
 const openApiSpec = {

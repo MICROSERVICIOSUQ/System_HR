@@ -1,6 +1,18 @@
 import type { Request, Response, NextFunction } from 'express';
 import { VacationService, ValidationError } from '../services/vacation.service.ts';
 
+const firstQueryValue = (value: unknown): string | undefined => {
+  const selected = Array.isArray(value) ? value[0] : value;
+  return selected === undefined ? undefined : String(selected);
+};
+
+const positiveIntegerQuery = (value: unknown): number | undefined => {
+  const selected = firstQueryValue(value);
+  if (selected === undefined || !/^\d+$/.test(selected)) return undefined;
+  const parsed = Number(selected);
+  return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : undefined;
+};
+
 export class VacationController {
   constructor(private readonly service = new VacationService()) {}
 
@@ -70,7 +82,10 @@ export class VacationController {
         });
       }
 
-      const period = await this.service.createPeriod({ empleadoId, fechaInicio, fechaFin });
+      const period = await this.service.createPeriod(
+        { empleadoId, fechaInicio, fechaFin },
+        res.locals.correlationId
+      );
       return res.status(201).json(period);
     } catch (error) {
       if (error instanceof ValidationError) {
@@ -90,10 +105,46 @@ export class VacationController {
    */
   getAllPeriods = async (req: Request, res: Response, next: NextFunction) => {
     try {
-      const empleadoId = req.query.empleadoId ? String(req.query.empleadoId) : undefined;
-      const periods = await this.service.getAllPeriods(empleadoId);
+      const periods = await this.service.getAllPeriods(
+        {
+          empleadoId: firstQueryValue(req.query.empleadoId),
+          estado: firstQueryValue(req.query.estado),
+        },
+        {
+          page: positiveIntegerQuery(req.query.page),
+          limit: positiveIntegerQuery(req.query.limit),
+          sortBy: firstQueryValue(req.query.sortBy),
+          order: firstQueryValue(req.query.order),
+        }
+      );
       return res.json(periods);
     } catch (error) {
+      return next(error);
+    }
+  };
+
+  /**
+   * PUT/PATCH /vacations/:id
+   * Body: { fechaInicio?, fechaFin? }
+   */
+  updatePeriod = async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const id = String(req.params.id);
+      const { fechaInicio, fechaFin } = req.body ?? {};
+      const period = await this.service.updatePeriod(
+        id,
+        { fechaInicio, fechaFin },
+        res.locals.correlationId
+      );
+      return res.json(period);
+    } catch (error) {
+      if (error instanceof ValidationError) {
+        return res.status(error.statusCode).json({
+          status: error.statusCode,
+          error: error.statusCode === 404 ? 'Not Found' : 'Bad Request',
+          message: error.message,
+        });
+      }
       return next(error);
     }
   };

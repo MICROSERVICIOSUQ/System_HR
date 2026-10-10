@@ -56,3 +56,14 @@ model ProcessedEvent {
 
   @@map("eventos_procesados")
 }
+
+model IdempotencyRecord {
+  key          String   @id
+  method       String
+  path         String
+  statusCode   Int
+  responseBody Json
+  createdAt    DateTime @default(now())
+
+  @@map("http_idempotency")
+}
