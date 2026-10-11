@@ -41,7 +41,13 @@ export const openApiSpec = {
     '/departamentos': {
       get: {
         summary: 'Listar todos los departamentos',
-        description: 'Obtiene el listado completo de los departamentos registrados, ordenados por fecha de creación descendente.',
+        description: 'Obtiene departamentos. Sin parámetros devuelve el array histórico; con page, limit, sortBy u order devuelve data/meta y ejecuta paginación en PostgreSQL.',
+        parameters: [
+          { name: 'page', in: 'query', required: false, schema: { type: 'integer', minimum: 1, default: 1 } },
+          { name: 'limit', in: 'query', required: false, schema: { type: 'integer', minimum: 1, maximum: 100, default: 10 } },
+          { name: 'sortBy', in: 'query', required: false, schema: { type: 'string', enum: ['id', 'nombre', 'descripcion', 'createdAt', 'updatedAt'], default: 'createdAt' } },
+          { name: 'order', in: 'query', required: false, schema: { type: 'string', enum: ['ASC', 'DESC'], default: 'DESC' } },
+        ],
         responses: {
           '200': {
             description: 'Listado de departamentos obtenido exitosamente',
@@ -89,6 +95,14 @@ export const openApiSpec = {
             content: {
               'application/json': {
                 schema: { $ref: '#/components/schemas/ValidationErrorResponse' },
+              },
+            },
+          },
+          '409': {
+            description: 'Ya existe un departamento con ese identificador',
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/ErrorResponse' },
               },
             },
           },
@@ -206,6 +220,61 @@ export const openApiSpec = {
           },
         },
       },
+      patch: {
+        summary: 'Actualizar parcialmente un departamento existente',
+        description: 'Actualiza el nombre o la descripción de un departamento existente. Debe indicar al menos un campo.',
+        parameters: [
+          {
+            name: 'id',
+            in: 'path',
+            required: true,
+            description: 'Identificador del departamento',
+            schema: { type: 'string', example: 'D001' },
+          },
+        ],
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': {
+              schema: { $ref: '#/components/schemas/UpdateDepartamentoDTO' },
+            },
+          },
+        },
+        responses: {
+          '200': {
+            description: 'Departamento actualizado exitosamente',
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/Departamento' },
+              },
+            },
+          },
+          '400': {
+            description: 'Datos de actualización inválidos',
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/ValidationErrorResponse' },
+              },
+            },
+          },
+          '404': {
+            description: 'Departamento no encontrado',
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/ErrorResponse' },
+              },
+            },
+          },
+          '503': {
+            description: 'Base de datos no disponible temporalmente',
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/ErrorResponse' },
+              },
+            },
+          },
+        },
+      },
       delete: {
         summary: 'Eliminar un departamento',
         description: 'Elimina permanentemente un departamento a partir de su identificador.',
@@ -232,6 +301,14 @@ export const openApiSpec = {
           },
           '404': {
             description: 'Departamento no encontrado',
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/ErrorResponse' },
+              },
+            },
+          },
+          '409': {
+            description: 'El departamento tiene empleados asociados o existe un conflicto de integridad',
             content: {
               'application/json': {
                 schema: { $ref: '#/components/schemas/ErrorResponse' },

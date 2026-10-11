@@ -1,4 +1,7 @@
 import { ProfileRepository, EstadoFiltro } from '../repositories/profile.repository.ts';
+import { ProfileError } from '../errors/profile.errors.ts';
+import { EmployeeEventPublisher } from '../messaging/employee-event.publisher.ts';
+import crypto from 'node:crypto';
 
 // ─── Tipos de eventos ────────────────────────────────────────────────────────
 
@@ -17,7 +20,7 @@ export interface EventEnvelope {
     departamentoId?: string;
     fechaIngreso?: string;
     fechaRetiro?: string | null;
-    [key: string]: any;
+    [key: string]: unknown;
   };
 }
 
@@ -30,17 +33,155 @@ const ALLOWED_EVENTS = ['empleado.creado', 'empleado.actualizado', 'empleado.ret
 // ─── Servicio principal ──────────────────────────────────────────────────────
 
 export class ProfileService {
-  constructor(private readonly repository = new ProfileRepository()) {}
+  constructor(
+    private readonly repository = new ProfileRepository(),
+    private readonly eventPublisher = new EmployeeEventPublisher(),
+  ) {}
 
   // ── Queries (Read Model) ──────────────────────────────────────────────────
 
-  async getAll(estado?: string) {
+  async getAll(
+    estado?: string,
+    pagination?: {
+      page: number;
+      limit: number;
+      sortBy: 'employeeId' | 'nombre' | 'apellido' | 'email' | 'cargo' | 'departamentoId' | 'fechaIngreso' | 'estado' | 'fechaRetiro' | 'createdAt' | 'updatedAt';
+      order: 'asc' | 'desc';
+    },
+  ) {
     const estadoFiltro = this.parseEstado(estado);
-    return this.repository.findAll(estadoFiltro);
+    const result = await this.repository.findAll(estadoFiltro, pagination);
+    if (!pagination) return result;
+
+    return {
+      data: result.data,
+      meta: {
+        total: result.total,
+        page: pagination.page,
+        limit: pagination.limit,
+        totalPages: Math.ceil(result.total / pagination.limit),
+      },
+    };
   }
 
   async getByEmployeeId(employeeId: string) {
     return this.repository.findByEmployeeId(employeeId);
+  }
+
+  async create(data: {
+    employeeId: string;
+    nombre: string;
+    apellido: string;
+    email: string;
+    cargo: string;
+    departamentoId: string;
+    fechaIngreso: string;
+    estado?: string;
+    lastEventId?: string;
+  }) {
+    this.validateRequiredFields(data, [
+      'employeeId',
+      'nombre',
+      'apellido',
+      'email',
+      'cargo',
+      'departamentoId',
+      'fechaIngreso',
+    ]);
+    this.validateEmail(data.email);
+    const eventId = data.lastEventId ?? crypto.randomUUID();
+    const existingEvent = await this.repository.findByLastEventId(eventId);
+    if (existingEvent) return existingEvent;
+
+    const existingProfile = await this.repository.findByEmployeeId(data.employeeId);
+    if (existingProfile) {
+      throw new ProfileError(409, `Ya existe un perfil para el empleado '${data.employeeId}'`);
+    }
+
+    const estado = this.parseEstado(data.estado ?? 'ACTIVO');
+    if (!estado) {
+      throw new ProfileError(400, 'Estado inválido');
+    }
+    if (estado !== 'ACTIVO') {
+      throw new ProfileError(400, 'Un perfil nuevo debe iniciar en estado ACTIVO');
+    }
+
+    return this.repository.create({
+      ...data,
+      fechaIngreso: this.parseDate(data.fechaIngreso, 'fechaIngreso'),
+      estado,
+      lastEventId: eventId,
+    });
+  }
+
+  async update(
+    employeeId: string,
+    data: {
+      nombre?: string;
+      apellido?: string;
+      email?: string;
+      cargo?: string;
+      departamentoId?: string;
+      estado?: string;
+      fechaRetiro?: string | null;
+      lastEventId?: string;
+    },
+  ) {
+    const suppliedFields = Object.entries(data).filter(
+      ([key, value]) => key !== 'lastEventId' && value !== undefined,
+    );
+    if (suppliedFields.length === 0) {
+      throw new ProfileError(400, 'Debe indicar al menos un campo para actualizar');
+    }
+    for (const [field, value] of suppliedFields) {
+      if (typeof value === 'string' && !value.trim()) {
+        throw new ProfileError(400, `${field} no puede estar vacío`);
+      }
+    }
+    if (data.email !== undefined) this.validateEmail(data.email);
+    const current = await this.repository.findByEmployeeId(employeeId);
+    if (!current) throw new ProfileError(404, `Perfil con employeeId '${employeeId}' no encontrado`);
+
+    const eventId = data.lastEventId ?? crypto.randomUUID();
+    const duplicate = await this.repository.findByLastEventId(eventId);
+    if (duplicate) return duplicate;
+
+    const nextEstado = data.estado === undefined ? current.estado : this.parseEstado(data.estado);
+    if (current.estado === 'RETIRADO' && nextEstado === 'ACTIVO') {
+      throw new ProfileError(409, 'Un perfil RETIRADO no puede volver a ACTIVO');
+    }
+
+    const transitionToRetired = current.estado !== 'RETIRADO' && nextEstado === 'RETIRADO';
+    const fechaRetiro = nextEstado === 'RETIRADO'
+      ? this.parseDate(data.fechaRetiro ?? new Date().toISOString(), 'fechaRetiro')
+      : data.fechaRetiro === null ? null : undefined;
+
+    const updated = await this.repository.update(employeeId, {
+      ...data,
+      estado: nextEstado,
+      fechaRetiro,
+      lastEventId: eventId,
+    });
+
+    if (transitionToRetired) {
+      try {
+        await this.eventPublisher.publishRetired({
+          ...updated,
+          fechaRetiro: updated.fechaRetiro ?? new Date(),
+        });
+      } catch (error) {
+        console.error('[PROFILE] No se pudo publicar empleado.retirado:', error);
+        throw new ProfileError(503, 'No se pudo publicar el evento de retiro');
+      }
+    }
+    return updated;
+  }
+
+  async retire(employeeId: string, lastEventId?: string) {
+    return this.update(employeeId, {
+      estado: 'RETIRADO',
+      lastEventId,
+    });
   }
 
   // ── Procesamiento de evento (Command side via RabbitMQ) ───────────────────
@@ -59,6 +200,15 @@ export class ProfileService {
         `[PROFILE] Evento ignorado | UUID: ${eventId} | Tipo '${eventType}' no es de interés para este servicio`
       );
       return 'IGNORED';
+    }
+
+    if (
+      typeof eventId !== 'string'
+      || !eventId.trim()
+      || typeof data?.id !== 'string'
+      || !data.id.trim()
+    ) {
+      throw new ProfileError(400, 'El evento debe incluir id y data.id');
     }
 
     // ── Idempotencia: comprobar si el eventId ya fue aplicado ────────────────
@@ -108,6 +258,15 @@ export class ProfileService {
     employeeId: string,
     data: EventEnvelope['data']
   ): Promise<ProcessingResult> {
+    this.validateRequiredFields(data, [
+      'nombre',
+      'apellido',
+      'email',
+      'cargo',
+      'departamentoId',
+    ]);
+    this.validateEmail(data.email as string);
+
     await this.repository.create({
       employeeId,
       nombre: data.nombre ?? '',
@@ -115,7 +274,9 @@ export class ProfileService {
       email: data.email ?? '',
       cargo: data.cargo ?? '',
       departamentoId: data.departamentoId ?? '',
-      fechaIngreso: data.fechaIngreso ? new Date(data.fechaIngreso) : new Date(),
+      fechaIngreso: data.fechaIngreso
+        ? this.parseDate(data.fechaIngreso, 'fechaIngreso')
+        : new Date(),
       estado: 'ACTIVO',
       lastEventId: eventId,
     });
@@ -132,6 +293,8 @@ export class ProfileService {
     employeeId: string,
     data: EventEnvelope['data']
   ): Promise<ProcessingResult> {
+    if (data.email !== undefined) this.validateEmail(data.email);
+
     // Verificar que el perfil base ya existe (puede llegar antes del creado en reentregas)
     const profile = await this.repository.findByEmployeeId(employeeId);
     if (!profile) {
@@ -140,6 +303,13 @@ export class ProfileService {
           `Creando perfil desde evento actualizado.`
       );
       // Creación defensiva si el perfil no existe aún (reordenamiento de mensajes)
+      this.validateRequiredFields(data, [
+        'nombre',
+        'apellido',
+        'email',
+        'cargo',
+        'departamentoId',
+      ]);
       await this.repository.create({
         employeeId,
         nombre: data.nombre ?? '',
@@ -147,7 +317,9 @@ export class ProfileService {
         email: data.email ?? '',
         cargo: data.cargo ?? '',
         departamentoId: data.departamentoId ?? '',
-        fechaIngreso: data.fechaIngreso ? new Date(data.fechaIngreso) : new Date(),
+        fechaIngreso: data.fechaIngreso
+          ? this.parseDate(data.fechaIngreso, 'fechaIngreso')
+          : new Date(),
         estado: 'ACTIVO',
         lastEventId: eventId,
       });
@@ -184,7 +356,9 @@ export class ProfileService {
       return 'IGNORED';
     }
 
-    const fechaRetiro = data.fechaRetiro ? new Date(data.fechaRetiro) : new Date();
+    const fechaRetiro = data.fechaRetiro
+      ? this.parseDate(data.fechaRetiro, 'fechaRetiro')
+      : new Date();
 
     await this.repository.retire(employeeId, {
       fechaRetiro,
@@ -201,7 +375,33 @@ export class ProfileService {
   // ── Helpers ───────────────────────────────────────────────────────────────
 
   private parseEstado(estado?: string): EstadoFiltro | undefined {
+    if (estado === undefined || estado.trim() === '') return undefined;
     if (estado === 'ACTIVO' || estado === 'RETIRADO') return estado;
-    return undefined;
+    throw new ProfileError(400, `Estado inválido: ${estado}. Use ACTIVO o RETIRADO`);
+  }
+
+  private parseDate(value: string, field: string): Date {
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime())) {
+      throw new ProfileError(400, `${field} debe ser una fecha válida`);
+    }
+    return date;
+  }
+
+  private validateRequiredFields(
+    data: Record<string, unknown>,
+    fields: string[],
+  ): void {
+    for (const field of fields) {
+      if (typeof data[field] !== 'string' || !data[field].trim()) {
+        throw new ProfileError(400, `${field} es obligatorio`);
+      }
+    }
+  }
+
+  private validateEmail(email: string): void {
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+      throw new ProfileError(400, 'email no tiene un formato válido');
+    }
   }
 }

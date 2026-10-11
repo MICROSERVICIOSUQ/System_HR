@@ -61,7 +61,21 @@ El microservicio expone un puerto interno a la red Docker (`expose: 8082`). No e
 |---|---|---|
 | GET | `/health` | Estado del microservicio (`{"status":"ok","service":"notifications"}`) |
 | GET | `/notifications` | Lista completa del historial de notificaciones procesadas (orden descendente) |
+| GET | `/notifications?page=1&limit=10&sortBy=processedAt&order=DESC` | Lista paginada; `limit` máximo 100 |
 | GET | `/notifications/:messageId` | Consulta una notificación por el UUID del mensaje de evento (`200` o `404`) |
+
+`NotificationHistory` es append-only. No se exponen POST, PUT, PATCH ni DELETE
+para modificar o eliminar registros: la creación ocurre exclusivamente al
+consumir eventos permitidos desde RabbitMQ, y `messageId` garantiza idempotencia.
+Las mutaciones HTTP responden `405 Method Not Allowed`.
+
+La paginación acepta `page`, `limit` (o `size`), `sortBy` y `order=ASC|DESC`.
+Los valores predeterminados son `page=1`, `limit=10`, `sortBy=processedAt` y
+`order=DESC`. Los campos ordenables son `messageId`, `eventType`, `producer`,
+`employeeId`, `employeeName`, `email` y `processedAt`. Con parámetros la
+respuesta es `{data, meta:{total,page,limit,totalPages}}`; sin parámetros se
+mantiene el array histórico. Los parámetros inválidos responden 400; las
+páginas vacías o fuera de rango devuelven `data: []`.
 
 ---
 

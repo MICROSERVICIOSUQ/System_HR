@@ -8,6 +8,10 @@ const controller = new ProfileController();
 // GET /profiles?estado=ACTIVO    → Solo activos
 // GET /profiles?estado=RETIRADO  → Solo retirados
 router.get('/', controller.getAll);
+router.post('/', controller.create);
+router.put('/:employeeId', controller.update);
+router.patch('/:employeeId', controller.update);
+router.delete('/:employeeId', controller.retire);
 
 // GET /profiles/:employeeId
 router.get('/:employeeId', controller.getByEmployeeId);

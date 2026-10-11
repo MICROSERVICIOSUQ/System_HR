@@ -3,6 +3,7 @@ import {
   EstadoFiltro,
   type VacationPeriodFilters,
   type VacationPeriodSortField,
+  type VacationBalanceSortField,
 } from '../repositories/vacation.repository.ts';
 import { RabbitMQPublisher } from '../messaging/rabbitmq.publisher.ts';
 import type { Prisma } from '../generated/prisma/client.ts';
@@ -81,9 +82,28 @@ export class VacationService {
 
   // ── Consultas VacationBalance (Read Model) ──────────────────────────────────
 
-  async getAll(estado?: string) {
+  async getAll(
+    estado?: string,
+    pagination?: {
+      page: number;
+      limit: number;
+      sortBy: VacationBalanceSortField;
+      order: 'asc' | 'desc';
+    },
+  ) {
     const estadoFiltro = this.parseEstado(estado);
-    return this.repository.findAll(estadoFiltro);
+    const result = await this.repository.findAll(estadoFiltro, pagination);
+    if (!pagination) return result;
+
+    return {
+      data: result.data,
+      meta: {
+        total: result.total,
+        page: pagination.page,
+        limit: pagination.limit,
+        totalPages: Math.ceil(result.total / pagination.limit),
+      },
+    };
   }
 
   async getByEmployeeId(employeeId: string) {
@@ -203,7 +223,7 @@ export class VacationService {
     const sortBy = isVacationPeriodSortField(pagination.sortBy)
       ? pagination.sortBy
       : 'fechaCreacion';
-    const order = pagination.order === 'asc' ? 'asc' : 'desc';
+    const order = pagination.order?.toLowerCase() === 'asc' ? 'asc' : 'desc';
 
     const { total, periods } = await this.repository.findAllPeriods(filters, {
       page,

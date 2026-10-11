@@ -18,6 +18,7 @@ import static org.hamcrest.Matchers.containsInAnyOrder;
 import static org.hamcrest.Matchers.hasSize;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
@@ -374,5 +375,82 @@ class EmployeeEndpointsTest {
         mockMvc.perform(get("/empleados/auditoria"))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.status").value(400));
+    }
+
+    @Test
+    @Order(21)
+    void updateEmployeeViaPutSuccessfully() throws Exception {
+        String updatePayload = """
+                {
+                  "cargo": "Principal Architect",
+                  "area": "Innovación"
+                }
+                """;
+
+        mockMvc.perform(put("/empleados/E099")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(updatePayload))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.id").value("E099"))
+                .andExpect(jsonPath("$.cargo").value("Principal Architect"))
+                .andExpect(jsonPath("$.area").value("Innovación"))
+                .andExpect(jsonPath("$.nombre").value("Carlos"));
+    }
+
+    @Test
+    @Order(22)
+    void updateEmployeeViaPatchSuccessfully() throws Exception {
+        String patchPayload = """
+                {
+                  "cargo": "VP of Engineering"
+                }
+                """;
+
+        mockMvc.perform(patch("/empleados/E099")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(patchPayload))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.id").value("E099"))
+                .andExpect(jsonPath("$.cargo").value("VP of Engineering"))
+                .andExpect(jsonPath("$.area").value("Innovación"));
+    }
+
+    @Test
+    @Order(23)
+    void getAllEmployeesSupportsFilteringByDepartmentStatusAndCargo() throws Exception {
+        mockMvc.perform(get("/empleados?departamentoId=IT&estado=ACTIVO"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$").isArray())
+                .andExpect(jsonPath("$[?(@.id == 'E099')]").exists())
+                .andExpect(jsonPath("$[?(@.id == 'E001')]").doesNotExist()); // E001 fue retirado en orden 19
+
+        mockMvc.perform(get("/empleados?cargo=Engineering"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$").isArray())
+                .andExpect(jsonPath("$[?(@.id == 'E099')].cargo").value("VP of Engineering"));
+    }
+
+    @Test
+    @Order(24)
+    void getAllEmployeesSupportsPagination() throws Exception {
+        mockMvc.perform(get("/empleados?page=1&limit=1&sortBy=id&order=ASC"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data").isArray())
+                .andExpect(jsonPath("$.data", hasSize(1)))
+                .andExpect(jsonPath("$.meta.total").isNumber())
+                .andExpect(jsonPath("$.meta.totalPages").isNumber());
+    }
+
+    @Test
+    @Order(25)
+    void getAllEmployeesRejectsInvalidPaginationAndSorting() throws Exception {
+        mockMvc.perform(get("/empleados?page=0&limit=10"))
+                .andExpect(status().isBadRequest());
+
+        mockMvc.perform(get("/empleados?page=1&limit=10&sortBy=password"))
+                .andExpect(status().isBadRequest());
+
+        mockMvc.perform(get("/empleados?page=1&limit=10&order=SIDEWAYS"))
+                .andExpect(status().isBadRequest());
     }
 }

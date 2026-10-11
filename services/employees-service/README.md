@@ -14,10 +14,21 @@ URL pública: `http://localhost:8080`, mediante el API Gateway. El microservicio
 | GET | `/empleados/health` | 200: salud del servicio |
 | GET | `/empleados/circuit-breaker` | 200: estado y contadores del circuito |
 | POST | `/empleados` | 201: empleado registrado + emite `empleado.creado` |
-| GET | `/empleados` | 200: listado de empleados |
+| GET | `/empleados` | 200: listado de empleados; admite filtros y paginación |
+| GET | `/empleados/auditoria?desde=YYYY-MM-DD&hasta=YYYY-MM-DD` | 200: retirados en un rango; admite paginación |
 | GET | `/empleados/{id}` | 200 o 404: consulta por identificador |
 | PUT | `/empleados/{id}` | 200: empleado actualizado + emite `empleado.actualizado` |
 | DELETE | `/empleados/{id}` | 200: retiro lógico (estado `RETIRADO`) + emite `empleado.retirado` |
+
+Los listados aceptan `page`, `limit` (el alias histórico `size` también se
+mantiene), `sortBy` y `order=ASC|DESC`. Los valores predeterminados son
+`page=1`, `limit=10`, `sortBy=id` y `order=ASC`; el límite máximo es 100.
+Los campos ordenables son `id`, `employeeNumber`, `nombre`, `apellido`, `email`,
+`cargo`, `area`, `departamentoId`, `fechaIngreso`, `fechaRetiro` y `status`.
+Cuando se envía alguno de esos parámetros la respuesta usa
+`{data,meta:{total,page,limit,totalPages}}`; sin parámetros se conserva el
+array histórico. Parámetros inválidos responden 400. Una página fuera de rango
+devuelve `data: []` y `totalPages` es 0 cuando no hay resultados.
 
 ---
 

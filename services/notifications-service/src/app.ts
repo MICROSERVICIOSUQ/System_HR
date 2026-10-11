@@ -1,6 +1,7 @@
 import express, { Request, Response, NextFunction } from 'express';
 import notificationRoutes from './routes/notification.routes.ts';
 import { NotificationController } from './controllers/notification.controller.ts';
+import { NotificationError } from './errors/notification.errors.ts';
 
 const app = express();
 const controller = new NotificationController();
@@ -25,6 +26,34 @@ app.use((_req: Request, res: Response) => {
 // Manejador global de errores
 app.use((err: any, _req: Request, res: Response, _next: NextFunction) => {
   console.error('[EXPRESS] Error no controlado:', err);
+  if (err instanceof NotificationError) {
+    return res.status(err.statusCode).json({
+      status: err.statusCode,
+      error: err.statusCode === 404
+        ? 'Not Found'
+        : err.statusCode === 409
+        ? 'Conflict'
+        : 'Bad Request',
+      message: err.message,
+    });
+  }
+
+  if (err?.code === 'P2025') {
+    return res.status(404).json({
+      status: 404,
+      error: 'Not Found',
+      message: 'Notificación no encontrada',
+    });
+  }
+
+  if (err?.code === 'P2002') {
+    return res.status(409).json({
+      status: 409,
+      error: 'Conflict',
+      message: 'El messageId ya fue procesado',
+    });
+  }
+
   res.status(500).json({
     status: 500,
     error: 'Internal Server Error',

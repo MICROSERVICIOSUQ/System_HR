@@ -7,7 +7,7 @@ export interface CreateNotificationDto {
   employeeId: string;
   employeeName: string;
   email: string;
-  payload: any;
+  payload: Record<string, unknown>;
 }
 
 export class NotificationRepository {
@@ -17,10 +17,26 @@ export class NotificationRepository {
     });
   }
 
-  async findAll() {
-    return prisma.notificationHistory.findMany({
-      orderBy: { processedAt: 'desc' },
-    });
+  async findAll(pagination?: {
+    page: number;
+    limit: number;
+    sortBy: 'messageId' | 'eventType' | 'producer' | 'employeeId' | 'employeeName' | 'email' | 'processedAt';
+    order: 'asc' | 'desc';
+  }) {
+    if (!pagination) {
+      return prisma.notificationHistory.findMany({
+        orderBy: { processedAt: 'desc' },
+      });
+    }
+
+    return prisma.$transaction([
+      prisma.notificationHistory.count(),
+      prisma.notificationHistory.findMany({
+        skip: (pagination.page - 1) * pagination.limit,
+        take: pagination.limit,
+        orderBy: { [pagination.sortBy]: pagination.order },
+      }),
+    ]).then(([total, data]) => ({ total, data }));
   }
 
   async create(data: CreateNotificationDto) {

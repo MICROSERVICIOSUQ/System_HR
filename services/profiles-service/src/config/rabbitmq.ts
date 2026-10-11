@@ -3,6 +3,7 @@ export const rabbitConfig = {
   port: parseInt(process.env.RABBITMQ_PORT || '5672', 10),
   user: process.env.RABBITMQ_USER || 'admin',
   password: process.env.RABBITMQ_PASSWORD || 'admin',
+  exchangeName: 'hr.events',
   queueName: 'profiles.queue',
   get url(): string {
     return `amqp://${this.user}:${this.password}@${this.host}:${this.port}`;

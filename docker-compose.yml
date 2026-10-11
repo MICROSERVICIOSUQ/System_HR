@@ -41,6 +41,7 @@ services:
       PORT: ${DEPARTAMENTOS_PORT:-8081}
       DATABASE_URL: postgresql://${DEPARTAMENTOS_DB_USER:-postgres}:${DEPARTAMENTOS_DB_PASSWORD:-postgres}@database-departamentos:5432/${DEPARTAMENTOS_DB_NAME:-gestion_departamentos}
       RABBITMQ_URL: amqp://${RABBITMQ_USER:-admin}:${RABBITMQ_PASSWORD:-admin}@${RABBITMQ_HOST:-rabbitmq}:${RABBITMQ_PORT:-5672}
+      EMPLOYEES_SERVICE_URL: http://employees-service:${EMPLEADOS_PORT:-8080}
     expose:
       - "${DEPARTAMENTOS_PORT:-8081}"
     restart: unless-stopped

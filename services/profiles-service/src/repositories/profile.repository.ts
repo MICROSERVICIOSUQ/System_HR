@@ -18,6 +18,8 @@ export interface UpdateProfileDto {
   email?: string;
   cargo?: string;
   departamentoId?: string;
+  estado?: string;
+  fechaRetiro?: Date | null;
   lastEventId: string;
 }
 
@@ -44,11 +46,32 @@ export class ProfileRepository {
   }
 
   /** Listar todos los perfiles, con filtro opcional por estado */
-  async findAll(estado?: EstadoFiltro) {
-    return prisma.employeeProfile.findMany({
-      where: estado ? { estado } : undefined,
-      orderBy: { updatedAt: 'desc' },
-    });
+  async findAll(
+    estado?: EstadoFiltro,
+    pagination?: {
+      page: number;
+      limit: number;
+      sortBy: 'employeeId' | 'nombre' | 'apellido' | 'email' | 'cargo' | 'departamentoId' | 'fechaIngreso' | 'estado' | 'fechaRetiro' | 'createdAt' | 'updatedAt';
+      order: 'asc' | 'desc';
+    },
+  ) {
+    const where = estado ? { estado } : undefined;
+    if (!pagination) {
+      return prisma.employeeProfile.findMany({
+        where,
+        orderBy: { updatedAt: 'desc' },
+      });
+    }
+
+    return prisma.$transaction([
+      prisma.employeeProfile.count({ where }),
+      prisma.employeeProfile.findMany({
+        where,
+        skip: (pagination.page - 1) * pagination.limit,
+        take: pagination.limit,
+        orderBy: { [pagination.sortBy]: pagination.order },
+      }),
+    ]).then(([total, data]) => ({ total, data }));
   }
 
   /** Crear un nuevo perfil de empleado */
@@ -78,6 +101,8 @@ export class ProfileRepository {
         ...(data.email !== undefined && { email: data.email }),
         ...(data.cargo !== undefined && { cargo: data.cargo }),
         ...(data.departamentoId !== undefined && { departamentoId: data.departamentoId }),
+        ...(data.estado !== undefined && { estado: data.estado }),
+        ...(data.fechaRetiro !== undefined && { fechaRetiro: data.fechaRetiro }),
         lastEventId: data.lastEventId,
       },
     });

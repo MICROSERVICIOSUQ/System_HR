@@ -1,0 +1,85 @@
+{
+  "info": {
+    "name": "perfiles-service",
+    "description": "CRUD del read model EmployeeProfile, baja lógica, paginación e idempotencia.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    { "key": "perfilesBaseUrl", "value": "http://localhost:8083" },
+    { "key": "profileEmployeeId", "value": "EMP-PROFILE-CRUD" },
+    { "key": "profileIdempotencyKey", "value": "profile-crud-create-001" }
+  ],
+  "item": [
+    {
+      "name": "1. POST /profiles",
+      "request": {
+        "method": "POST",
+        "header": [
+          { "key": "Content-Type", "value": "application/json" },
+          { "key": "Idempotency-Key", "value": "{{profileIdempotencyKey}}" }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"employeeId\": \"{{profileEmployeeId}}\",\n  \"nombre\": \"Ana\",\n  \"apellido\": \"Pardo\",\n  \"email\": \"ana.pardo@empresa.com\",\n  \"cargo\": \"Analista\",\n  \"departamentoId\": \"DEPT-R4\",\n  \"fechaIngreso\": \"2026-03-01\"\n}",
+          "options": { "raw": { "language": "json" } }
+        },
+        "url": { "raw": "{{perfilesBaseUrl}}/profiles", "host": ["{{perfilesBaseUrl}}"], "path": ["profiles"] }
+      },
+      "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": [
+        "pm.test('Status 201', () => pm.response.to.have.status(201));",
+        "pm.test('Perfil ACTIVO creado', () => pm.expect(pm.response.json().estado).to.eql('ACTIVO'));"
+      ] } }]
+    },
+    {
+      "name": "2. GET /profiles paginado",
+      "request": {
+        "method": "GET",
+        "url": { "raw": "{{perfilesBaseUrl}}/profiles?page=1&limit=10", "host": ["{{perfilesBaseUrl}}"], "path": ["profiles"], "query": [
+          { "key": "page", "value": "1" },
+          { "key": "limit", "value": "10" }
+        ] }
+      },
+      "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": [
+        "pm.test('Status 200', () => pm.response.to.have.status(200));",
+        "const body = pm.response.json();",
+        "pm.test('Devuelve data y meta', () => { pm.expect(body.data).to.be.an('array'); pm.expect(body.meta.total).to.be.a('number'); });"
+      ] } }]
+    },
+    {
+      "name": "3. GET /profiles/:employeeId",
+      "request": {
+        "method": "GET",
+        "url": { "raw": "{{perfilesBaseUrl}}/profiles/{{profileEmployeeId}}", "host": ["{{perfilesBaseUrl}}"], "path": ["profiles", "{{profileEmployeeId}}"] }
+      },
+      "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": [
+        "pm.test('Status 200', () => pm.response.to.have.status(200));",
+        "pm.test('Consulta por employeeId', () => pm.expect(pm.response.json().employeeId).to.eql(pm.collectionVariables.get('profileEmployeeId')));"
+      ] } }]
+    },
+    {
+      "name": "4. PATCH /profiles/:employeeId",
+      "request": {
+        "method": "PATCH",
+        "header": [{ "key": "Content-Type", "value": "application/json" }, { "key": "Idempotency-Key", "value": "profile-crud-update-001" }],
+        "body": { "mode": "raw", "raw": "{ \"cargo\": \"Analista Senior\" }", "options": { "raw": { "language": "json" } } },
+        "url": { "raw": "{{perfilesBaseUrl}}/profiles/{{profileEmployeeId}}", "host": ["{{perfilesBaseUrl}}"], "path": ["profiles", "{{profileEmployeeId}}"] }
+      },
+      "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": [
+        "pm.test('Status 200', () => pm.response.to.have.status(200));",
+        "pm.test('Perfil actualizado', () => pm.expect(pm.response.json().cargo).to.eql('Analista Senior'));"
+      ] } }]
+    },
+    {
+      "name": "5. DELETE /profiles/:employeeId (baja lógica)",
+      "request": {
+        "method": "DELETE",
+        "header": [{ "key": "Idempotency-Key", "value": "profile-crud-retire-001" }],
+        "url": { "raw": "{{perfilesBaseUrl}}/profiles/{{profileEmployeeId}}", "host": ["{{perfilesBaseUrl}}"], "path": ["profiles", "{{profileEmployeeId}}"] }
+      },
+      "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": [
+        "pm.test('Status 200', () => pm.response.to.have.status(200));",
+        "pm.test('Perfil RETIRADO y conservado', () => { const p = pm.response.json(); pm.expect(p.estado).to.eql('RETIRADO'); pm.expect(p.fechaRetiro).to.exist; });"
+      ] } }]
+    }
+  ]
+}

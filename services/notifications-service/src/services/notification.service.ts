@@ -1,4 +1,5 @@
 import { NotificationRepository } from '../repositories/notification.repository.ts';
+import { NotificationError } from '../errors/notification.errors.ts';
 
 export interface EventEnvelope {
   id: string;
@@ -15,7 +16,7 @@ export interface EventEnvelope {
     cargo?: string;
     fechaIngreso?: string;
     fechaRetiro?: string | null;
-    [key: string]: any;
+    [key: string]: unknown;
   };
 }
 
@@ -24,11 +25,30 @@ export type ProcessingResult = 'PROCESSED' | 'DUPLICATE' | 'IGNORED' | 'ERROR';
 export class NotificationService {
   constructor(private readonly repository = new NotificationRepository()) {}
 
-  async getAll() {
-    return this.repository.findAll();
+  async getAll(pagination?: {
+    page: number;
+    limit: number;
+    sortBy: 'messageId' | 'eventType' | 'producer' | 'employeeId' | 'employeeName' | 'email' | 'processedAt';
+    order: 'asc' | 'desc';
+  }) {
+    const result = await this.repository.findAll(pagination);
+    if (!pagination) return result;
+
+    return {
+      data: result.data,
+      meta: {
+        total: result.total,
+        page: pagination.page,
+        limit: pagination.limit,
+        totalPages: Math.ceil(result.total / pagination.limit),
+      },
+    };
   }
 
   async getByMessageId(messageId: string) {
+    if (!messageId.trim()) {
+      throw new NotificationError(400, 'messageId es obligatorio');
+    }
     return this.repository.findByMessageId(messageId);
   }
 
@@ -42,6 +62,16 @@ export class NotificationService {
     if (!allowedEvents.includes(eventType)) {
       console.log(`[NOTIFICATIONS] Evento ignorado | UUID: ${messageId} | Tipo '${eventType}' no es de interés para este servicio`);
       return 'IGNORED';
+    }
+
+    if (
+      typeof messageId !== 'string'
+      || !messageId.trim()
+      || typeof eventType !== 'string'
+      || typeof data?.id !== 'string'
+      || !data.id.trim()
+    ) {
+      throw new NotificationError(400, 'El evento debe incluir id, type y data.id');
     }
 
     const employeeId = data?.id ?? 'UNKNOWN';

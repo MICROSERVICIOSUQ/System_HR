@@ -46,6 +46,17 @@ export interface RetireVacationDto {
 }
 
 export type EstadoFiltro = 'ACTIVO' | 'RETIRADO';
+export type VacationBalanceSortField =
+  | 'employeeId'
+  | 'nombre'
+  | 'apellido'
+  | 'email'
+  | 'departamentoId'
+  | 'diasDisponibles'
+  | 'diasTomados'
+  | 'estadoEmpleado'
+  | 'updatedAt';
+type VacationBalanceRecord = Awaited<ReturnType<typeof prisma.vacationBalance.findMany>>[number];
 
 // ── DTOs para VacationPeriod ─────────────────────────────────────────────────
 
@@ -91,11 +102,42 @@ export class VacationRepository {
   }
 
   /** Listar saldos de vacaciones con filtro opcional por estadoEmpleado */
-  async findAll(estado?: EstadoFiltro) {
-    return prisma.vacationBalance.findMany({
-      where: estado ? { estadoEmpleado: estado } : undefined,
-      orderBy: { updatedAt: 'desc' },
-    });
+  async findAll(estado?: EstadoFiltro): Promise<VacationBalanceRecord[]>;
+  async findAll(
+    estado?: EstadoFiltro,
+    pagination?: {
+      page: number;
+      limit: number;
+      sortBy: VacationBalanceSortField;
+      order: 'asc' | 'desc';
+    },
+  ): Promise<{ total: number; data: VacationBalanceRecord[] }>;
+  async findAll(
+    estado?: EstadoFiltro,
+    pagination?: {
+      page: number;
+      limit: number;
+      sortBy: VacationBalanceSortField;
+      order: 'asc' | 'desc';
+    },
+  ): Promise<VacationBalanceRecord[] | { total: number; data: VacationBalanceRecord[] }> {
+    const where = estado ? { estadoEmpleado: estado } : undefined;
+    if (!pagination) {
+      return prisma.vacationBalance.findMany({
+        where,
+        orderBy: { updatedAt: 'desc' },
+      });
+    }
+
+    return prisma.$transaction([
+      prisma.vacationBalance.count({ where }),
+      prisma.vacationBalance.findMany({
+        where,
+        skip: (pagination.page - 1) * pagination.limit,
+        take: pagination.limit,
+        orderBy: { [pagination.sortBy]: pagination.order },
+      }),
+    ]).then(([total, data]) => ({ total, data }));
   }
 
   /** Crear un nuevo registro de saldo de vacaciones */

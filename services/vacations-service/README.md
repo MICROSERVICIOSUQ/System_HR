@@ -9,17 +9,26 @@ La ruta canónica es `/vacaciones`; `/vacations` se conserva como alias.
 | Recurso | Método y ruta | Descripción |
 |---|---|---|
 | Períodos | `POST /vacaciones` | Programa un período y publica `vacaciones.programadas` |
-| Períodos | `GET /vacaciones` | Lista períodos |
+| Períodos | `GET /vacaciones?page=1&limit=10&sortBy=fechaCreacion&order=DESC` | Lista períodos paginada |
 | Períodos | `GET /vacaciones?empleadoId={id}` | Filtra por empleado |
 | Períodos | `GET /vacaciones/{id}` | Consulta por ID |
 | Períodos | `DELETE /vacaciones/{id}` | Cancela períodos cuya fecha de inicio aún es futura |
-| Saldos | `GET /vacaciones/balances` | Lista saldos; admite `?estado=ACTIVO` o `?estado=RETIRADO` |
+| Saldos | `GET /vacaciones/balances?page=1&limit=10&sortBy=updatedAt&order=DESC` | Lista saldos; admite `?estado=ACTIVO` o `?estado=RETIRADO` |
 | Saldos | `GET /vacaciones/balances/{employeeId}` | Consulta el saldo de un empleado |
 
 - Swagger UI: `http://localhost:8080/vacaciones/docs`
 - Especificación OpenAPI JSON: `http://localhost:8080/vacaciones/openapi.json` (también disponible en `/api-docs`)
 
 La especificación documenta el `200` esperado por el contrato del reto y el `201` que devuelve actualmente el `POST`. Asimismo, el reto solicita `400` para empleado inexistente, pero la implementación actual responde `404`; ambas respuestas están señaladas en OpenAPI.
+
+Los listados aceptan `page`, `limit`, `sortBy` y `order=ASC|DESC`, con
+`page=1`, `limit=10` y máximo de 100. Para períodos se permiten
+`id`, `empleadoId`, `fechaInicio`, `fechaFin`, `estado` y `fechaCreacion`;
+para saldos, `employeeId`, `nombre`, `apellido`, `email`, `departamentoId`,
+`diasDisponibles`, `diasTomados`, `estadoEmpleado` y `updatedAt`. Las
+respuestas paginadas usan `{data, meta:{total,page,limit,totalPages}}`.
+Sin parámetros se conserva el array existente. Parámetros inválidos responden
+400; páginas fuera de rango devuelven `data: []`.
 
 ## Justificación técnica: validación de empleados
 

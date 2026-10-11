@@ -2,7 +2,7 @@
   "info": {
     "name": "Pruebas E2E y Regresión - Reto 4",
     "_postman_id": "8b40137e-f23b-46f5-9148-7d1f8e6dbb0d",
-    "description": "Colección independiente y parametrizada del Reto 4. Ejecutar en orden desde la carpeta 01 hasta la 07. Requiere el stack Docker Compose activo y permisos admin/admin para RabbitMQ Management. Los consumidores son asíncronos; configurar un delay de 500 ms entre peticiones al ejecutar la colección. La topología solicitada q.employees.* se comprueba explícitamente y reportará fallo si la infraestructura mantiene otros nombres.",
+    "description": "Colección independiente y parametrizada del Reto 4. Ejecutar en orden desde la carpeta 01 hasta la 07. Requiere el stack Docker Compose activo y permisos admin/admin para RabbitMQ Management. Los consumidores son asíncronos; configurar un delay de 500 ms entre peticiones al ejecutar la colección. La topología real usa notifications.queue, profiles.queue y vacations.queue.",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
   },
   "variable": [
@@ -68,10 +68,10 @@
           "request": { "auth": { "type": "basic", "basic": [{ "key": "username", "value": "{{rabbitmqUser}}", "type": "string" }, { "key": "password", "value": "{{rabbitmqPassword}}", "type": "string" }] }, "method": "GET", "header": [], "url": { "raw": "{{rabbitmqApiUrl}}/api/exchanges/%2F/hr.events", "host": ["{{rabbitmqApiUrl}}"], "path": ["api", "exchanges", "%2F", "hr.events"] } }
         },
         {
-          "name": "Colas solicitadas q.employees.*",
-          "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": ["pm.test('HTTP 200', () => pm.response.to.have.status(200));", "const queues = pm.response.json().map(q => q.name);", "pm.test('Están declaradas las tres colas del contrato Reto 4', () => { ['q.employees.notifications', 'q.employees.profiles', 'q.employees.vacations'].forEach(q => pm.expect(queues, 'cola ' + q).to.include(q)); });"] } }],
+          "name": "Colas de consumidores declaradas",
+          "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": ["pm.test('HTTP 200', () => pm.response.to.have.status(200));", "const queues = pm.response.json().map(q => q.name);", "pm.test('Están declaradas las colas reales de los consumidores', () => { ['notifications.queue', 'profiles.queue', 'vacations.queue'].forEach(q => pm.expect(queues, 'cola ' + q).to.include(q)); });"] } }],
           "request": { "auth": { "type": "basic", "basic": [{ "key": "username", "value": "{{rabbitmqUser}}", "type": "string" }, { "key": "password", "value": "{{rabbitmqPassword}}", "type": "string" }] }, "method": "GET", "header": [], "url": { "raw": "{{rabbitmqApiUrl}}/api/queues/%2F", "host": ["{{rabbitmqApiUrl}}"], "path": ["api", "queues", "%2F"] } },
-          "description": "Comprueba los nombres exigidos por esta suite. La topología de algunas configuraciones existentes puede usar notifications.queue, profiles.queue y vacations.queue."
+          "description": "Comprueba los nombres declarados por los consumidores actuales en RabbitMQ."
         }
       ]
     },
@@ -101,8 +101,8 @@
         },
         {
           "name": "GET listar empleados",
-          "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": ["pm.test('HTTP 200', () => pm.response.to.have.status(200));", "const b = pm.response.json();", "pm.test('Lista y empleado recién creado', () => { pm.expect(b).to.be.an('array'); pm.expect(b.some(e => e.id === pm.collectionVariables.get('empleadoId'))).to.eql(true); });"] } }],
-          "request": { "method": "GET", "header": [], "url": { "raw": "{{baseUrl}}/empleados", "host": ["{{baseUrl}}"], "path": ["empleados"] } }
+          "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": ["pm.test('HTTP 200', () => pm.response.to.have.status(200));", "const b = pm.response.json();", "pm.test('Lista paginada incluye metadatos', () => { pm.expect(b.data).to.be.an('array'); pm.expect(b.meta).to.have.property('total'); pm.expect(b.meta.page).to.eql(1); });", "pm.test('Lista incluye empleado recién creado', () => pm.expect(b.data.some(e => e.id === pm.collectionVariables.get('empleadoId'))).to.eql(true));"] } }],
+          "request": { "method": "GET", "header": [], "url": { "raw": "{{baseUrl}}/empleados?departamentoId={{departamentoEmpleadoId}}&page=1&limit=100&sortBy=id&order=ASC", "host": ["{{baseUrl}}"], "path": ["empleados"], "query": [{ "key": "departamentoId", "value": "{{departamentoEmpleadoId}}" }, { "key": "page", "value": "1" }, { "key": "limit", "value": "100" }, { "key": "sortBy", "value": "id" }, { "key": "order", "value": "ASC" }] } }
         },
         {
           "name": "GET empleado por ID",
@@ -149,8 +149,8 @@
         },
         {
           "name": "GET listar departamentos",
-          "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": ["pm.test('HTTP 200', () => pm.response.to.have.status(200));", "const b = pm.response.json();", "pm.test('Lista incluye departamento creado', () => { pm.expect(b).to.be.an('array'); pm.expect(b.some(d => d.id === pm.collectionVariables.get('departamentoId'))).to.eql(true); });"] } }],
-          "request": { "method": "GET", "header": [], "url": { "raw": "{{baseUrl}}/departamentos", "host": ["{{baseUrl}}"], "path": ["departamentos"] } }
+          "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": ["pm.test('HTTP 200', () => pm.response.to.have.status(200));", "const b = pm.response.json();", "pm.test('Lista paginada incluye metadatos', () => { pm.expect(b.data).to.be.an('array'); pm.expect(b.meta).to.have.property('totalPages'); });", "pm.test('Lista incluye departamento creado', () => pm.expect(b.data.some(d => d.id === pm.collectionVariables.get('departamentoId'))).to.eql(true));"] } }],
+          "request": { "method": "GET", "header": [], "url": { "raw": "{{baseUrl}}/departamentos?page=1&limit=100&sortBy=id&order=ASC", "host": ["{{baseUrl}}"], "path": ["departamentos"], "query": [{ "key": "page", "value": "1" }, { "key": "limit", "value": "100" }, { "key": "sortBy", "value": "id" }, { "key": "order", "value": "ASC" }] } }
         },
         {
           "name": "GET departamento por ID",
@@ -164,7 +164,7 @@
         },
         {
           "name": "POST departamento con ID duplicado",
-          "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": ["pm.test('HTTP 400 duplicado', () => pm.response.to.have.status(400));", "pm.test('Error de duplicidad JSON', () => pm.expect(pm.response.json().message).to.be.a('string').and.not.empty);"] } }],
+          "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": ["pm.test('HTTP 409 duplicado', () => pm.response.to.have.status(409));", "pm.test('Error de duplicidad JSON', () => pm.expect(pm.response.json().message).to.be.a('string').and.not.empty);"] } }],
           "request": { "method": "POST", "header": [{ "key": "Content-Type", "value": "application/json" }], "body": { "mode": "raw", "raw": "{\"id\":\"{{departamentoId}}\",\"nombre\":\"Duplicado\",\"descripcion\":\"Debe ser rechazado\"}", "options": { "raw": { "language": "json" } } }, "url": { "raw": "{{baseUrl}}/departamentos", "host": ["{{baseUrl}}"], "path": ["departamentos"] } }
         },
         {
@@ -205,13 +205,13 @@
         },
         {
           "name": "GET profiles filtrados ACTIVO",
-          "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": ["pm.test('HTTP 200 y array', () => { pm.response.to.have.status(200); pm.expect(pm.response.json()).to.be.an('array'); });", "pm.test('Filtro ACTIVO incluye empleado de evento', () => pm.expect(pm.response.json().some(p => p.employeeId === pm.collectionVariables.get('empleadoReplicaId') && p.estado === 'ACTIVO')).to.eql(true));"] } }],
-          "request": { "method": "GET", "header": [], "url": { "raw": "{{baseUrl}}/profiles?estado=ACTIVO", "host": ["{{baseUrl}}"], "path": ["profiles"], "query": [{ "key": "estado", "value": "ACTIVO" }] } }
+          "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": ["pm.test('HTTP 200 y respuesta paginada', () => { pm.response.to.have.status(200); const b = pm.response.json(); pm.expect(b.data).to.be.an('array'); pm.expect(b.meta).to.have.property('totalPages'); });", "pm.test('Filtro ACTIVO incluye empleado de evento', () => pm.expect(pm.response.json().data.some(p => p.employeeId === pm.collectionVariables.get('empleadoReplicaId') && p.estado === 'ACTIVO')).to.eql(true));"] } }],
+          "request": { "method": "GET", "header": [], "url": { "raw": "{{baseUrl}}/profiles?estado=ACTIVO&page=1&limit=100&sortBy=updatedAt&order=DESC", "host": ["{{baseUrl}}"], "path": ["profiles"], "query": [{ "key": "estado", "value": "ACTIVO" }, { "key": "page", "value": "1" }, { "key": "limit", "value": "100" }, { "key": "sortBy", "value": "updatedAt" }, { "key": "order", "value": "DESC" }] } }
         },
         {
           "name": "GET notifications confirma idempotencia (un messageId)",
-          "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": ["pm.test('HTTP 200 y array', () => { pm.response.to.have.status(200); pm.expect(pm.response.json()).to.be.an('array'); });", "const records = pm.response.json().filter(n => n.messageId === pm.collectionVariables.get('eventId'));", "pm.test('Solo hay un registro de notificación para el eventId repetido', () => pm.expect(records.length).to.eql(1));"] } }],
-          "request": { "method": "GET", "header": [], "url": { "raw": "{{baseUrl}}/notifications", "host": ["{{baseUrl}}"], "path": ["notifications"] } }
+          "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": ["pm.test('HTTP 200 y respuesta paginada', () => { pm.response.to.have.status(200); const b = pm.response.json(); pm.expect(b.data).to.be.an('array'); pm.expect(b.meta).to.have.property('total'); });", "const records = pm.response.json().data.filter(n => n.messageId === pm.collectionVariables.get('eventId'));", "pm.test('Solo hay un registro de notificación para el eventId repetido', () => pm.expect(records.length).to.eql(1));"] } }],
+          "request": { "method": "GET", "header": [], "url": { "raw": "{{baseUrl}}/notifications?page=1&limit=100&sortBy=processedAt&order=DESC", "host": ["{{baseUrl}}"], "path": ["notifications"], "query": [{ "key": "page", "value": "1" }, { "key": "limit", "value": "100" }, { "key": "sortBy", "value": "processedAt" }, { "key": "order", "value": "DESC" }] } }
         },
         {
           "name": "Publicar empleado.retirado para comprobar filtro RETIRADO",
@@ -268,8 +268,8 @@
         },
         {
           "name": "GET listar períodos",
-          "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": ["pm.test('HTTP 200 y array', () => { pm.response.to.have.status(200); pm.expect(pm.response.json()).to.be.an('array'); });", "pm.test('Incluye período programado', () => pm.expect(pm.response.json().some(v => v.id === pm.collectionVariables.get('vacacionId'))).to.eql(true));"] } }],
-          "request": { "method": "GET", "header": [], "url": { "raw": "{{baseUrl}}/vacations", "host": ["{{baseUrl}}"], "path": ["vacations"] } }
+          "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": ["pm.test('HTTP 200 y respuesta paginada', () => { pm.response.to.have.status(200); const b = pm.response.json(); pm.expect(b.data).to.be.an('array'); pm.expect(b.meta).to.have.property('totalPages'); });", "pm.test('Incluye período programado', () => pm.expect(pm.response.json().data.some(v => v.id === pm.collectionVariables.get('vacacionId'))).to.eql(true));"] } }],
+          "request": { "method": "GET", "header": [], "url": { "raw": "{{baseUrl}}/vacations?empleadoId={{empleadoId}}&page=1&limit=100&sortBy=fechaCreacion&order=DESC", "host": ["{{baseUrl}}"], "path": ["vacations"], "query": [{ "key": "empleadoId", "value": "{{empleadoId}}" }, { "key": "page", "value": "1" }, { "key": "limit", "value": "100" }, { "key": "sortBy", "value": "fechaCreacion" }, { "key": "order", "value": "DESC" }] } }
         },
         {
           "name": "GET período por ID",

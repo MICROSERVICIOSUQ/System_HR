@@ -1,16 +1,54 @@
 import type { Request, Response, NextFunction } from 'express';
 import { VacationService, ValidationError } from '../services/vacation.service.ts';
+import type { VacationBalanceSortField, VacationPeriodSortField } from '../repositories/vacation.repository.ts';
 
 const firstQueryValue = (value: unknown): string | undefined => {
   const selected = Array.isArray(value) ? value[0] : value;
   return selected === undefined ? undefined : String(selected);
 };
 
-const positiveIntegerQuery = (value: unknown): number | undefined => {
+const requiredPositiveIntegerQuery = (
+  value: unknown,
+  name: string,
+  defaultValue: number,
+): number => {
   const selected = firstQueryValue(value);
-  if (selected === undefined || !/^\d+$/.test(selected)) return undefined;
+  if (selected === undefined) return defaultValue;
+  if (!/^\d+$/.test(selected)) {
+    throw new ValidationError(`${name} debe ser un entero positivo`);
+  }
   const parsed = Number(selected);
-  return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : undefined;
+  if (!Number.isSafeInteger(parsed) || parsed < 1) {
+    throw new ValidationError(`${name} debe ser un entero positivo`);
+  }
+  return parsed;
+};
+
+const parseLimit = (value: unknown): number => {
+  const limit = requiredPositiveIntegerQuery(value, 'limit', 10);
+  if (limit > 100) throw new ValidationError('limit no puede ser mayor que 100');
+  return limit;
+};
+
+const parseOrder = (value: unknown): 'asc' | 'desc' => {
+  const selected = (firstQueryValue(value) ?? 'DESC').toUpperCase();
+  if (selected !== 'ASC' && selected !== 'DESC') {
+    throw new ValidationError('order debe ser ASC o DESC');
+  }
+  return selected.toLowerCase() as 'asc' | 'desc';
+};
+
+const parseSortBy = <T extends string>(
+  value: unknown,
+  allowed: readonly T[],
+  defaultValue: T,
+): T => {
+  const selected = firstQueryValue(value);
+  if (selected === undefined) return defaultValue;
+  if (!allowed.includes(selected as T)) {
+    throw new ValidationError(`sortBy no permitido. Valores: ${allowed.join(', ')}`);
+  }
+  return selected as T;
 };
 
 export class VacationController {
@@ -35,7 +73,23 @@ export class VacationController {
         ? String(req.query.estado)
         : undefined;
 
-      const balances = await this.service.getAll(estado);
+      const hasPagination = ['page', 'limit', 'size', 'sortBy', 'order'].some(
+        (key) => req.query[key] !== undefined,
+      );
+      const pagination = hasPagination
+        ? {
+            page: requiredPositiveIntegerQuery(req.query.page, 'page', 1),
+            limit: parseLimit(req.query.limit ?? req.query.size),
+            sortBy: parseSortBy<VacationBalanceSortField>(
+              req.query.sortBy,
+              ['employeeId', 'nombre', 'apellido', 'email', 'departamentoId', 'diasDisponibles', 'diasTomados', 'estadoEmpleado', 'updatedAt'],
+              'updatedAt',
+            ),
+            order: parseOrder(req.query.order),
+          }
+        : undefined;
+
+      const balances = await this.service.getAll(estado, pagination);
       return res.json(balances);
     } catch (error) {
       return next(error);
@@ -105,16 +159,27 @@ export class VacationController {
    */
   getAllPeriods = async (req: Request, res: Response, next: NextFunction) => {
     try {
+      const hasPagination = ['page', 'limit', 'sortBy', 'order'].some(
+        (key) => req.query[key] !== undefined,
+      );
       const periods = await this.service.getAllPeriods(
         {
           empleadoId: firstQueryValue(req.query.empleadoId),
           estado: firstQueryValue(req.query.estado),
         },
         {
-          page: positiveIntegerQuery(req.query.page),
-          limit: positiveIntegerQuery(req.query.limit),
-          sortBy: firstQueryValue(req.query.sortBy),
-          order: firstQueryValue(req.query.order),
+          page: hasPagination
+            ? requiredPositiveIntegerQuery(req.query.page, 'page', 1)
+            : undefined,
+          limit: hasPagination ? parseLimit(req.query.limit) : undefined,
+          sortBy: hasPagination
+            ? parseSortBy<VacationPeriodSortField>(
+                req.query.sortBy,
+                ['id', 'empleadoId', 'fechaInicio', 'fechaFin', 'estado', 'fechaCreacion'],
+                'fechaCreacion',
+              )
+            : undefined,
+          order: hasPagination ? parseOrder(req.query.order) : undefined,
         }
       );
       return res.json(periods);

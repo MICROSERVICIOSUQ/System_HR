@@ -5,6 +5,7 @@ import helmet from 'helmet';
 import vacationRoutes from './routes/vacation.routes.ts';
 import balanceRoutes from './routes/balance.routes.ts';
 import { VacationController } from './controllers/vacation.controller.ts';
+import { ValidationError } from './services/vacation.service.ts';
 import { correlationMiddleware } from './middlewares/correlation.middleware.ts';
 import { idempotencyMiddleware } from './middlewares/idempotency.middleware.ts';
 
@@ -302,6 +303,13 @@ app.use((_req: Request, res: Response) => {
 // Manejador global de errores
 app.use((err: any, _req: Request, res: Response, _next: NextFunction) => {
   console.error('[VACATIONS] [ERROR] Error no controlado:', err);
+  if (err instanceof ValidationError) {
+    return res.status(err.statusCode).json({
+      status: err.statusCode,
+      error: err.statusCode === 404 ? 'Not Found' : 'Bad Request',
+      message: err.message,
+    });
+  }
   res.status(500).json({
     status: 500,
     error: 'Internal Server Error',

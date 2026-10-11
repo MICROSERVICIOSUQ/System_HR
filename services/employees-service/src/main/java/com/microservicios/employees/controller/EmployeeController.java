@@ -17,7 +17,6 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
 import java.time.LocalDate;
-import java.util.List;
 import java.util.Map;
 
 @RestController
@@ -58,15 +57,44 @@ public class EmployeeController {
     }
 
     @GetMapping
-    @Operation(summary = "Listar todos los empleados", description = "Obtiene la lista completa de empleados registrados en el sistema.")
+    @Operation(summary = "Listar todos los empleados", description = "Obtiene la lista de empleados registrados en el sistema, con filtros opcionales por departamento, estado, cargo y paginación.")
     @ApiResponses({
             @ApiResponse(responseCode = "200", description = "Lista de empleados obtenida exitosamente",
                     content = @Content(array = @ArraySchema(schema = @Schema(implementation = Employee.class)))),
             @ApiResponse(responseCode = "503", description = "Base de datos no disponible",
                     content = @Content(schema = @Schema(implementation = ErrorResponse.class)))
     })
-    public ResponseEntity<List<Employee>> getAll() {
-        return ResponseEntity.ok(service.findAll());
+    public ResponseEntity<?> getAll(
+            @Parameter(description = "Filtrar por identificador de departamento", example = "D001")
+            @RequestParam(required = false) String departamentoId,
+            @Parameter(description = "Filtrar por estado del empleado (ACTIVO o RETIRADO)", example = "ACTIVO")
+            @RequestParam(required = false) String estado,
+            @Parameter(description = "Filtrar por cargo (búsqueda parcial)", example = "Desarrollador")
+            @RequestParam(required = false) String cargo,
+            @Parameter(description = "Número de página (base 1)", example = "1")
+            @RequestParam(required = false) Integer page,
+            @Parameter(description = "Tamaño de página", example = "10")
+            @RequestParam(required = false) Integer size,
+            @Parameter(description = "Alias compatible para size", hidden = true)
+            @RequestParam(required = false) Integer limit,
+            @Parameter(description = "Campo permitido para ordenar", example = "id")
+            @RequestParam(required = false) String sortBy,
+            @Parameter(description = "Dirección de ordenamiento: ASC o DESC", example = "DESC")
+            @RequestParam(required = false) String order) {
+        Integer effectiveSize = (size != null) ? size : limit;
+        com.microservicios.employees.model.EmployeeStatus statusEnum = parseStatus(estado);
+        return ResponseEntity.ok(service.findAll(departamentoId, statusEnum, cargo, page, effectiveSize, sortBy, order));
+    }
+
+    private com.microservicios.employees.model.EmployeeStatus parseStatus(String estado) {
+        if (estado == null || estado.isBlank()) return null;
+        String trimmed = estado.trim();
+        for (com.microservicios.employees.model.EmployeeStatus s : com.microservicios.employees.model.EmployeeStatus.values()) {
+            if (s.name().equalsIgnoreCase(trimmed) || s.jsonValue().equalsIgnoreCase(trimmed)) {
+                return s;
+            }
+        }
+        throw new IllegalArgumentException("Estado de empleado no válido: " + estado);
     }
 
     @GetMapping("/auditoria")
@@ -80,7 +108,7 @@ public class EmployeeController {
             @ApiResponse(responseCode = "503", description = "Base de datos no disponible",
                     content = @Content(schema = @Schema(implementation = ErrorResponse.class)))
     })
-    public ResponseEntity<List<Employee>> getAuditoria(
+    public ResponseEntity<?> getAuditoria(
             @Parameter(description = "Fecha inicial del rango (formato yyyy-MM-dd)", example = "2026-01-01")
             @RequestParam(name = "desde", required = false)
             @DateTimeFormat(iso = DateTimeFormat.ISO.DATE)
@@ -99,12 +127,16 @@ public class EmployeeController {
             @Parameter(hidden = true)
             @RequestParam(name = "fechaFin", required = false)
             @DateTimeFormat(iso = DateTimeFormat.ISO.DATE)
-            LocalDate fechaFin) {
+            LocalDate fechaFin,
+            @RequestParam(required = false) Integer page,
+            @RequestParam(required = false) Integer limit,
+            @RequestParam(required = false) String sortBy,
+            @RequestParam(required = false) String order) {
 
         LocalDate fechaDesde = (desde != null) ? desde : fechaInicio;
         LocalDate fechaHasta = (hasta != null) ? hasta : fechaFin;
 
-        return ResponseEntity.ok(service.findAuditoria(fechaDesde, fechaHasta));
+        return ResponseEntity.ok(service.findAuditoria(fechaDesde, fechaHasta, page, limit, sortBy, order));
     }
 
     @GetMapping("/{id}")
@@ -123,9 +155,9 @@ public class EmployeeController {
         return ResponseEntity.ok(service.findById(id));
     }
 
-    @PutMapping("/{id}")
-    @Operation(summary = "Actualizar datos de un empleado",
-            description = "Actualiza la información del empleado y publica el evento de dominio 'empleado.actualizado'.")
+    @RequestMapping(value = "/{id}", method = {RequestMethod.PUT, RequestMethod.PATCH})
+    @Operation(summary = "Actualizar datos de un empleado (PUT o PATCH)",
+            description = "Actualiza la información del empleado y publica el evento de dominio 'empleado.actualizado'. Soporta tanto PUT como PATCH.")
     @ApiResponses({
             @ApiResponse(responseCode = "200", description = "Empleado actualizado exitosamente",
                     content = @Content(schema = @Schema(implementation = Employee.class))),

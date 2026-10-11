@@ -25,6 +25,36 @@ app.use((_req: Request, res: Response) => {
 // Manejador global de errores
 app.use((err: any, _req: Request, res: Response, _next: NextFunction) => {
   console.error('[PROFILE] [ERROR] Error no controlado:', err);
+  if (err?.name === 'ProfileError') {
+    return res.status(err.statusCode).json({
+      status: err.statusCode,
+      error: err.statusCode === 404
+        ? 'Not Found'
+        : err.statusCode === 409
+        ? 'Conflict'
+        : err.statusCode === 503
+        ? 'Service Unavailable'
+        : 'Bad Request',
+      message: err.message,
+    });
+  }
+
+  if (err?.code === 'P2002') {
+    return res.status(409).json({
+      status: 409,
+      error: 'Conflict',
+      message: 'El identificador o la clave de idempotencia ya existe',
+    });
+  }
+
+  if (err?.code === 'P2025') {
+    return res.status(404).json({
+      status: 404,
+      error: 'Not Found',
+      message: 'Perfil no encontrado',
+    });
+  }
+
   res.status(500).json({
     status: 500,
     error: 'Internal Server Error',

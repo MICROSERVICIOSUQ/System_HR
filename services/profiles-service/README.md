@@ -2,7 +2,9 @@
 
 Microservicio desarrollado con **Node.js 22**, **TypeScript**, **Express**, **Prisma** y **PostgreSQL**.
 
-Implementa un **Read Model CQRS**: proyección desnormalizada de empleados construida **exclusivamente** mediante eventos de RabbitMQ. Nunca consulta a `employees-service`.
+Implementa un **Read Model CQRS**: proyección desnormalizada de empleados
+construida principalmente mediante eventos de RabbitMQ. También expone operaciones
+HTTP de administración sobre la proyección; nunca consulta a `employees-service`.
 
 ---
 
@@ -34,7 +36,7 @@ Implementa un **Read Model CQRS**: proyección desnormalizada de empleados const
 
 | Aspecto | Detalle |
 |---|---|
-| **Escritura** | Exclusivamente por eventos de RabbitMQ (`profiles.queue`) |
+| **Escritura** | Eventos de RabbitMQ (`profiles.queue`) y CRUD HTTP administrativo |
 | **Lectura** | API REST sobre PostgreSQL — sin llamar a otros servicios |
 | **Consistencia** | Eventual — el estado se construye proyectando eventos |
 | **Sin acoplamiento** | Cero llamadas HTTP a `employees-service` |
@@ -91,10 +93,29 @@ El servicio está **expuesto internamente** a la red Docker (`expose: 8083`). No
 | Método | Ruta | Descripción |
 |---|---|---|
 | `GET` | `/health` | Estado del servicio `{"status":"ok","service":"profiles"}` |
+| `POST` | `/profiles` | Crea una proyección de perfil (`Idempotency-Key` opcional) |
 | `GET` | `/profiles` | Todos los perfiles (sin filtro) |
 | `GET` | `/profiles?estado=ACTIVO` | Solo perfiles activos |
 | `GET` | `/profiles?estado=RETIRADO` | Solo perfiles retirados |
+| `GET` | `/profiles?page=1&limit=10&sortBy=updatedAt&order=DESC` | Página de perfiles; `limit` máximo 100 |
 | `GET` | `/profiles/:employeeId` | Perfil individual por ID de empleado (`200` o `404`) |
+| `PUT/PATCH` | `/profiles/:employeeId` | Actualiza datos y valida transiciones de estado |
+| `DELETE` | `/profiles/:employeeId` | Baja lógica: conserva el perfil y lo marca `RETIRADO` |
+
+Las actualizaciones aceptan `Idempotency-Key`. Repetir una operación con la misma
+clave devuelve la proyección ya persistida sin aplicarla de nuevo. Un perfil
+`RETIRADO` no puede volver a `ACTIVO`. Cuando una operación HTTP cambia el estado
+a `RETIRADO`, se publica un evento `empleado.retirado` en el exchange existente
+`hr.events`; el consumidor conserva `fechaRetiro` y nunca elimina el registro.
+
+La paginación acepta `page`, `limit` (o el alias histórico `size`), `sortBy` y
+`order=ASC|DESC`. Los valores predeterminados son `page=1`, `limit=10`,
+`sortBy=updatedAt` y `order=DESC`. Se permiten `employeeId`, `nombre`,
+`apellido`, `email`, `cargo`, `departamentoId`, `fechaIngreso`, `estado`,
+`fechaRetiro`, `createdAt` y `updatedAt`. Las respuestas paginadas usan
+`{data, meta:{total,page,limit,totalPages}}`; sin parámetros se conserva el
+array histórico. Parámetros inválidos responden 400, una página fuera de rango
+devuelve `data: []` y `totalPages` es 0 si no hay resultados.
 
 ---
 

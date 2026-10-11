@@ -12,9 +12,23 @@ URL pública: `http://localhost:8080`, mediante el Gateway. El puerto interno pr
 | GET | `/departamentos` | 200: listado |
 | GET | `/departamentos/{id}` | 200 o 404 |
 | PUT | `/departamentos/{id}` | 200: actualizado |
+| PATCH | `/departamentos/{id}` | 200: actualizado parcialmente |
 | DELETE | `/departamentos/{id}` | 204: eliminado |
 
-Los datos inválidos producen 400 y la indisponibilidad de persistencia produce 503.
+El listado admite `page`, `limit`, `sortBy` y `order=ASC|DESC`. Los valores
+predeterminados son `page=1`, `limit=10`, `sortBy=createdAt` y `order=DESC`;
+`limit` acepta como máximo 100. Los campos ordenables son `id`, `nombre`,
+`descripcion`, `createdAt` y `updatedAt`. Cuando se envía alguno de estos
+parámetros, la respuesta es `{data, meta}`; sin ellos se conserva el listado
+en formato array por compatibilidad. Una página vacía devuelve `data: []`;
+`totalPages` es 0 cuando no hay resultados y una página fuera de rango también
+devuelve `data: []` sin error.
+
+Los datos inválidos producen 400, los duplicados producen 409 y la indisponibilidad de
+persistencia o de la consulta de empleados produce 503. `PUT` y `PATCH` aceptan
+`nombre`, `descripcion` o ambos, pero al menos uno es obligatorio.
+No se puede eliminar un departamento que tenga empleados asociados; esa operación
+responde 409.
 
 ## Modelo
 
