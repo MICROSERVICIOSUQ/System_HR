@@ -167,6 +167,131 @@
         }
       },
       "response": []
+    },
+    {
+      "name": "6. POST /departamentos duplicado",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('Status 409 Conflict', () => pm.response.to.have.status(409));",
+              "pm.test('Indica conflicto de identificador', () => {",
+              "    pm.expect(pm.response.json().message).to.include('Ya existe');",
+              "});"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "POST",
+        "header": [{ "key": "Content-Type", "value": "application/json" }],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"id\": \"RRHH\",\n  \"nombre\": \"Recursos Humanos\",\n  \"descripcion\": \"Duplicado\"\n}",
+          "options": { "raw": { "language": "json" } }
+        },
+        "url": {
+          "raw": "{{departamentosBaseUrl}}/departamentos",
+          "host": ["{{departamentosBaseUrl}}"],
+          "path": ["departamentos"]
+        }
+      },
+      "response": []
+    },
+    {
+      "name": "7. PUT /departamentos/{id}",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('Status 200', () => pm.response.to.have.status(200));",
+              "pm.test('Actualiza nombre y descripción', () => {",
+              "    const d = pm.response.json();",
+              "    pm.expect(d.nombre).to.eql('Gestión Humana');",
+              "    pm.expect(d.descripcion).to.eql('Gestión integral del talento');",
+              "});"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "PUT",
+        "header": [{ "key": "Content-Type", "value": "application/json" }],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"nombre\": \"Gestión Humana\",\n  \"descripcion\": \"Gestión integral del talento\"\n}",
+          "options": { "raw": { "language": "json" } }
+        },
+        "url": {
+          "raw": "{{departamentosBaseUrl}}/departamentos/RRHH",
+          "host": ["{{departamentosBaseUrl}}"],
+          "path": ["departamentos", "RRHH"]
+        }
+      },
+      "response": []
+    },
+    {
+      "name": "8. PATCH /departamentos/{id}",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('Status 200', () => pm.response.to.have.status(200));",
+              "pm.test('Actualiza parcialmente la descripción', () => {",
+              "    const d = pm.response.json();",
+              "    pm.expect(d.nombre).to.eql('Gestión Humana');",
+              "    pm.expect(d.descripcion).to.eql('Gestión humana y nómina');",
+              "});"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "PATCH",
+        "header": [{ "key": "Content-Type", "value": "application/json" }],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"descripcion\": \"Gestión humana y nómina\"\n}",
+          "options": { "raw": { "language": "json" } }
+        },
+        "url": {
+          "raw": "{{departamentosBaseUrl}}/departamentos/RRHH",
+          "host": ["{{departamentosBaseUrl}}"],
+          "path": ["departamentos", "RRHH"]
+        }
+      },
+      "response": []
+    },
+    {
+      "name": "9. DELETE /departamentos/{id}",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('Status 204 No Content', () => pm.response.to.have.status(204));"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "DELETE",
+        "header": [],
+        "url": {
+          "raw": "{{departamentosBaseUrl}}/departamentos/RRHH",
+          "host": ["{{departamentosBaseUrl}}"],
+          "path": ["departamentos", "RRHH"]
+        },
+        "description": "Devuelve 409 si RRHH tiene empleados asociados; solo elimina si no hay relaciones."
+      },
+      "response": []
     }
   ]
 }

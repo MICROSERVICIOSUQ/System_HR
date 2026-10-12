@@ -1,509 +1,394 @@
-# Sistema de Recursos Humanos
+# Sistema de Recursos Humanos — System_HR (Reto 3 y Reto 4)
 
-Plataforma de microservicios para la gestion de recursos humanos.
+Sistema empresarial de gestión de empleados y departamentos basado en **Arquitectura de Microservicios**, combinando comunicación síncrona protegida mediante **Circuit Breaker** (Reto 3) con comunicación asíncrona desacoplada mediante **RabbitMQ y Arquitectura Orientada a Eventos** (Reto 4).
 
-## Estructura
+---
+
+# PARTE I — Reto 3: Comunicación Síncrona, API Gateway y Resiliencia
+
+## Arquitectura Síncrona
 
 ```text
-sistema_rrhh/
-|-- services/              Microservicios independientes
-|-- api-gateway/           Punto de entrada comun
-|-- infrastructure/       Bases de datos, scripts y configuracion auxiliar
-|-- tests/                 Pruebas que involucran varios servicios
-|-- docs/                  Arquitectura, diagramas y decisiones tecnicas
-|-- docker-compose.yml     Orquestacion del entorno completo
-|-- .env.example           Variables de entorno de referencia
+Cliente HTTP
+    │ http://localhost:8080
+    ▼
+API Gateway
+    ├── /empleados y /empleados/** ────────► employees-service
+    │                                         │
+    │                                         ├── PostgreSQL empleados
+    │                                         │
+    │                                         └── Circuit Breaker + reintentos
+    │                                                      │
+    └── /departamentos y /departamentos/** ───► departments-service
+                                                           │
+                                                           └── PostgreSQL departamentos
 ```
 
-## Microservicios
+Solo el Gateway publica un puerto al host. Los servicios de negocio usan `expose` y las bases de datos no publican puertos. Cada servicio mantiene su propio modelo, reglas y migraciones.
 
-| Servicio | Tecnologia | Puerto local | Persistencia | Documentación Swagger UI |
-|---|---|---:|---|---|
-| departments-service | Node.js, TypeScript, Prisma | 8081 | PostgreSQL propia | [Swagger UI (localhost:8081/docs)](http://localhost:8081/docs) |
-| employees-service | Java 21, Spring Boot | 8080 | PostgreSQL propia | [Swagger UI (localhost:8080/swagger-ui.html)](http://localhost:8080/swagger-ui.html) |
+## Servicios y Tecnologías (Núcleo Síncrono)
 
-Cada microservicio mantiene su propio codigo, reglas de negocio, contrato HTTP y esquema de persistencia. Las bases de datos no se comparten entre servicios.
-
-## Documentación con OpenAPI (Swagger)
-
-En cumplimiento con el principio de **autonomía de los microservicios**, cada servicio es autodescriptivo (*self-describing*) y expone de forma desacoplada su contrato OpenAPI 3.0 y su interfaz gráfica de Swagger UI. Esto garantiza que cualquier servicio pueda ser probado, consumido o integrado de manera independiente en otros ecosistemas:
-
-| Microservicio | Interfaz Gráfica (Swagger UI) | Especificación JSON (OpenAPI 3.0) | Librería utilizada |
+| Servicio | Tecnología | Puerto interno predeterminado | Acceso desde el host |
 |---|---|---|---|
-| **`departments-service`** | [http://localhost:8081/docs](http://localhost:8081/docs) | [http://localhost:8081/docs/openapi.json](http://localhost:8081/docs/openapi.json) | `swagger-ui-express` |
-| **`employees-service`** | [http://localhost:8080/swagger-ui.html](http://localhost:8080/swagger-ui.html) | [http://localhost:8080/v3/api-docs](http://localhost:8080/v3/api-docs) | `springdoc-openapi-starter-webmvc-ui` |
+| api-gateway | Java 17, Spring Boot y Spring Cloud Gateway | 8080 | 8080 |
+| employees-service | Java 21, Spring Boot, JPA y Resilience4j | 8080 | Mediante Gateway |
+| departments-service | Node.js 22, TypeScript, Express y Prisma | 8081 | Mediante Gateway |
+| database-empleados | PostgreSQL 16 | 5432 | Sin puerto publicado |
+| database-departamentos | PostgreSQL 16 | 5432 | Sin puerto publicado |
 
-Cada interfaz permite probar interactivamente los endpoints y documenta:
-- Propósito detallado de cada operación y parámetros requeridos.
-- Códigos de respuesta HTTP posibles (`200 OK`, `201 Created`, `204 No Content`, `400 Bad Request`, `404 Not Found`, `503 Service Unavailable`).
-- Esquemas de datos (*Schemas*) para las cargas útiles de entrada (*request bodies*) y modelos de dominio de salida con ejemplos.
+El Gateway y empleados pueden usar el mismo puerto interno porque se ejecutan en contenedores distintos.
 
-## Despliegue y Puesta en Marcha desde Cero
+### Elección del Gateway
 
-Para que cualquier desarrollador o evaluador clone el repositorio y levante el sistema completo sin requerir pasos manuales adicionales:
+Se utiliza Spring Cloud Gateway porque es un Gateway de aplicación, permite configurar rutas y añadir código para responsabilidades transversales. En esta entrega enruta solicitudes y controla errores de conexión; permite incorporar autenticación y autorización en retos posteriores. Las reglas de registro y validación permanecen en los servicios.
 
-### 1. Clonar el repositorio y preparar variables de entorno
+## URL Base y Rutas Síncronas
+
+URL pública única: `http://localhost:8080`.
+
+| Ruta externa | Destino predeterminado | Uso |
+|---|---|---|
+| `/health` | Gateway | Salud propia del Gateway |
+| `/empleados` y `/empleados/**` | `http://employees-service:8080` | API de empleados |
+| `/departamentos` y `/departamentos/**` | `http://departments-service:8081` | API de departamentos |
+| `/empleados/health` | employees-service | Salud de empleados |
+| `/empleados/circuit-breaker` | employees-service | Estado y contadores del circuito |
+
+El Gateway conserva las rutas de negocio y propaga cuerpos, cabeceras de aplicación y códigos de respuesta. Si no puede comunicarse con el destino o vence el timeout, devuelve `503` con un JSON descriptivo.
+
+Las interfaces Swagger y las especificaciones OpenAPI siguen disponibles dentro de cada servicio, pero sus rutas no están publicadas por el Gateway actual. El `/health` interno de departamentos tampoco se enruta como una ruta pública: Compose lo utiliza dentro del contenedor.
+
+## Circuit Breaker (Resilience4j)
+
+La llamada de empleados a departamentos está protegida por Resilience4j. `DepartmentClient` ejecuta la operación mediante el circuito; `DepartmentHttpClient` realiza la consulta HTTP y sus reintentos. Las validaciones de duplicados y la persistencia quedan fuera del circuito de departamentos.
+
+| Parámetro | Valor |
+|---|---|
+| Nombre | `departmentsCircuitBreaker` |
+| Ventana | Últimas 3 operaciones |
+| Mínimo para evaluar | 3 operaciones |
+| Umbral de fallos | 100 %: tres operaciones consecutivas fallidas |
+| Espera en OPEN | 30 segundos |
+| Operaciones de prueba en HALF_OPEN | 1 |
+| Timeout de conexión HTTP | 3 segundos |
+| Timeout de lectura HTTP | 5 segundos |
+| Intentos por operación | 4 en total |
+| Esperas entre intentos | 1, 2 y 4 segundos |
+
+Una operación con sus reintentos agotados cuenta como un fallo del circuito. En OPEN se rechaza la consulta sin llamar a departamentos. Después de 30 segundos pasa a HALF_OPEN; si la operación de prueba obtiene una respuesta válida, cierra; si falla por indisponibilidad, vuelve a abrir.
+
+Se eligieron tres fallos para detectar una caída sostenida después de los reintentos, y 30 segundos para permitir la recuperación sin consultar continuamente la dependencia. Una sola operación de prueba limita la carga durante la recuperación.
+
+Un departamento inexistente devuelve un 404 desde departamentos: es una comunicación exitosa. Empleados lo traduce en `400` por regla de negocio, sin contarlo como caída del servicio.
+
+Consulta del estado:
 
 ```bash
-git clone <url-del-repositorio>
-cd sistema_rrhh
-
-# Crear el archivo de entorno local a partir del ejemplo
-cp .env.example .env     # En Linux / macOS / Git Bash
-copy .env.example .env   # En Windows PowerShell / CMD
+curl -s http://localhost:8080/empleados/circuit-breaker
 ```
 
-### 2. Iniciar el entorno completo
+También se registran las transiciones CLOSED, OPEN y HALF_OPEN en los logs de empleados.
 
-```bash
-docker compose up --build
+## Estrategia de Fallback
+
+Si departamentos no está disponible o el circuito está abierto, el registro devuelve `503 Service Unavailable`, con el mensaje:
+
+```json
+{"message":"El servicio de departamentos no está disponible temporalmente"}
 ```
 
-Al ejecutar este comando:
-1. Docker descarga y levanta las bases de datos PostgreSQL independientes (`database-departamentos` y `database-empleados`).
-2. Se evalúan los health checks de PostgreSQL con `pg_isready` hasta que ambas bases estén listas.
-3. Se compilan y construyen las imágenes de los microservicios.
-4. Los esquemas y tablas de ambas bases de datos se crean automáticamente durante el arranque de cada servicio (mediante migraciones versionadas).
-5. Las APIs quedan publicadas en los puertos del host: `8081` (Departamentos) y `8080` (Empleados).
+Este es el mensaje relevante; la respuesta incluye también `timestamp`, `status`, `error` y `path`.
 
-### 3. Verificar el estado del sistema
+Se prioriza la consistencia: no se guarda un empleado cuyo departamento no pudo validarse. El usuario debe reintentar después de la recuperación. No se crean registros pendientes y, por tanto, no se necesita reconciliación de esos registros. Las consultas que no dependen de departamentos pueden seguir funcionando si la base de empleados está disponible.
+
+## Prueba Reproducible del Reto 3
+
+Con los servicios saludables y el circuito cerrado, desde la raíz del repositorio:
 
 ```bash
+python3 tests/reto3_smoke.py
+```
+
+El script crea datos con identificadores nuevos, detiene departamentos, comprueba los errores del Gateway y ejecuta ocho intentos de registro. Después restaura departamentos y verifica la recuperación automática. No elimina datos ni volúmenes; deja los registros de prueba creados durante la etapa saludable.
+
+Para guardar la salida como evidencia:
+
+```bash
+python3 tests/reto3_smoke.py > reto3-evidencia.jsonl
+```
+
+Para demostrar también el rechazo de conexiones directas en un entorno donde esos puertos no estén ocupados por otros programas:
+
+```bash
+curl -i --max-time 5 http://localhost:8081/departamentos
+curl -i --max-time 5 http://localhost:8082/empleados
+```
+
+Ambas conexiones deben rechazarse. El script además verifica que los contenedores reales de negocio no tienen puertos publicados.
+
+## Resultados Verificados del Reto 3
+
+En la ejecución del 22 de septiembre de 2026, realizada con contenedores y volúmenes de prueba aislados:
+
+| Comprobación | Resultado |
+|---|---|
+| Pruebas automatizadas del Gateway | 6 aprobadas |
+| Pruebas automatizadas de empleados | 23 aprobadas |
+| Registro con el sistema saludable | 201 |
+| Destino caído a través del Gateway | 503 con JSON |
+| Primeros tres registros con departamentos caído | 19,04 s; 18,03 s; 12,02 s |
+| Registros siguientes con circuito abierto | Aproximadamente 0,010 s |
+| Acceso directo a 8081 y 8082 | Conexión rechazada |
+| Recuperación automática | OPEN → HALF_OPEN → CLOSED |
+| Registro con departamento inexistente tras recuperarse | 400 por departamento inexistente |
+
+---
+
+# PARTE II — Reto 4: Arquitectura Orientada a Eventos y Mensajería Asíncrona
+
+## 1. Descripción y Objetivos del Reto 4
+
+El **Reto 4** incorpora comunicación asíncrona desacoplada mediante **RabbitMQ** bajo el patrón **Event-Driven Architecture (EDA)** y el modelo **CQRS (Read Model)**.
+
+El sistema demuestra y valida los siguientes principios:
+* **API Gateway como único punto de entrada:** Control perimetral centralizado.
+* **Microservicios independientes:** Separación de dominios con ciclos de vida y despliegues autónomos.
+* **Database-per-Service:** Cada microservicio gestiona su propia base PostgreSQL independiente.
+* **Comunicación asíncrona Fanout:** Transmisión 1 a N de eventos de dominio a múltiples consumidores simultáneos.
+* **Idempotencia en consumidores:** Manejo seguro de reentregas de red mediante llaves de evento (`lastEventId`) e índices únicos.
+
+## 2. Arquitectura General del Reto 4
+
+```text
+                         Cliente
+                            │
+                    http://localhost:8080
+                            │
+                 API Gateway (Spring Boot)
+              ┌─────────────┴─────────────┐
+              │                           │
+      Employees Service          Departments Service
+              │                           │
+              │ HTTP                      │
+              └───────────────┐           │
+                              │
+                      RabbitMQ Exchange
+                         hr.events
+                         (Fanout)
+      ┌───────────────┬───────────────┬───────────────┐
+      │               │               │
+Notifications     Profiles      Vacations
+      │               │               │
+  PostgreSQL      PostgreSQL     PostgreSQL
+```
+
+### Principios Fundamentales
+* **Único puerto público:** Solo el API Gateway publica el puerto `8080` hacia el host.
+* **Aislamiento entre consumidores:** `notifications-service`, `profiles-service` y `vacations-service` nunca se llaman entre sí; consumen eventos de forma completamente asíncrona.
+* **Bases de datos independientes:** Cada consumidor persiste exclusivamente en su propia base de datos PostgreSQL.
+
+## 3. Catálogo Completo de Microservicios
+
+| Servicio | Tecnología | Puerto interno | Base de datos | Rol en Reto 4 |
+|---|---|---|---|---|
+| api-gateway | Spring Boot | 8080 | No | Enrutamiento perimetral |
+| employees-service | Spring Boot | 8080 | PostgreSQL | Productor de eventos de dominio |
+| departments-service | Node + Prisma | 8081 | PostgreSQL | Catálogo de departamentos |
+| notifications-service | Node + Prisma | 8082 | PostgreSQL | Consumidor asíncrono (notificaciones) |
+| profiles-service | Node + Prisma | 8083 | PostgreSQL | Consumidor asíncrono (Read Model CQRS) |
+| vacations-service | Node + Prisma | 8084 | PostgreSQL | Consumidor asíncrono (saldo vacaciones) |
+| rabbitmq | RabbitMQ Management | 5672 | No | Message Broker AMQP |
+
+> [!NOTE]
+> **Solo el puerto 8080 es público** (API Gateway). Los servicios de negocio operan aislados mediante la directiva `expose` en la red interna de Docker (`sistema_rrhh_network`).
+
+## 4. Infraestructura RabbitMQ
+
+### Exchange
+
+| Nombre | Tipo | Durabilidad |
+|---|---|---|
+| hr.events | Fanout | Durable |
+
+### Colas
+
+| Cola | Consumidor | Enlace (Binding) |
+|---|---|---|
+| notifications.queue | notifications-service | Vinculada a `hr.events` |
+| profiles.queue | profiles-service | Vinculada a `hr.events` |
+| vacations.queue | vacations-service | Vinculada a `hr.events` |
+
+> **Funcionamiento Fanout:** El exchange `hr.events` duplica automáticamente cada evento emitido hacia las tres colas suscritas. La *routing key* siempre es vacía (`""`), pues el enrutamiento es de difusión global.
+
+## 5. Catálogo de Eventos
+
+| Evento | Productor | Consumidores | Descripción |
+|---|---|---|---|
+| empleado.creado | employees-service | notifications, profiles, vacations | Alta de nuevo empleado |
+| empleado.actualizado | employees-service | notifications, profiles, vacations | Modificación de datos del empleado |
+| empleado.retirado | employees-service | notifications, profiles, vacations | Retiro lógico del empleado |
+
+### Estructura del Event Envelope
+
+Todos los mensajes transmitidos en RabbitMQ viajan bajo el sobre estándar canónico:
+
+```json
+{
+  "id": "550e8400-e29b-41d4-a716-446655440000",
+  "type": "empleado.creado",
+  "version": "1.0",
+  "occurredAt": "2026-09-28T20:00:00Z",
+  "producer": "employees-service",
+  "data": {
+    "id": "E001",
+    "nombre": "Juan",
+    "apellido": "Perez",
+    "email": "juan@empresa.com",
+    "cargo": "Developer",
+    "departamentoId": "D001"
+  }
+}
+```
+
+## 6. Organización del Proyecto
+
+```text
+System_HR/
+├── api-gateway/
+├── services/
+│   ├── employees-service/
+│   ├── departments-service/
+│   ├── notifications-service/
+│   ├── profiles-service/
+│   └── vacations-service/
+├── infrastructure/
+│   ├── databases/
+│   └── rabbitmq/
+├── shared-events/
+│   ├── catalog/
+│   ├── schemas/
+│   └── docs/
+├── docs/
+│   ├── architecture/
+│   ├── decisions/
+│   └── evidencias/
+├── postman/
+├── tests/
+├── docker-compose.yml
+└── README.md
+```
+
+* **`api-gateway/`**: Gateway de entrada basado en Spring Cloud Gateway.
+* **`services/`**: Código fuente de los microservicios de dominio (Productores y Consumidores).
+* **`infrastructure/`**: Definiciones de Docker Compose para bases PostgreSQL y RabbitMQ.
+* **`shared-events/`**: Repositorio de especificaciones, contratos de eventos y JSON Schemas compartidos.
+* **`docs/decisions/`**: Registros formales de decisiones de arquitectura (ADR).
+* **`postman/`**: Colecciones y entornos de Postman para pruebas de integración de API.
+* **`tests/`**: Scripts automatizados de pruebas de humo y validación de resiliencia.
+
+## 7. Cómo Ejecutar el Sistema Completo
+
+### Requisitos previos
+* **Docker Desktop** (con soporte para Docker Compose v2 e `include`).
+
+### Comandos principales
+
+```bash
+# Iniciar todos los contenedores en segundo plano
+docker compose up --build -d
+
+# Verificar estado y healthchecks
 docker compose ps
+
+# Detener el sistema conservando los volúmenes de datos
+docker compose down
 ```
 
-Comprobar la disponibilidad con los endpoints de salud:
+### URLs y Accesos Principales
 
+| Recurso | URL | Credenciales |
+|---|---|---|
+| API Gateway | [http://localhost:8080](http://localhost:8080) | N/A |
+| RabbitMQ Management | [http://localhost:15672](http://localhost:15672) | `admin` / `admin` |
+| Health Gateway | [http://localhost:8080/health](http://localhost:8080/health) | N/A |
+
+## 8. Cómo Probar el Sistema (Guía Paso a Paso)
+
+### Prueba 1 — Crear un Departamento
 ```bash
-# Salud del servicio de Departamentos
-curl -s http://localhost:8081/health
-
-# Salud del servicio de Empleados
-curl -s http://localhost:8080/empleados/health
+curl -i -X POST http://localhost:8080/departamentos \
+  -H "Content-Type: application/json" \
+  -d '{"nombre": "Tecnología", "codigo": "DEP-TEC"}'
 ```
+* **Esperado:** Código HTTP `201 Created`.
 
-### 4. Detener o reiniciar el entorno
-
-* **Detener servicios conservando datos:**
-  ```bash
-  docker compose down
-  ```
-* **Reiniciar desde cero eliminando volúmenes de base de datos:**
-  ```bash
-  docker compose down -v
-  docker compose up --build
-  ```
-
----
-
-## Evidencias
-
-Salida real de terminal, capturada el 2026-09-15 sobre este repositorio. En la
-máquina donde se capturó, el puerto 8080 estaba ocupado por otro proceso, así que
-`employees-service` se publicó con `EMPLEADOS_PORT=8080` (equivale a fijarlo en
-`.env`); nada más cambia. El volumen `softwareiii_postgres_data` que aparece en los
-listados pertenece a otro proyecto de la misma máquina y es ajeno a este sistema.
-
-### Persistencia: `down` conserva los datos, `down -v` los destruye
-
-**1. Arranque limpio y siembra de datos**
-
-```console
-$ docker compose down -v
- Volume gestion-departamentos_postgres_data Removed
- Volume gestion-empleados_postgres_data Removed
- Network sistema_rrhh_network Removed
-
-$ docker compose up --build -d
-Container system_hr-database-empleados-1 Started
-Container system_hr-database-departamentos-1 Started
-Container system_hr-database-departamentos-1 Healthy
-Container system_hr-departments-service-1 Started
-Container system_hr-database-empleados-1 Healthy
-Container system_hr-departments-service-1 Healthy
-Container system_hr-employees-service-1 Started
-
-$ curl -X POST /departamentos  {"id":"IT",...}
-{"id":"IT","nombre":"Tecnología","descripcion":"Departamento de TI","createdAt":"2026-09-16T02:17:14.009Z","updatedAt":"2026-09-16T02:17:14.009Z"}   -> HTTP 201
-
-$ curl -X POST /empleados  {"id":"E001",...,"departamentoId":"IT"}
-{"id":"E001","nombre":"Juan","apellido":"Pérez","email":"juan.perez@empresa.com","cargo":"Desarrollador Senior","area":"Tecnología","departamentoId":"IT","fechaIngreso":"2026-02-10","estado":"ACTIVO","numeroEmpleado":"EMP-2026-001"}   -> HTTP 201
+### Prueba 2 — Crear un Empleado
+```bash
+curl -i -X POST http://localhost:8080/empleados \
+  -H "Content-Type: application/json" \
+  -d '{
+    "nombre": "Juan",
+    "apellido": "Perez",
+    "email": "juan.perez@empresa.com",
+    "cargo": "Developer",
+    "departamentoId": "<ID_DEPARTAMENTO_CREADO>"
+  }'
 ```
+* **Esperado:** Código HTTP `201 Created` y publicación automática de `empleado.creado` en RabbitMQ.
 
-**2. `down` sin `-v` → `up -d` → el empleado sobrevive**
+### Prueba 3 — Verificar RabbitMQ
+Ingresar a la consola en [http://localhost:15672](http://localhost:15672) (`admin` / `admin`) → Pestaña **Queues**.
+* **Esperado:**
+  * `notifications.queue` → `Ready = 0` (mensaje consumido con ACK).
+  * `profiles.queue` → `Ready = 0`.
+  * `vacations.queue` → `Ready = 0`.
 
-```console
-$ docker compose down
-Container system_hr-employees-service-1 Removed
-Container system_hr-departments-service-1 Removed
-Container system_hr-database-empleados-1 Removed
-Container system_hr-database-departamentos-1 Removed
-Network sistema_rrhh_network Removed
-
-$ docker volume ls | grep postgres_data
-gestion-departamentos_postgres_data
-gestion-empleados_postgres_data
-softwareiii_postgres_data
-
-$ docker compose up -d
-Container system_hr-database-empleados-1 Started
-Container system_hr-database-departamentos-1 Started
-Container system_hr-database-departamentos-1 Healthy
-Container system_hr-departments-service-1 Started
-Container system_hr-database-empleados-1 Healthy
-Container system_hr-departments-service-1 Healthy
-Container system_hr-employees-service-1 Started
-
-$ curl /empleados/E001
-{"id":"E001","nombre":"Juan","apellido":"Pérez","email":"juan.perez@empresa.com","cargo":"Desarrollador Senior","area":"Tecnología","departamentoId":"IT","fechaIngreso":"2026-02-10","estado":"ACTIVO","numeroEmpleado":"EMP-2026-001"}   -> HTTP 200
+### Prueba 4 — Ver Notifications
+```bash
+docker compose exec notifications-service curl -s http://localhost:8082/notifications
 ```
+* **Esperado:** Historial con la notificación de bienvenida registrada.
 
-Los contenedores se destruyeron y se recrearon; los volúmenes no se tocaron y
-`E001` sigue ahí.
-
-**3. `down -v` → `up -d --build` → el empleado desaparece**
-
-```console
-$ docker compose down -v
-Container system_hr-employees-service-1 Removed
-Container system_hr-database-empleados-1 Removed
-Container system_hr-departments-service-1 Removed
-Container system_hr-database-departamentos-1 Removed
-Volume gestion-empleados_postgres_data Removed
-Volume gestion-departamentos_postgres_data Removed
-Network sistema_rrhh_network Removed
-
-$ docker volume ls | grep postgres_data
-softwareiii_postgres_data
-
-$ docker compose up -d --build
-Container system_hr-database-departamentos-1 Started
-Container system_hr-database-empleados-1 Started
-Container system_hr-database-departamentos-1 Healthy
-Container system_hr-departments-service-1 Started
-Container system_hr-database-empleados-1 Healthy
-Container system_hr-departments-service-1 Healthy
-Container system_hr-employees-service-1 Started
-
-$ curl /empleados/E001
-{"timestamp":"2026-09-16T02:18:29.034525442Z","status":404,"error":"Not Found","message":"El empleado con id E001 no existe","path":"/empleados/E001"}   -> HTTP 404
+### Prueba 5 — Ver Profiles (Read Model CQRS)
+```bash
+docker compose exec profiles-service curl -s http://localhost:8083/profiles
 ```
+* **Esperado:** Lista de perfiles con el empleado creado y estado `ACTIVO`.
 
-Con `-v` los dos volúmenes se eliminaron; las migraciones recrearon el esquema
-vacío y `E001` ya no existe.
-
-### Arranque ordenado: los cuatro servicios `healthy`
-
-Tras `docker compose down -v && docker compose up --build`:
-
-```console
-$ docker compose ps
-NAME                                 STATUS                    PORTS
-system_hr-database-departamentos-1   Up 25 seconds (healthy)   5432/tcp
-system_hr-database-empleados-1       Up 25 seconds (healthy)   5432/tcp
-system_hr-departments-service-1      Up 19 seconds (healthy)   0.0.0.0:8081->8081/tcp, [::]:8081->8081/tcp
-system_hr-employees-service-1        Up 13 seconds (healthy)   0.0.0.0:8090->8090/tcp, [::]:8090->8090/tcp
+### Prueba 6 — Ver Vacations
+```bash
+docker compose exec vacations-service curl -s http://localhost:8084/vacations
 ```
+* **Esperado:** Registro con `diasDisponibles = 15`, `diasTomados = 0` y `estadoEmpleado = ACTIVO`.
 
-El orden de las marcas `Healthy` en la salida de `up` muestra la cadena de
-dependencias: las bases primero, `departments-service` cuando su base está
-`healthy`, y `employees-service` en último lugar, cuando tanto su base como
-`departments-service` lo están. Las migraciones se aplican durante ese arranque:
+### Prueba 7 — Idempotencia
+Reenviar el mismo mensaje con el mismo `id` (UUID).
+* **Esperado:**
+  * Log del consumidor registra `[DUPLICADO]`.
+  * Confirmación con ACK sin duplicar registros en la base de datos PostgreSQL.
 
-```console
-$ docker compose logs employees-service | grep -i "flyway\|Started"
-2026-09-16T02:18:19.874Z  INFO 1 --- [main] o.f.core.internal.command.DbMigrate : Successfully applied 1 migration to schema "public", now at version v1 (execution time 00:00.042s)
-2026-09-16T02:18:22.484Z  INFO 1 --- [main] c.m.employees.EmployeesApplication  : Started EmployeesApplication in 6.178 seconds (process running for 6.705)
+## 9. Decisiones Arquitectónicas del Proyecto
 
-$ docker compose logs departments-service | grep -i "migration\|Server running"
-3 migrations found in prisma/migrations
-The following migration(s) have been applied:
-Server running on http://localhost:8081
-```
+El historial formal de decisiones técnicas se documenta en [`docs/decisions/`](docs/decisions/):
 
----
+* **[ADR-001](docs/decisions/ADR-001-motor-de-base-de-datos.md):** PostgreSQL en instancias separadas por servicio.
+* **[ADR-002](docs/decisions/ADR-002-estrategia-de-esquema.md):** Migraciones versionadas (Flyway y Prisma Migrate).
+* **[ADR-003](docs/decisions/ADR-003-garantia-de-unicidad.md):** Unicidad en dos capas (consulta previa + restricción UNIQUE).
+* **[ADR-004](docs/decisions/ADR-004-rabbitmq-message-broker.md):** Selección de RabbitMQ como Message Broker oficial.
+* **[ADR-005](docs/decisions/ADR-005-event-driven-architecture.md):** Adopción de Arquitectura Orientada a Eventos (EDA).
+* **[ADR-006](docs/decisions/ADR-006-fanout-exchange.md):** Uso de Exchange Fanout `hr.events` para distribución simultánea 1 a N.
+* **[ADR-007](docs/decisions/ADR-007-idempotent-consumers.md):** Consumidores idempotentes basados en Event ID.
 
-## Decisiones técnicas
+## 10. Resultados Obtenidos del Reto 4
 
-Las tres decisiones de persistencia están registradas como ADR en
-[`docs/decisions/`](docs/decisions/README.md). Aquí va el resumen; el contexto
-completo, las alternativas descartadas y las consecuencias están en cada ADR.
-
-### (a) Motor de base de datos: un solo motor, instancias separadas — [ADR-001](docs/decisions/ADR-001-motor-de-base-de-datos.md)
-
-Ambos servicios usan **PostgreSQL 16**, cada uno en su propio contenedor, con su
-propio volumen y sus propias credenciales. La separación es a nivel de instancia,
-no solo de esquema: `database-departamentos` y `database-empleados` no comparten
-proceso, puerto ni volumen.
-
-Se evaluó la **persistencia políglota** —elegir el motor óptimo por caso de uso,
-por ejemplo un almacén de documentos para departamentos, que es un catálogo plano
-de lectura frecuente— y se descartó. La ventaja para tres campos planos es
-marginal; el costo es concreto: dos motores que aprender, dos herramientas de
-migración con semánticas distintas, dos estrategias de backup y el doble de
-superficie para fallos de arranque, en un equipo de dos personas con experiencia
-previa en SQL y sin infraestructura de operación.
-
-Lo que se gana: una sola herramienta de backup, monitoreo y diagnóstico; el mismo
-healthcheck (`pg_isready`) para ambas bases; el mismo comportamiento de
-restricciones y transacciones en los dos servicios. Lo que se sacrifica: la opción
-de optimizar el motor por servicio. Si departamentos creciera hacia documentos de
-estructura variable, PostgreSQL seguiría sirviendo (`jsonb`), pero no sería la
-elección ideal. Como cada servicio es dueño exclusivo de su base, cualquiera de los
-dos puede migrar a otro motor en el futuro sin tocar al otro.
-
-### (b) Estrategia de creación de esquema: migraciones versionadas — [ADR-002](docs/decisions/ADR-002-estrategia-de-esquema.md)
-
-Flyway en `employees-service` y Prisma Migrate en `departments-service`, aplicadas
-automáticamente al arrancar cada contenedor. Detalle y comparación con `init.sql`
-y auto-DDL en la sección siguiente.
-
-### (c) Garantía de unicidad: dos capas — [ADR-003](docs/decisions/ADR-003-garantia-de-unicidad.md)
-
-`employees-service` exige `email` y `numeroEmpleado` únicos. La garantía se
-implementa en **dos capas complementarias**, cada una con un propósito distinto:
-
-**Capa 1 — consulta previa** (`existsByEmailIgnoreCase`, `existsByNumeroEmpleado`
-en `EmployeeService.register`). Cubre el caso común y permite responder un mensaje
-preciso: `El email 'juan.perez@empresa.com' ya está registrado`. Esta capa es la
-que produce **buenos mensajes**, no la que garantiza el invariante.
-
-**Capa 2 — restricción `UNIQUE` en el esquema**, declarada en la migración
-`V1__create_employees.sql`:
-
-```sql
-email           VARCHAR(255) NOT NULL UNIQUE,
-employee_number VARCHAR(255) NOT NULL UNIQUE,
-```
-
-La consulta previa, por sí sola, deja abierta una **condición de carrera**: dos
-peticiones con el mismo email que lleguen casi simultáneamente pueden *ambas* pasar
-la comprobación (ninguna ve a la otra porque ninguna ha insertado todavía) y *ambas*
-intentar insertar. Con un servicio multihilo —o varias réplicas— no es teórico. La
-restricción `UNIQUE` es la única barrera que PostgreSQL hace cumplir de forma
-atómica: la segunda inserción falla aunque haya superado la consulta.
-
-Cuando esa carrera ocurre, JPA lanza `DataIntegrityViolationException`; el
-`GlobalExceptionHandler` la captura y responde **`400` con mensaje descriptivo**
-(`El email o número de empleado ya está registrado`), igual que la capa 1. El
-cliente recibe el mismo código en ambos caminos y nunca ve un `500`.
-
-En resumen: **no es "solo consulta previa"**. La consulta da el mensaje amigable;
-la restricción garantiza la corrección. El `id` queda cubierto por la clave primaria.
-
----
-
-## Creación y Evolución del Esquema de Base de Datos
-
-En este sistema, la creación y evolución de las tablas no depende de scripts manuales ni de la máquina de un desarrollador en particular: **se ejecuta automáticamente al iniciar los contenedores**.
-
-### ¿Quién crea las tablas y cuándo?
-
-* **En `departments-service` (Node.js + Prisma):**
-  Al iniciar el contenedor, el comando de arranque ejecuta:
-  ```bash
-  npx prisma migrate deploy && exec npx tsx src/server.ts
-  ```
-  Prisma inspecciona el directorio `prisma/migrations/`, detecta las migraciones pendientes y las aplica secuencialmente en la base `gestion_departamentos` antes de levantar el servidor HTTP.
-* **En `employees-service` (Java + Spring Boot + Flyway):**
-  Durante la fase de inicio del contexto de Spring Boot, **Flyway** detecta automáticamente las migraciones ubicadas en `src/main/resources/db/migration/` (como `V1__create_employees.sql`) y las aplica sobre `gestion_empleados`. Posteriormente, Hibernate valida que las entidades JPA coincidan con el esquema aplicado (`spring.jpa.hibernate.ddl-auto=validate`).
-
-### Estrategia elegida: Herramienta de Migraciones Versionadas
-
-Se evaluaron tres estrategias de inicialización de bases de datos:
-
-| Estrategia | Cómo funciona | Ventajas | Desventajas / Limitaciones |
-|---|---|---|---|
-| **Script de inicialización (`init.sql`)** | Archivo `.sql` montado en `/docker-entrypoint-initdb.d/`. | Sencillo y explícito para la primera ejecución. | **"La trampa del script de inicialización"**: Solo se ejecuta cuando el volumen está completamente vacío. Si el esquema cambia, obliga a borrar el volumen (`docker compose down -v`) perdiendo todos los datos. |
-| **Auto-DDL del ORM** (`ddl-auto=create/update`) | El framework genera las tablas al arrancar a partir del modelo. | Cómodo en etapas tempranas. | Peligroso: no hay trazabilidad de cambios, puede alterar o eliminar columnas con datos en producción y no controla índices ni secuencias avanzadas. |
-| **Herramienta de migraciones (Elegida)** | Archivos SQL versionados y ordenados (Flyway y Prisma Migrate). | **Trazabilidad histórica completa, idempotencia, evolución sin pérdida de datos y compatible con CI/CD.** | Requiere configurar la herramienta en el ciclo de vida del servicio. |
-
-### Justificación de la decisión y "La trampa del script de inicialización"
-
-Se optó por la **Estrategia de Herramientas de Migraciones (Flyway y Prisma Migrate)** por las siguientes razones:
-
-1. **Evita la trampa de `/docker-entrypoint-initdb.d/`:** En un proyecto donde los microservicios evolucionan continuamente (como agregar nuevos estados a los empleados o nuevas secuencias a departamentos), un script `init.sql` queda congelado en el volumen persistente una vez inicializado. Forzar a un compañero a ejecutar `docker compose down -v` cada vez que el esquema cambie borra todos los datos de prueba acumulados.
-2. **Evolución no destructiva:** Las migraciones versionadas permiten alterar tablas existentes (`ALTER TABLE`, adición de columnas, restricciones `UNIQUE`, índices) aplicando incrementos (`V2__...`, nuevas carpetas de migración en Prisma) sin perder un solo registro existente.
-3. **Idempotencia y seguridad:** Ambas herramientas gestionan su propia tabla de historial (`flyway_schema_history` y `_prisma_migrations`). Si una migración ya fue aplicada, no se repite; si es nueva, se ejecuta en una transacción.
-4. **Validación estricta con ORM:** Al utilizar `hibernate.ddl-auto=validate`, aseguramos que Hibernate nunca modifique la estructura por su cuenta, garantizando que el código Java y el esquema SQL permanezcan sincronizados bajo control estricto.
-
----
-
-## Salud y resiliencia
-
-### Health checks y orden de inicialización
-- Las bases `database-departamentos` y `database-empleados` usan
-  `pg_isready -U <usuario> -d <base>` como health check.
-- Los microservicios esperan a que sus dependencias estén `healthy` mediante
-  `depends_on.condition: service_healthy` en Compose. Departamentos se comprueba en
-  `GET /health` y Empleados en `GET /empleados/health`.
-- Las imágenes de los dos microservicios incluyen `curl` y ejecutan `curl -f` contra
-  sus endpoints de salud respetando los puertos de entorno.
-
-### Resiliencia ante el desastre en la llamada inter-servicios
-
-Al comunicar `employees-service` con `departments-service` vía HTTP para validar departamentos, se implementaron las dos protecciones esenciales contra fallos de red o caídas temporales:
-
-1. **Timeout explícito:** Se configuró `SimpleClientHttpRequestFactory` con un tiempo de conexión máximo de **3 segundos** y de lectura de **5 segundos**. Esto impide que una lentitud o congelamiento en el servicio de departamentos bloquee indefinidamente los hilos de atención de empleados.
-2. **Reintentos con espera exponencial creciente (Backoff):** Mediante Spring Retry (`@Retryable(maxAttempts = 4, backoff = @Backoff(delay = 1000, multiplier = 2.0))`), ante errores de conexión (`ResourceAccessException`) o fallos del servidor remoto (`HttpServerErrorException`), el cliente hace **4 intentos en total** (1 inicial + 3 reintentos) con esperas crecientes entre ellos:
-
-   ```
-   intento 1 ──(1 s)──► intento 2 ──(2 s)──► intento 3 ──(4 s)──► intento 4 ──► 503
-   ```
-
-   Un `RetryListener` (`RetryLoggingListener`) deja rastro de cada intento en el log. Salida real del test `DepartmentClientRetryTest`, que apunta el cliente a un puerto cerrado y verifica 4 intentos y un tiempo total ≥ 7 s:
-
-   ```
-   20:53:46.688  WARN  Intento 1 fallido en DepartmentClient.existsById: ResourceAccessException — Connection refused
-   20:53:47.700  WARN  Intento 2 fallido en DepartmentClient.existsById: ResourceAccessException — Connection refused   (+1.0 s)
-   20:53:49.721  WARN  Intento 3 fallido en DepartmentClient.existsById: ResourceAccessException — Connection refused   (+2.0 s)
-   20:53:53.753  WARN  Intento 4 fallido en DepartmentClient.existsById: ResourceAccessException — Connection refused   (+4.0 s)
-   20:53:53.753  ERROR Reintentos agotados en DepartmentClient.existsById tras 4 intentos
-   ```
-
-#### Decisión arquitectónica al agotar los reintentos: ¿Rechazar o aceptar como pendiente?
-
-> **Decisión:** Se **rechaza la solicitud de registro devolviendo `503 Service Unavailable`** con el mensaje `"El servicio de departamentos no está disponible temporalmente"`, en lugar de aceptar al empleado en un estado "pendiente de validación".
-
-**Justificación técnica:**
-* **Consistencia e integridad de datos:** Aceptar un registro sin validar el departamento arriesga almacenar empleados con identificadores de departamento inexistentes o erróneos en la base de datos PostgreSQL, violando la integridad de dominio.
-* **Preservación del modelo canónico:** El modelo del empleado requiere que el estado sea estrictamente `ACTIVO` en esta fase del sistema. Introducir un estado transitorio `PENDIENTE` rompería el contrato de la API.
-* **Ausencia de infraestructura de reconciliación asíncrona:** Aceptar registros pendientes exigiría colas de mensajería (RabbitMQ/Kafka) o tareas programadas de conciliación en segundo plano que están fuera del alcance de este reto.
-* **Estrategia Fail-Fast:** El cliente recibe un código `503` estándar que le indica claramente que el sistema no puede garantizar la validez del registro en ese instante y debe reintentar más tarde.
-
-### Resiliencia en la persistencia (PostgreSQL)
-
-Para fallos transitorios de PostgreSQL durante la ejecución, ambos microservicios implementan reintentos automáticos con espera exponencial y timeouts de conexión. Si la base continúa sin estar disponible tras los intentos, la petición responde `503 Service Unavailable` sin colapsar el proceso del microservicio.
-
-#### `employees-service` (Spring Boot)
-
-Cada método de `EmployeeService` está anotado con `@Retryable` (Spring Retry). Ante un fallo de persistencia hace hasta **3 intentos** (250 ms → 500 ms). Las excepciones cubiertas son:
-
-| Excepción | Causa |
+| Validación | Estado |
 |---|---|
-| `DataAccessResourceFailureException` | Fallo en el pool de conexiones HikariCP |
-| `CannotCreateTransactionException` | Imposible abrir una transacción JPA |
-| `QueryTimeoutException` | Consulta supera el timeout configurado |
-| `JpaSystemException` | JPA envuelve una `PSQLException` de conexión rota en runtime |
-
-Al agotar los reintentos el `GlobalExceptionHandler` captura cualquiera de estas excepciones y responde `503`. El `RetryLoggingListener` deja trazas de cada intento en el log.
-
-#### `departments-service` (Node.js + Prisma)
-
-Cada operación del repositorio se envuelve en `withDatabaseRetry()` (`src/utils/database-retry.ts`). Ante un fallo transitorio ejecuta hasta **3 intentos** (250 ms → 500 ms). La detección de error transitorio cubre:
-
-- Nombres de clase: `PrismaClientInitializationError`, `PrismaClientUnknownRequestError`
-- Códigos PostgreSQL/Node.js en `error.code`: `08xxx`, `57Pxx`, `ECONNREFUSED`, `ETIMEDOUT`, `P1001`, `P1002`
-- Texto del mensaje cuando `error.code` está ausente: `ECONNREFUSED`, `Connection terminated`, etc.
-- Recursividad sobre `error.cause` para errores encadenados del driver
-
-Al agotar los reintentos se lanza `DatabaseUnavailableError`, que el `errorHandler` de Express traduce a `503`.
-
-## Pruebas con Postman y Newman
-
-En [`postman/`](postman/) hay un environment y tres colecciones (Postman Collection v2.1):
-
-| Archivo | Qué prueba |
-|---|---|
-| `system-hr.postman_environment.json` | Variables `empleadosBaseUrl` y `departamentosBaseUrl`. Las tres colecciones las usan; no hay URLs fijas |
-| `system-hr-ecosistema.postman_collection.json` | **Flujo de integración completo** (punto 8 del enunciado): crea IT → crea E001 en IT → consulta → tres rechazos (email, número, departamento) → listados. Los pasos se encadenan con variables de colección |
-| `empleados-service.postman_collection.json` | Contrato de `employees-service`: 201, duplicados 400, departamento inexistente 400, 404 exacto, listado |
-| `departamentos-service.postman_collection.json` | Contrato de `departments-service`: 201, body inválido 400, 404 con id, listado |
-
-Cada request lleva `pm.test()` de código de estado y de contenido, así que una
-corrida completa en verde es evidencia automatizable de las pruebas.
-
-### Importar en Postman
-
-1. **Import** → arrastra los cuatro archivos de `postman/` a la vez.
-2. Arriba a la derecha, selecciona el environment **System HR - local**.
-3. Si el sistema corre en otros puertos, edita el environment (columna *Current value*), no las colecciones.
-4. Abre una colección → **Run** → *Run collection*. Los requests van en orden.
-
-**Precondición:** las colecciones crean registros con ids fijos (`IT`, `E001`,
-`RRHH`, `E101`) y esperan `201` al crearlos. Ejecútalas sobre una base limpia:
-
-```bash
-docker compose down -v && docker compose up --build -d
-```
-
-Las tres colecciones usan ids distintos entre sí, así que pueden correr una tras
-otra sin reiniciar la base.
-
-### Ejecutar por línea de comandos con Newman
-
-Newman es el runner de Postman para terminal; con `npx` no requiere instalación:
-
-```bash
-npx newman run postman/system-hr-ecosistema.postman_collection.json \
-  -e postman/system-hr.postman_environment.json
-```
-
-```bash
-npx newman run postman/empleados-service.postman_collection.json \
-  -e postman/system-hr.postman_environment.json
-```
-
-```bash
-npx newman run postman/departamentos-service.postman_collection.json \
-  -e postman/system-hr.postman_environment.json
-```
-
-Para sobreescribir un puerto sin editar el environment (por ejemplo, si el 8080
-está ocupado en tu máquina):
-
-```bash
-npx newman run postman/system-hr-ecosistema.postman_collection.json \
-  -e postman/system-hr.postman_environment.json \
-  --env-var empleadosBaseUrl=http://localhost:8090
-```
-
-Newman termina con código de salida distinto de cero si cualquier aserción falla,
-así que sirve tal cual en un pipeline de CI.
-
-### Resultado de la última ejecución
-
-Las tres colecciones, corridas en ese orden sobre una base recién creada
-(`down -v && up --build`), el 2026-09-15:
-
-```console
-$ npx newman run postman/system-hr-ecosistema.postman_collection.json -e postman/system-hr.postman_environment.json
-→ 1. Crear departamento IT                        POST /departamentos   [201 Created]   √ √
-→ 2. Crear empleado E001 en IT                    POST /empleados       [201 Created]   √ √ √
-→ 3. Consultar empleado E001                      GET  /empleados/E001  [200 OK]        √ √
-→ 4. POST con email de E001 duplicado             POST /empleados       [400 Bad Request] √ √
-→ 5. POST con numeroEmpleado de E001 duplicado    POST /empleados       [400 Bad Request] √ √
-→ 6. POST con departamentoId inexistente          POST /empleados       [400 Bad Request] √ √
-→ 7. Consultar departamento IT                    GET  /departamentos/IT [200 OK]       √ √
-→ 8. Listar departamentos                         GET  /departamentos   [200 OK]        √ √
-→ 9. Listar empleados                             GET  /empleados       [200 OK]        √ √
-┌─────────────────────────┬───────────────────┬───────────────────┐
-│                         │          executed │            failed │
-│                requests │                 9 │                 0 │
-│              assertions │                19 │                 0 │
-└─────────────────────────┴───────────────────┴───────────────────┘
-
-$ npx newman run postman/empleados-service.postman_collection.json -e postman/system-hr.postman_environment.json
-│                requests │                 8 │                 0 │
-│              assertions │                16 │                 0 │
-
-$ npx newman run postman/departamentos-service.postman_collection.json -e postman/system-hr.postman_environment.json
-│                requests │                 5 │                 0 │
-│              assertions │                10 │                 0 │
-```
-
-**Total: 22 requests, 45 aserciones, 0 fallos.**
-
----
-
-## Reglas de organizacion
-
-- Los cambios internos de un servicio se realizan dentro de su directorio en `services/`.
-- Las migraciones y modelos de datos pertenecen al servicio dueno de la informacion.
-- `infrastructure/` contiene configuracion de ejecucion, no logica de negocio.
-- Las pruebas que requieren varios servicios pertenecen a `tests/`.
-- Las variables locales y credenciales se mantienen en `.env`, nunca en el repositorio.
-
-## Estado actual
-
-La orquestacion completa incluye una base PostgreSQL independiente para cada servicio. `employees-service` conserva sus datos en `gestion_empleados` y `departments-service` en `gestion_departamentos`.
+| Gateway funcionando | Completado |
+| Employees Service (Productor) | Completado |
+| Departments Service | Completado |
+| Notifications Consumer | Completado |
+| Profiles Consumer (Read Model CQRS) | Completado |
+| Vacations Consumer | Completado |
+| RabbitMQ Fanout (`hr.events`) | Completado |
+| Idempotencia en consumidores | Completado |
+| Database-per-Service (PostgreSQL independientes) | Completado |

@@ -1,0 +1,69 @@
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+/// Saldo y estado de vacaciones de cada empleado.
+/// Construido exclusivamente desde eventos RabbitMQ (CQRS - Consumidor asíncrono).
+model VacationBalance {
+  /// UUID interno generado por la base de datos
+  id              String   @id @default(uuid())
+  /// ID del empleado (clave de negocio, UNIQUE)
+  employeeId      String   @unique
+  nombre          String
+  apellido        String
+  email           String
+  departamentoId  String
+  /// Días de vacaciones disponibles (inicia en 15)
+  diasDisponibles Int      @default(15)
+  /// Días de vacaciones ya tomados (inicia en 0)
+  diasTomados     Int      @default(0)
+  /// ACTIVO | RETIRADO
+  estadoEmpleado  String   @default("ACTIVO")
+  /// UUID del último evento aplicado (garantía de idempotencia)
+  lastEventId     String   @unique
+  /// Actualizado automáticamente por Prisma en cada operación
+  updatedAt       DateTime @updatedAt
+}
+
+/// Período de vacaciones programado por un empleado.
+/// Creado vía POST /vacations. Al crearse publica vacaciones.programadas en RabbitMQ.
+model VacationPeriod {
+  /// UUID generado por la base de datos
+  id           String   @id @default(uuid())
+  /// ID del empleado (debe existir en VacationBalance)
+  empleadoId   String
+  /// Fecha de inicio del período (solo fecha, sin hora)
+  fechaInicio  DateTime @db.Date
+  /// Fecha de fin del período (solo fecha, sin hora)
+  fechaFin     DateTime @db.Date
+  /// Estado: PROGRAMADA | EN_CURSO | COMPLETADA | CANCELADA
+  estado       String   @default("PROGRAMADA")
+  /// Fecha/hora de creación del registro
+  fechaCreacion DateTime @default(now())
+
+  @@index([empleadoId])
+  @@index([estado])
+}
+
+model ProcessedEvent {
+  id        String   @id
+  timestamp DateTime @default(now()) @db.Timestamp(3)
+
+  @@map("eventos_procesados")
+}
+
+model IdempotencyRecord {
+  key          String   @id
+  method       String
+  path         String
+  statusCode   Int
+  responseBody Json
+  createdAt    DateTime @default(now())
+
+  @@map("http_idempotency")
+}

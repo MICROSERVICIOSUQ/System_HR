@@ -72,4 +72,32 @@ describe('POST /departamentos — validación de entrada', () => {
     assert.equal(res.status, 404);
     assert.equal(body.message, 'Ruta no encontrada: GET /ruta-invalida');
   });
+
+  test('PUT y PATCH con body vacío responden 400', async () => {
+    for (const method of ['PUT', 'PATCH']) {
+      const res = await fetch(`${baseUrl}/departamentos/RRHH`, {
+        method,
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({}),
+      });
+      const body = await res.json();
+
+      assert.equal(res.status, 400);
+      assert.equal(body.status, 'error');
+      assert.equal(body.message, 'Datos inválidos');
+      assert.ok(body.errors.some((error: { message: string }) =>
+        error.message.includes('al menos un campo'),
+      ));
+    }
+  });
+
+  test('rechaza paginación y ordenamiento inválidos antes de consultar la base de datos', async () => {
+    const invalidLimit = await fetch(`${baseUrl}/departamentos?page=1&limit=101`);
+    const invalidSort = await fetch(`${baseUrl}/departamentos?page=1&sortBy=secret`);
+    const invalidOrder = await fetch(`${baseUrl}/departamentos?page=1&order=SIDEWAYS`);
+
+    assert.equal(invalidLimit.status, 400);
+    assert.equal(invalidSort.status, 400);
+    assert.equal(invalidOrder.status, 400);
+  });
 });

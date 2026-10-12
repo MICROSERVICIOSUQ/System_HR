@@ -12,15 +12,16 @@ import io.swagger.v3.oas.annotations.responses.ApiResponse;
 import io.swagger.v3.oas.annotations.responses.ApiResponses;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
+import org.springframework.format.annotation.DateTimeFormat;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
-import java.util.List;
+import java.time.LocalDate;
 import java.util.Map;
 
 @RestController
 @RequestMapping("/empleados")
-@Tag(name = "Empleados", description = "Endpoints para la gestión, consulta y registro de empleados")
+@Tag(name = "Empleados", description = "Endpoints para la gestión, consulta, registro, actualización y retiro de empleados")
 public class EmployeeController {
 
     private final EmployeeService service;
@@ -41,7 +42,7 @@ public class EmployeeController {
 
     @PostMapping
     @Operation(summary = "Registrar un nuevo empleado",
-            description = "Registra un empleado validando formato, unicidad de campos y verificando que el departamento exista en departments-service.")
+            description = "Registra un empleado validando formato, unicidad de campos y verificando que el departamento exista en departments-service. Publica evento 'empleado.creado'.")
     @ApiResponses({
             @ApiResponse(responseCode = "201", description = "Empleado registrado exitosamente",
                     content = @Content(schema = @Schema(implementation = Employee.class))),
@@ -56,15 +57,86 @@ public class EmployeeController {
     }
 
     @GetMapping
-    @Operation(summary = "Listar todos los empleados", description = "Obtiene la lista completa de empleados registrados en el sistema.")
+    @Operation(summary = "Listar todos los empleados", description = "Obtiene la lista de empleados registrados en el sistema, con filtros opcionales por departamento, estado, cargo y paginación.")
     @ApiResponses({
             @ApiResponse(responseCode = "200", description = "Lista de empleados obtenida exitosamente",
                     content = @Content(array = @ArraySchema(schema = @Schema(implementation = Employee.class)))),
             @ApiResponse(responseCode = "503", description = "Base de datos no disponible",
                     content = @Content(schema = @Schema(implementation = ErrorResponse.class)))
     })
-    public ResponseEntity<List<Employee>> getAll() {
-        return ResponseEntity.ok(service.findAll());
+    public ResponseEntity<?> getAll(
+            @Parameter(description = "Filtrar por identificador de departamento", example = "D001")
+            @RequestParam(required = false) String departamentoId,
+            @Parameter(description = "Filtrar por estado del empleado (ACTIVO o RETIRADO)", example = "ACTIVO")
+            @RequestParam(required = false) String estado,
+            @Parameter(description = "Filtrar por cargo (búsqueda parcial)", example = "Desarrollador")
+            @RequestParam(required = false) String cargo,
+            @Parameter(description = "Número de página (base 1)", example = "1")
+            @RequestParam(required = false) Integer page,
+            @Parameter(description = "Tamaño de página", example = "10")
+            @RequestParam(required = false) Integer size,
+            @Parameter(description = "Alias compatible para size", hidden = true)
+            @RequestParam(required = false) Integer limit,
+            @Parameter(description = "Campo permitido para ordenar", example = "id")
+            @RequestParam(required = false) String sortBy,
+            @Parameter(description = "Dirección de ordenamiento: ASC o DESC", example = "DESC")
+            @RequestParam(required = false) String order) {
+        Integer effectiveSize = (size != null) ? size : limit;
+        com.microservicios.employees.model.EmployeeStatus statusEnum = parseStatus(estado);
+        return ResponseEntity.ok(service.findAll(departamentoId, statusEnum, cargo, page, effectiveSize, sortBy, order));
+    }
+
+    private com.microservicios.employees.model.EmployeeStatus parseStatus(String estado) {
+        if (estado == null || estado.isBlank()) return null;
+        String trimmed = estado.trim();
+        for (com.microservicios.employees.model.EmployeeStatus s : com.microservicios.employees.model.EmployeeStatus.values()) {
+            if (s.name().equalsIgnoreCase(trimmed) || s.jsonValue().equalsIgnoreCase(trimmed)) {
+                return s;
+            }
+        }
+        throw new IllegalArgumentException("Estado de empleado no válido: " + estado);
+    }
+
+    @GetMapping("/auditoria")
+    @Operation(summary = "Auditoría de empleados retirados por rango de fechas",
+            description = "Consulta únicamente empleados con estado RETIRADO cuya fechaRetiro esté dentro del rango especificado (desde y hasta inclusivos).")
+    @ApiResponses({
+            @ApiResponse(responseCode = "200", description = "Lista de empleados retirados obtenida exitosamente",
+                    content = @Content(array = @ArraySchema(schema = @Schema(implementation = Employee.class)))),
+            @ApiResponse(responseCode = "400", description = "Fechas inválidas, parámetros faltantes o fecha desde posterior a hasta",
+                    content = @Content(schema = @Schema(implementation = ErrorResponse.class))),
+            @ApiResponse(responseCode = "503", description = "Base de datos no disponible",
+                    content = @Content(schema = @Schema(implementation = ErrorResponse.class)))
+    })
+    public ResponseEntity<?> getAuditoria(
+            @Parameter(description = "Fecha inicial del rango (formato yyyy-MM-dd)", example = "2026-01-01")
+            @RequestParam(name = "desde", required = false)
+            @DateTimeFormat(iso = DateTimeFormat.ISO.DATE)
+            LocalDate desde,
+
+            @Parameter(description = "Fecha final del rango (formato yyyy-MM-dd)", example = "2026-12-31")
+            @RequestParam(name = "hasta", required = false)
+            @DateTimeFormat(iso = DateTimeFormat.ISO.DATE)
+            LocalDate hasta,
+
+            @Parameter(hidden = true)
+            @RequestParam(name = "fechaInicio", required = false)
+            @DateTimeFormat(iso = DateTimeFormat.ISO.DATE)
+            LocalDate fechaInicio,
+
+            @Parameter(hidden = true)
+            @RequestParam(name = "fechaFin", required = false)
+            @DateTimeFormat(iso = DateTimeFormat.ISO.DATE)
+            LocalDate fechaFin,
+            @RequestParam(required = false) Integer page,
+            @RequestParam(required = false) Integer limit,
+            @RequestParam(required = false) String sortBy,
+            @RequestParam(required = false) String order) {
+
+        LocalDate fechaDesde = (desde != null) ? desde : fechaInicio;
+        LocalDate fechaHasta = (hasta != null) ? hasta : fechaFin;
+
+        return ResponseEntity.ok(service.findAuditoria(fechaDesde, fechaHasta, page, limit, sortBy, order));
     }
 
     @GetMapping("/{id}")
@@ -81,5 +153,42 @@ public class EmployeeController {
             @Parameter(description = "Identificador único del empleado (ej: E001)", required = true)
             @PathVariable String id) {
         return ResponseEntity.ok(service.findById(id));
+    }
+
+    @RequestMapping(value = "/{id}", method = {RequestMethod.PUT, RequestMethod.PATCH})
+    @Operation(summary = "Actualizar datos de un empleado (PUT o PATCH)",
+            description = "Actualiza la información del empleado y publica el evento de dominio 'empleado.actualizado'. Soporta tanto PUT como PATCH.")
+    @ApiResponses({
+            @ApiResponse(responseCode = "200", description = "Empleado actualizado exitosamente",
+                    content = @Content(schema = @Schema(implementation = Employee.class))),
+            @ApiResponse(responseCode = "400", description = "Datos de entrada inválidos o conflicto de datos",
+                    content = @Content(schema = @Schema(implementation = ErrorResponse.class))),
+            @ApiResponse(responseCode = "404", description = "Empleado no encontrado",
+                    content = @Content(schema = @Schema(implementation = ErrorResponse.class))),
+            @ApiResponse(responseCode = "503", description = "Base de datos no disponible",
+                    content = @Content(schema = @Schema(implementation = ErrorResponse.class)))
+    })
+    public ResponseEntity<Employee> update(
+            @Parameter(description = "Identificador único del empleado", required = true)
+            @PathVariable String id,
+            @RequestBody Employee employee) {
+        return ResponseEntity.ok(service.update(id, employee));
+    }
+
+    @DeleteMapping("/{id}")
+    @Operation(summary = "Retirar lógicamente un empleado",
+            description = "Realiza el retiro lógico del empleado cambiando su estado a RETIRADO y publica 'empleado.retirado'.")
+    @ApiResponses({
+            @ApiResponse(responseCode = "200", description = "Empleado retirado exitosamente",
+                    content = @Content(schema = @Schema(implementation = Employee.class))),
+            @ApiResponse(responseCode = "404", description = "Empleado no encontrado",
+                    content = @Content(schema = @Schema(implementation = ErrorResponse.class))),
+            @ApiResponse(responseCode = "503", description = "Base de datos no disponible",
+                    content = @Content(schema = @Schema(implementation = ErrorResponse.class)))
+    })
+    public ResponseEntity<Employee> delete(
+            @Parameter(description = "Identificador único del empleado", required = true)
+            @PathVariable String id) {
+        return ResponseEntity.ok(service.retire(id));
     }
 }

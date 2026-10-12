@@ -1,0 +1,390 @@
+{
+  "info": {
+    "name": "Pruebas E2E y Regresión - Reto 4",
+    "_postman_id": "8b40137e-f23b-46f5-9148-7d1f8e6dbb0d",
+    "description": "Colección independiente y parametrizada del Reto 4. Ejecutar en orden desde la carpeta 01 hasta la 07. Requiere el stack Docker Compose activo y permisos admin/admin para RabbitMQ Management. Los consumidores son asíncronos; configurar un delay de 500 ms entre peticiones al ejecutar la colección. La topología solicitada q.employees.* se comprueba explícitamente y reportará fallo si la infraestructura mantiene otros nombres.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    { "key": "baseUrl", "value": "http://localhost:8080", "type": "string" },
+    { "key": "rabbitmqApiUrl", "value": "http://localhost:15672", "type": "string" },
+    { "key": "rabbitmqUser", "value": "admin", "type": "string" },
+    { "key": "rabbitmqPassword", "value": "admin", "type": "string" },
+    { "key": "empleadoId", "value": "", "type": "string" },
+    { "key": "departamentoId", "value": "", "type": "string" },
+    { "key": "vacacionId", "value": "", "type": "string" },
+    { "key": "eventId", "value": "", "type": "string" },
+    { "key": "empleadoReplicaId", "value": "", "type": "string" },
+    { "key": "empleadoVacId", "value": "", "type": "string" },
+    { "key": "departamentoEmpleadoId", "value": "", "type": "string" },
+    { "key": "departamentoNuevoId", "value": "", "type": "string" },
+    { "key": "vacacionIniciadaId", "value": "", "type": "string" },
+    { "key": "vacacionConflictoId", "value": "", "type": "string" },
+    { "key": "eventRetiroId", "value": "", "type": "string" },
+    { "key": "eventVacId", "value": "", "type": "string" },
+    { "key": "captureQueue", "value": "", "type": "string" },
+    { "key": "vacFechaInicio", "value": "", "type": "string" },
+    { "key": "vacFechaFin", "value": "", "type": "string" },
+    { "key": "vacConflictoInicio", "value": "", "type": "string" },
+    { "key": "vacConflictoFin", "value": "", "type": "string" },
+    { "key": "vacHoy", "value": "", "type": "string" },
+    { "key": "vacManana", "value": "", "type": "string" },
+    { "key": "qaRun", "value": "", "type": "string" }
+  ],
+  "event": [
+    {
+      "listen": "test",
+      "script": {
+        "type": "text/javascript",
+        "exec": [
+          "pm.test('Tiempo de respuesta menor a 2000 ms', () => pm.expect(pm.response.responseTime).to.be.below(2000));",
+          "pm.test('Respuesta JSON con estructura de objeto o array', () => {",
+          "    pm.expect(pm.response.headers.get('Content-Type') || '').to.include('application/json');",
+          "    const body = pm.response.json();",
+          "    pm.expect(body).to.not.equal(null);",
+          "    pm.expect(Array.isArray(body) || typeof body === 'object').to.eql(true);",
+          "});"
+        ]
+      }
+    }
+  ],
+  "item": [
+    {
+      "name": "01. Health & Infrastructure (Gateway :8080)",
+      "item": [
+        {
+          "name": "GET Gateway health",
+          "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": ["pm.test('HTTP 200', () => pm.response.to.have.status(200));", "const b = pm.response.json();", "pm.test('Contrato health Gateway', () => { pm.expect(b.status).to.eql('ok'); pm.expect(b.service).to.eql('api-gateway'); });"] } }],
+          "request": { "method": "GET", "header": [], "url": { "raw": "{{baseUrl}}/health", "host": ["{{baseUrl}}"], "path": ["health"] } }
+        },
+        {
+          "name": "RabbitMQ health/aliveness",
+          "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": ["pm.test('HTTP 200', () => pm.response.to.have.status(200));", "pm.test('RabbitMQ aliveness responde JSON', () => pm.expect(pm.response.json()).to.be.an('object'));"] } }],
+          "request": { "auth": { "type": "basic", "basic": [{ "key": "username", "value": "{{rabbitmqUser}}", "type": "string" }, { "key": "password", "value": "{{rabbitmqPassword}}", "type": "string" }] }, "method": "GET", "header": [], "url": { "raw": "{{rabbitmqApiUrl}}/api/aliveness-test/%2F", "host": ["{{rabbitmqApiUrl}}"], "path": ["api", "aliveness-test", "%2F"] } }
+        },
+        {
+          "name": "Exchange hr.events existe y es fanout",
+          "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": ["pm.test('HTTP 200', () => pm.response.to.have.status(200));", "const b = pm.response.json();", "pm.test('Exchange canónico fanout', () => { pm.expect(b.name).to.eql('hr.events'); pm.expect(b.type).to.eql('fanout'); });"] } }],
+          "request": { "auth": { "type": "basic", "basic": [{ "key": "username", "value": "{{rabbitmqUser}}", "type": "string" }, { "key": "password", "value": "{{rabbitmqPassword}}", "type": "string" }] }, "method": "GET", "header": [], "url": { "raw": "{{rabbitmqApiUrl}}/api/exchanges/%2F/hr.events", "host": ["{{rabbitmqApiUrl}}"], "path": ["api", "exchanges", "%2F", "hr.events"] } }
+        },
+        {
+          "name": "Colas solicitadas q.employees.*",
+          "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": ["pm.test('HTTP 200', () => pm.response.to.have.status(200));", "const queues = pm.response.json().map(q => q.name);", "pm.test('Están declaradas las tres colas del contrato Reto 4', () => { ['q.employees.notifications', 'q.employees.profiles', 'q.employees.vacations'].forEach(q => pm.expect(queues, 'cola ' + q).to.include(q)); });"] } }],
+          "request": { "auth": { "type": "basic", "basic": [{ "key": "username", "value": "{{rabbitmqUser}}", "type": "string" }, { "key": "password", "value": "{{rabbitmqPassword}}", "type": "string" }] }, "method": "GET", "header": [], "url": { "raw": "{{rabbitmqApiUrl}}/api/queues/%2F", "host": ["{{rabbitmqApiUrl}}"], "path": ["api", "queues", "%2F"] } },
+          "description": "Comprueba los nombres exigidos por esta suite. La topología de algunas configuraciones existentes puede usar notifications.queue, profiles.queue y vacations.queue."
+        }
+      ]
+    },
+    {
+      "name": "02. Microservicio Empleados (/empleados)",
+      "item": [
+        {
+          "name": "Preparar departamento para empleado",
+          "event": [
+            { "listen": "prerequest", "script": { "type": "text/javascript", "exec": ["const run = Date.now().toString();", "pm.collectionVariables.set('qaRun', run);", "pm.collectionVariables.set('departamentoEmpleadoId', 'QA-EMP-' + run);", "pm.collectionVariables.set('departamentoNuevoId', 'QA-UPD-' + run);"] } },
+            { "listen": "test", "script": { "type": "text/javascript", "exec": ["pm.test('HTTP 201 departamento de precondición', () => pm.response.to.have.status(201));", "const b = pm.response.json();", "pm.test('Departamento listo para altas', () => pm.expect(b.id).to.eql(pm.collectionVariables.get('departamentoEmpleadoId')));"] } }
+          ],
+          "request": { "method": "POST", "header": [{ "key": "Content-Type", "value": "application/json" }], "body": { "mode": "raw", "raw": "{\"id\":\"{{departamentoEmpleadoId}}\",\"nombre\":\"QA Empleados {{qaRun}}\",\"descripcion\":\"Precondición Postman Reto 4\"}", "options": { "raw": { "language": "json" } } }, "url": { "raw": "{{baseUrl}}/departamentos", "host": ["{{baseUrl}}"], "path": ["departamentos"] } }
+        },
+        {
+          "name": "Preparar segundo departamento para PUT",
+          "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": ["pm.test('HTTP 201 segundo departamento', () => pm.response.to.have.status(201));", "pm.test('Segundo ID único creado', () => pm.expect(pm.response.json().id).to.eql(pm.collectionVariables.get('departamentoNuevoId')));"] } }],
+          "request": { "method": "POST", "header": [{ "key": "Content-Type", "value": "application/json" }], "body": { "mode": "raw", "raw": "{\"id\":\"{{departamentoNuevoId}}\",\"nombre\":\"QA Actualización {{qaRun}}\",\"descripcion\":\"Departamento destino para actualización\"}", "options": { "raw": { "language": "json" } } }, "url": { "raw": "{{baseUrl}}/departamentos", "host": ["{{baseUrl}}"], "path": ["departamentos"] } }
+        },
+        {
+          "name": "POST crear empleado",
+          "event": [
+            { "listen": "prerequest", "script": { "type": "text/javascript", "exec": ["const run = pm.collectionVariables.get('qaRun');", "pm.collectionVariables.set('empleadoId', 'QA-E-' + run);"] } },
+            { "listen": "test", "script": { "type": "text/javascript", "exec": ["pm.test('HTTP 201 empleado creado', () => pm.response.to.have.status(201));", "const e = pm.response.json();", "pm.test('Esquema y datos principales de empleado', () => { ['id','nombre','apellido','email','numeroEmpleado','cargo','area','departamentoId','fechaIngreso','estado'].forEach(k => pm.expect(e).to.have.property(k)); pm.expect(e.id).to.eql(pm.collectionVariables.get('empleadoId')); pm.expect(e.departamentoId).to.eql(pm.collectionVariables.get('departamentoEmpleadoId')); pm.expect(e.estado).to.eql('ACTIVO'); });"] } }
+          ],
+          "request": { "method": "POST", "header": [{ "key": "Content-Type", "value": "application/json" }], "body": { "mode": "raw", "raw": "{\"id\":\"{{empleadoId}}\",\"nombre\":\"QA\",\"apellido\":\"Reto Cuatro\",\"email\":\"qa.{{qaRun}}@example.test\",\"numeroEmpleado\":\"EMP-{{qaRun}}\",\"cargo\":\"Analista QA\",\"area\":\"Tecnología\",\"departamentoId\":\"{{departamentoEmpleadoId}}\",\"fechaIngreso\":\"2026-01-15\",\"estado\":\"ACTIVO\"}", "options": { "raw": { "language": "json" } } }, "url": { "raw": "{{baseUrl}}/empleados", "host": ["{{baseUrl}}"], "path": ["empleados"] } }
+        },
+        {
+          "name": "GET listar empleados",
+          "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": ["pm.test('HTTP 200', () => pm.response.to.have.status(200));", "const b = pm.response.json();", "pm.test('Lista y empleado recién creado', () => { pm.expect(b).to.be.an('array'); pm.expect(b.some(e => e.id === pm.collectionVariables.get('empleadoId'))).to.eql(true); });"] } }],
+          "request": { "method": "GET", "header": [], "url": { "raw": "{{baseUrl}}/empleados", "host": ["{{baseUrl}}"], "path": ["empleados"] } }
+        },
+        {
+          "name": "GET empleado por ID",
+          "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": ["pm.test('HTTP 200', () => pm.response.to.have.status(200));", "const e = pm.response.json();", "pm.test('ID y estructura del recurso', () => { pm.expect(e.id).to.eql(pm.collectionVariables.get('empleadoId')); pm.expect(e).to.have.property('departamentoId'); pm.expect(e).to.have.property('estado'); });"] } }],
+          "request": { "method": "GET", "header": [], "url": { "raw": "{{baseUrl}}/empleados/{{empleadoId}}", "host": ["{{baseUrl}}"], "path": ["empleados", "{{empleadoId}}"] } }
+        },
+        {
+          "name": "PUT actualizar cargo y departamento",
+          "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": ["pm.test('HTTP 200', () => pm.response.to.have.status(200));", "const e = pm.response.json();", "pm.test('Cargo y departamento actualizados', () => { pm.expect(e.cargo).to.eql('QA Automation Lead'); pm.expect(e.departamentoId).to.eql(pm.collectionVariables.get('departamentoNuevoId')); });"] } }],
+          "request": { "method": "PUT", "header": [{ "key": "Content-Type", "value": "application/json" }], "body": { "mode": "raw", "raw": "{\"cargo\":\"QA Automation Lead\",\"departamentoId\":\"{{departamentoNuevoId}}\"}", "options": { "raw": { "language": "json" } } }, "url": { "raw": "{{baseUrl}}/empleados/{{empleadoId}}", "host": ["{{baseUrl}}"], "path": ["empleados", "{{empleadoId}}"] } }
+        },
+        {
+          "name": "POST empleado con payload incompleto",
+          "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": ["pm.test('HTTP 400 validación', () => pm.response.to.have.status(400));", "pm.test('Error JSON descriptivo', () => pm.expect(pm.response.json().message).to.be.a('string').and.not.empty);"] } }],
+          "request": { "method": "POST", "header": [{ "key": "Content-Type", "value": "application/json" }], "body": { "mode": "raw", "raw": "{\"nombre\":\"Sin campos requeridos\"}", "options": { "raw": { "language": "json" } } }, "url": { "raw": "{{baseUrl}}/empleados", "host": ["{{baseUrl}}"], "path": ["empleados"] } }
+        },
+        {
+          "name": "POST empleado con departamento inexistente",
+          "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": ["pm.test('HTTP 400 departamento inexistente', () => pm.response.to.have.status(400));", "pm.test('Error JSON identifica validación', () => pm.expect(pm.response.json().message).to.be.a('string').and.not.empty);"] } }],
+          "request": { "method": "POST", "header": [{ "key": "Content-Type", "value": "application/json" }], "body": { "mode": "raw", "raw": "{\"id\":\"QA-INVALID-{{qaRun}}\",\"nombre\":\"No\",\"apellido\":\"Departamento\",\"email\":\"bad.dept.{{qaRun}}@example.test\",\"numeroEmpleado\":\"BAD-{{qaRun}}\",\"cargo\":\"QA\",\"area\":\"QA\",\"departamentoId\":\"UUID-DEPARTAMENTO-INEXISTENTE\",\"fechaIngreso\":\"2026-01-15\",\"estado\":\"ACTIVO\"}", "options": { "raw": { "language": "json" } } }, "url": { "raw": "{{baseUrl}}/empleados", "host": ["{{baseUrl}}"], "path": ["empleados"] } }
+        },
+        {
+          "name": "GET empleado inexistente",
+          "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": ["pm.test('HTTP 404', () => pm.response.to.have.status(404));", "pm.test('Error 404 JSON', () => pm.expect(pm.response.json().status).to.eql(404));"] } }],
+          "request": { "method": "GET", "header": [], "url": { "raw": "{{baseUrl}}/empleados/UUID-INEXISTENTE", "host": ["{{baseUrl}}"], "path": ["empleados", "UUID-INEXISTENTE"] } }
+        },
+        {
+          "name": "DELETE retiro lógico del empleado",
+          "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": ["pm.test('HTTP 200 retiro procesado', () => pm.response.to.have.status(200));", "pm.test('Estado RETIRADO', () => pm.expect(pm.response.json().estado).to.eql('RETIRADO'));"] } }],
+          "request": { "method": "DELETE", "header": [], "url": { "raw": "{{baseUrl}}/empleados/{{empleadoId}}", "host": ["{{baseUrl}}"], "path": ["empleados", "{{empleadoId}}"] } }
+        }
+      ]
+    },
+    {
+      "name": "03. Microservicio Departamentos (/departamentos)",
+      "item": [
+        {
+          "name": "POST departamento válido y guardar ID",
+          "event": [
+            { "listen": "prerequest", "script": { "type": "text/javascript", "exec": ["pm.collectionVariables.set('departamentoId', 'QA-DEP-' + Date.now());"] } },
+            { "listen": "test", "script": { "type": "text/javascript", "exec": ["pm.test('HTTP 201 departamento creado', () => pm.response.to.have.status(201));", "const d = pm.response.json();", "pm.test('Estructura departamento y valor guardado', () => { ['id','nombre','descripcion'].forEach(k => pm.expect(d).to.have.property(k)); pm.expect(d.id).to.eql(pm.collectionVariables.get('departamentoId')); });"] } }
+          ],
+          "request": { "method": "POST", "header": [{ "key": "Content-Type", "value": "application/json" }], "body": { "mode": "raw", "raw": "{\"id\":\"{{departamentoId}}\",\"nombre\":\"QA Departamento {{qaRun}}\",\"descripcion\":\"Creado por colección E2E Reto 4\"}", "options": { "raw": { "language": "json" } } }, "url": { "raw": "{{baseUrl}}/departamentos", "host": ["{{baseUrl}}"], "path": ["departamentos"] } }
+        },
+        {
+          "name": "GET listar departamentos",
+          "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": ["pm.test('HTTP 200', () => pm.response.to.have.status(200));", "const b = pm.response.json();", "pm.test('Lista incluye departamento creado', () => { pm.expect(b).to.be.an('array'); pm.expect(b.some(d => d.id === pm.collectionVariables.get('departamentoId'))).to.eql(true); });"] } }],
+          "request": { "method": "GET", "header": [], "url": { "raw": "{{baseUrl}}/departamentos", "host": ["{{baseUrl}}"], "path": ["departamentos"] } }
+        },
+        {
+          "name": "GET departamento por ID",
+          "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": ["pm.test('HTTP 200', () => pm.response.to.have.status(200));", "const d = pm.response.json();", "pm.test('Coincide con departamento creado', () => { pm.expect(d.id).to.eql(pm.collectionVariables.get('departamentoId')); pm.expect(d.nombre).to.be.a('string'); pm.expect(d.descripcion).to.be.a('string'); });"] } }],
+          "request": { "method": "GET", "header": [], "url": { "raw": "{{baseUrl}}/departamentos/{{departamentoId}}", "host": ["{{baseUrl}}"], "path": ["departamentos", "{{departamentoId}}"] } }
+        },
+        {
+          "name": "POST departamento con nombre inválido",
+          "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": ["pm.test('HTTP 400 nombre inválido', () => pm.response.to.have.status(400));", "pm.test('Error de validación JSON', () => pm.expect(pm.response.json().message).to.be.a('string').and.not.empty);"] } }],
+          "request": { "method": "POST", "header": [{ "key": "Content-Type", "value": "application/json" }], "body": { "mode": "raw", "raw": "{\"nombre\":\"\",\"descripcion\":\"Inválido\"}", "options": { "raw": { "language": "json" } } }, "url": { "raw": "{{baseUrl}}/departamentos", "host": ["{{baseUrl}}"], "path": ["departamentos"] } }
+        },
+        {
+          "name": "POST departamento con ID duplicado",
+          "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": ["pm.test('HTTP 400 duplicado', () => pm.response.to.have.status(400));", "pm.test('Error de duplicidad JSON', () => pm.expect(pm.response.json().message).to.be.a('string').and.not.empty);"] } }],
+          "request": { "method": "POST", "header": [{ "key": "Content-Type", "value": "application/json" }], "body": { "mode": "raw", "raw": "{\"id\":\"{{departamentoId}}\",\"nombre\":\"Duplicado\",\"descripcion\":\"Debe ser rechazado\"}", "options": { "raw": { "language": "json" } } }, "url": { "raw": "{{baseUrl}}/departamentos", "host": ["{{baseUrl}}"], "path": ["departamentos"] } }
+        },
+        {
+          "name": "GET departamento inexistente",
+          "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": ["pm.test('HTTP 404', () => pm.response.to.have.status(404));", "pm.test('Cuerpo de error 404', () => pm.expect(pm.response.json().status).to.eql('error'));"] } }],
+          "request": { "method": "GET", "header": [], "url": { "raw": "{{baseUrl}}/departamentos/UUID-INEXISTENTE", "host": ["{{baseUrl}}"], "path": ["departamentos", "UUID-INEXISTENTE"] } }
+        }
+      ]
+    },
+    {
+      "name": "04. Event-Driven & Idempotencia (Notificaciones y Perfiles)",
+      "item": [
+        {
+          "name": "Publicar empleado.creado con envelope canónico",
+          "event": [
+            { "listen": "prerequest", "script": { "type": "text/javascript", "exec": ["pm.collectionVariables.set('empleadoReplicaId', 'QA-EVENT-' + Date.now());", "pm.collectionVariables.set('empleadoId', pm.collectionVariables.get('empleadoReplicaId'));", "pm.collectionVariables.set('eventId', 'QA-EVENT-ID-' + Date.now());", "pm.collectionVariables.set('eventOccurredAt', new Date().toISOString());"] } },
+            { "listen": "test", "script": { "type": "text/javascript", "exec": ["pm.test('HTTP 200 RabbitMQ routed', () => pm.response.to.have.status(200));", "pm.test('Broker enruta el evento', () => pm.expect(pm.response.json().routed).to.eql(true));"] } }
+          ],
+          "request": { "auth": { "type": "basic", "basic": [{ "key": "username", "value": "{{rabbitmqUser}}", "type": "string" }, { "key": "password", "value": "{{rabbitmqPassword}}", "type": "string" }] }, "method": "POST", "header": [{ "key": "Content-Type", "value": "application/json" }], "body": { "mode": "raw", "raw": "{\"properties\":{\"content_type\":\"application/json\"},\"routing_key\":\"\",\"payload\":\"{\\\"id\\\":\\\"{{eventId}}\\\",\\\"type\\\":\\\"empleado.creado\\\",\\\"version\\\":\\\"1.0\\\",\\\"occurredAt\\\":\\\"{{eventOccurredAt}}\\\",\\\"producer\\\":\\\"employees-service\\\",\\\"data\\\":{\\\"id\\\":\\\"{{empleadoReplicaId}}\\\",\\\"nombre\\\":\\\"Prueba\\\",\\\"apellido\\\":\\\"Eventos\\\",\\\"email\\\":\\\"{{qaRun}}.eventos@example.test\\\",\\\"departamentoId\\\":\\\"{{departamentoEmpleadoId}}\\\",\\\"cargo\\\":\\\"QA\\\",\\\"fechaIngreso\\\":\\\"2026-01-15\\\",\\\"fechaRetiro\\\":null}}\",\"payload_encoding\":\"string\"}", "options": { "raw": { "language": "json" } } }, "url": { "raw": "{{rabbitmqApiUrl}}/api/exchanges/%2F/hr.events/publish", "host": ["{{rabbitmqApiUrl}}"], "path": ["api", "exchanges", "%2F", "hr.events", "publish"] } },
+          "description": "El payload publicado contiene los seis campos canónicos: id, type, version, occurredAt, producer y data."
+        },
+        {
+          "name": "GET notificaciones y comprobar evento único (eventual)",
+          "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": ["pm.test('HTTP 200 y lista JSON', () => { pm.response.to.have.status(200); pm.expect(pm.response.json()).to.be.an('array'); });", "const id = pm.collectionVariables.get('eventId');", "const url = pm.variables.replaceIn('{{baseUrl}}/notifications');", "pm.test('Evento empleado.creado proyectado exactamente una vez', function (done) {", "  let attempts = 0;", "  const poll = () => pm.sendRequest(url, (err, res) => {", "    attempts++;", "    if (!err && res.code === 200) { const matches = res.json().filter(n => n.messageId === id); if (matches.length === 1) { pm.expect(matches.length).to.eql(1); return done(); } }", "    if (attempts >= 15) { pm.expect(false, 'No apareció un único registro tras esperar al consumidor').to.eql(true); return done(); }", "    setTimeout(poll, 300);", "  });", "  poll();", "});"] } }],
+          "request": { "method": "GET", "header": [], "url": { "raw": "{{baseUrl}}/notifications", "host": ["{{baseUrl}}"], "path": ["notifications"] } }
+        },
+        {
+          "name": "Reenviar mismo empleado.creado (mismo eventId)",
+          "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": ["pm.test('HTTP 200 RabbitMQ routed', () => pm.response.to.have.status(200));", "pm.test('Broker enruta el reenvío', () => pm.expect(pm.response.json().routed).to.eql(true));"] } }],
+          "request": { "auth": { "type": "basic", "basic": [{ "key": "username", "value": "{{rabbitmqUser}}", "type": "string" }, { "key": "password", "value": "{{rabbitmqPassword}}", "type": "string" }] }, "method": "POST", "header": [{ "key": "Content-Type", "value": "application/json" }], "body": { "mode": "raw", "raw": "{\"properties\":{\"content_type\":\"application/json\"},\"routing_key\":\"\",\"payload\":\"{\\\"id\\\":\\\"{{eventId}}\\\",\\\"type\\\":\\\"empleado.creado\\\",\\\"version\\\":\\\"1.0\\\",\\\"occurredAt\\\":\\\"{{eventOccurredAt}}\\\",\\\"producer\\\":\\\"employees-service\\\",\\\"data\\\":{\\\"id\\\":\\\"{{empleadoReplicaId}}\\\",\\\"nombre\\\":\\\"Prueba\\\",\\\"apellido\\\":\\\"Eventos\\\",\\\"email\\\":\\\"{{qaRun}}.eventos@example.test\\\",\\\"departamentoId\\\":\\\"{{departamentoEmpleadoId}}\\\",\\\"cargo\\\":\\\"QA\\\",\\\"fechaIngreso\\\":\\\"2026-01-15\\\",\\\"fechaRetiro\\\":null}}\",\"payload_encoding\":\"string\"}", "options": { "raw": { "language": "json" } } }, "url": { "raw": "{{rabbitmqApiUrl}}/api/exchanges/%2F/hr.events/publish", "host": ["{{rabbitmqApiUrl}}"], "path": ["api", "exchanges", "%2F", "hr.events", "publish"] } }
+        },
+        {
+          "name": "GET profiles y verificar lastEventId preservado",
+          "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": ["pm.test('HTTP 200 o 404 mientras converge la proyección', () => pm.expect([200,404]).to.include(pm.response.code));", "const url = pm.variables.replaceIn('{{baseUrl}}/profiles/{{empleadoReplicaId}}');", "pm.test('Read model ACTIVO conserva el eventId tras el duplicado', function (done) {", "  let attempts = 0;", "  const poll = () => pm.sendRequest(url, (err, res) => {", "    attempts++;", "    if (!err && res.code === 200) { const p = res.json(); if (p.employeeId === pm.collectionVariables.get('empleadoReplicaId') && p.estado === 'ACTIVO' && p.lastEventId === pm.collectionVariables.get('eventId')) { pm.expect(p.lastEventId).to.eql(pm.collectionVariables.get('eventId')); return done(); } }", "    if (attempts >= 15) { pm.expect(false, 'El perfil no convergió al eventId esperado').to.eql(true); return done(); }",
+              "    setTimeout(poll, 300);", "  });", "  poll();", "});"] } }],
+          "request": { "method": "GET", "header": [], "url": { "raw": "{{baseUrl}}/profiles/{{empleadoReplicaId}}", "host": ["{{baseUrl}}"], "path": ["profiles", "{{empleadoReplicaId}}"] } },
+          "description": "La proyección es asíncrona: ejecutar con delay entre requests. Si el consumidor aún no ha aplicado el mensaje, volver a ejecutar esta petición."
+        },
+        {
+          "name": "GET profiles filtrados ACTIVO",
+          "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": ["pm.test('HTTP 200 y array', () => { pm.response.to.have.status(200); pm.expect(pm.response.json()).to.be.an('array'); });", "pm.test('Filtro ACTIVO incluye empleado de evento', () => pm.expect(pm.response.json().some(p => p.employeeId === pm.collectionVariables.get('empleadoReplicaId') && p.estado === 'ACTIVO')).to.eql(true));"] } }],
+          "request": { "method": "GET", "header": [], "url": { "raw": "{{baseUrl}}/profiles?estado=ACTIVO", "host": ["{{baseUrl}}"], "path": ["profiles"], "query": [{ "key": "estado", "value": "ACTIVO" }] } }
+        },
+        {
+          "name": "GET notifications confirma idempotencia (un messageId)",
+          "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": ["pm.test('HTTP 200 y array', () => { pm.response.to.have.status(200); pm.expect(pm.response.json()).to.be.an('array'); });", "const records = pm.response.json().filter(n => n.messageId === pm.collectionVariables.get('eventId'));", "pm.test('Solo hay un registro de notificación para el eventId repetido', () => pm.expect(records.length).to.eql(1));"] } }],
+          "request": { "method": "GET", "header": [], "url": { "raw": "{{baseUrl}}/notifications", "host": ["{{baseUrl}}"], "path": ["notifications"] } }
+        },
+        {
+          "name": "Publicar empleado.retirado para comprobar filtro RETIRADO",
+          "event": [{ "listen": "prerequest", "script": { "type": "text/javascript", "exec": ["pm.collectionVariables.set('eventRetiroId', 'QA-RET-' + Date.now());"] } }, { "listen": "test", "script": { "type": "text/javascript", "exec": ["pm.test('HTTP 200 RabbitMQ routed', () => pm.response.to.have.status(200));", "pm.test('Broker enruta evento retiro', () => pm.expect(pm.response.json().routed).to.eql(true));"] } }],
+          "request": { "auth": { "type": "basic", "basic": [{ "key": "username", "value": "{{rabbitmqUser}}", "type": "string" }, { "key": "password", "value": "{{rabbitmqPassword}}", "type": "string" }] }, "method": "POST", "header": [{ "key": "Content-Type", "value": "application/json" }], "body": { "mode": "raw", "raw": "{\"properties\":{\"content_type\":\"application/json\"},\"routing_key\":\"\",\"payload\":\"{\\\"id\\\":\\\"{{eventRetiroId}}\\\",\\\"type\\\":\\\"empleado.retirado\\\",\\\"version\\\":\\\"1.0\\\",\\\"occurredAt\\\":\\\"{{$isoTimestamp}}\\\",\\\"producer\\\":\\\"employees-service\\\",\\\"data\\\":{\\\"id\\\":\\\"{{empleadoReplicaId}}\\\",\\\"nombre\\\":\\\"Prueba\\\",\\\"apellido\\\":\\\"Eventos\\\",\\\"email\\\":\\\"{{qaRun}}.eventos@example.test\\\",\\\"departamentoId\\\":\\\"{{departamentoEmpleadoId}}\\\",\\\"cargo\\\":\\\"QA\\\",\\\"fechaIngreso\\\":\\\"2026-01-15\\\",\\\"fechaRetiro\\\":\\\"{{$isoTimestamp}}\\\"}}\",\"payload_encoding\":\"string\"}", "options": { "raw": { "language": "json" } } }, "url": { "raw": "{{rabbitmqApiUrl}}/api/exchanges/%2F/hr.events/publish", "host": ["{{rabbitmqApiUrl}}"], "path": ["api", "exchanges", "%2F", "hr.events", "publish"] } }
+        },
+        {
+          "name": "GET profiles filtrados RETIRADO",
+          "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": ["pm.test('HTTP 200 y array', () => { pm.response.to.have.status(200); pm.expect(pm.response.json()).to.be.an('array'); });", "const url = pm.variables.replaceIn('{{baseUrl}}/profiles?estado=RETIRADO');", "pm.test('Filtro RETIRADO refleja el evento consumido', function (done) {", "  let attempts = 0;", "  const poll = () => pm.sendRequest(url, (err, res) => {", "    attempts++;",
+              "    if (!err && res.code === 200 && res.json().some(p => p.employeeId === pm.collectionVariables.get('empleadoReplicaId'))) { pm.expect(res.json().some(p => p.employeeId === pm.collectionVariables.get('empleadoReplicaId') && p.estado === 'RETIRADO')).to.eql(true); return done(); }",
+              "    if (attempts >= 15) { pm.expect(false, 'El perfil no aparece en el filtro RETIRADO').to.eql(true); return done(); }",
+              "    setTimeout(poll, 300);", "  });", "  poll();", "});"] } }],
+          "request": { "method": "GET", "header": [], "url": { "raw": "{{baseUrl}}/profiles?estado=RETIRADO", "host": ["{{baseUrl}}"], "path": ["profiles"], "query": [{ "key": "estado", "value": "RETIRADO" }] } }
+        },
+        {
+          "name": "Publicar empleado activo independiente para pruebas de vacaciones",
+          "event": [
+            { "listen": "prerequest", "script": { "type": "text/javascript", "exec": ["pm.collectionVariables.set('empleadoVacId', 'QA-VAC-EMP-' + Date.now());", "pm.collectionVariables.set('empleadoId', pm.collectionVariables.get('empleadoVacId'));", "pm.collectionVariables.set('eventVacId', 'QA-VAC-CREATED-' + Date.now());"] } },
+            { "listen": "test", "script": { "type": "text/javascript", "exec": ["pm.test('HTTP 200 RabbitMQ routed', () => pm.response.to.have.status(200));", "pm.test('Evento empleado.creado enrutable', () => pm.expect(pm.response.json().routed).to.eql(true));"] } }
+          ],
+          "request": { "auth": { "type": "basic", "basic": [{ "key": "username", "value": "{{rabbitmqUser}}", "type": "string" }, { "key": "password", "value": "{{rabbitmqPassword}}", "type": "string" }] }, "method": "POST", "header": [{ "key": "Content-Type", "value": "application/json" }], "body": { "mode": "raw", "raw": "{\"properties\":{\"content_type\":\"application/json\"},\"routing_key\":\"\",\"payload\":\"{\\\"id\\\":\\\"{{eventVacId}}\\\",\\\"type\\\":\\\"empleado.creado\\\",\\\"version\\\":\\\"1.0\\\",\\\"occurredAt\\\":\\\"{{$isoTimestamp}}\\\",\\\"producer\\\":\\\"employees-service\\\",\\\"data\\\":{\\\"id\\\":\\\"{{empleadoVacId}}\\\",\\\"nombre\\\":\\\"Empleado\\\",\\\"apellido\\\":\\\"Vacaciones\\\",\\\"email\\\":\\\"{{qaRun}}.vacaciones@example.test\\\",\\\"departamentoId\\\":\\\"{{departamentoEmpleadoId}}\\\",\\\"cargo\\\":\\\"QA\\\",\\\"fechaIngreso\\\":\\\"2026-01-15\\\",\\\"fechaRetiro\\\":null}}\",\"payload_encoding\":\"string\"}", "options": { "raw": { "language": "json" } } }, "url": { "raw": "{{rabbitmqApiUrl}}/api/exchanges/%2F/hr.events/publish", "host": ["{{rabbitmqApiUrl}}"], "path": ["api", "exchanges", "%2F", "hr.events", "publish"] } },
+          "description": "Crea una réplica de empleado ACTIVO distinta de la usada en la prueba de retiro para que la batería de vacaciones pueda continuar."
+        },
+        {
+          "name": "Esperar réplica ACTIVA de empleado para vacaciones",
+          "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": ["pm.test('HTTP 200 o 404 mientras se aplica evento', () => pm.expect([200,404]).to.include(pm.response.code));", "const url = pm.variables.replaceIn('{{baseUrl}}/vacations/balances/{{empleadoId}}');", "pm.test('Réplica de vacaciones creada con estado ACTIVO', function (done) {", "  let attempts = 0;", "  const poll = () => pm.sendRequest(url, (err, res) => {", "    attempts++;",
+              "    if (!err && res.code === 200) { const b = res.json(); if (b.employeeId === pm.collectionVariables.get('empleadoId') && b.estadoEmpleado === 'ACTIVO') { pm.expect(b.diasDisponibles).to.be.a('number'); return done(); } }",
+              "    if (attempts >= 15) { pm.expect(false, 'VacationBalance no convergió a ACTIVO').to.eql(true); return done(); }",
+              "    setTimeout(poll, 300);", "  });", "  poll();", "});"] } }],
+          "request": { "method": "GET", "header": [], "url": { "raw": "{{baseUrl}}/vacations/balances/{{empleadoId}}", "host": ["{{baseUrl}}"], "path": ["vacations", "balances", "{{empleadoId}}"] } }
+        }
+      ]
+    },
+    {
+      "name": "05. Microservicio Vacaciones - Flujos Exitosos (/vacations y /vacaciones)",
+      "item": [
+        {
+          "name": "GET saldo inicial de días disponibles",
+          "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": ["pm.test('HTTP 200 saldo encontrado', () => pm.response.to.have.status(200));", "const s = pm.response.json();", "pm.test('Saldo CQRS de empleado activo', () => { pm.expect(s.employeeId).to.eql(pm.collectionVariables.get('empleadoId')); pm.expect(s.diasDisponibles).to.be.a('number'); pm.expect(s.diasTomados).to.be.a('number'); pm.expect(s.estadoEmpleado).to.eql('ACTIVO'); });"] } }],
+          "request": { "method": "GET", "header": [], "url": { "raw": "{{baseUrl}}/vacations/balances/{{empleadoId}}", "host": ["{{baseUrl}}"], "path": ["vacations", "balances", "{{empleadoId}}"] } }
+        },
+        {
+          "name": "POST programar período futuro",
+          "event": [
+            { "listen": "prerequest", "script": { "type": "text/javascript", "exec": ["const start = new Date(); start.setUTCHours(0,0,0,0); start.setUTCDate(start.getUTCDate() + 15); const end = new Date(start); end.setUTCDate(end.getUTCDate() + 5);", "pm.collectionVariables.set('vacFechaInicio', start.toISOString().slice(0,10)); pm.collectionVariables.set('vacFechaFin', end.toISOString().slice(0,10));"] } },
+            { "listen": "test", "script": { "type": "text/javascript", "exec": ["pm.test('HTTP 201 período creado', () => pm.response.to.have.status(201));", "const v = pm.response.json();", "pm.test('Esquema período PROGRAMADA', () => { ['id','empleadoId','fechaInicio','fechaFin','estado','fechaCreacion'].forEach(k => pm.expect(v).to.have.property(k)); pm.expect(v.empleadoId).to.eql(pm.collectionVariables.get('empleadoId')); pm.expect(v.estado).to.eql('PROGRAMADA'); pm.expect(v.fechaInicio).to.eql(pm.collectionVariables.get('vacFechaInicio')); pm.expect(v.fechaFin).to.eql(pm.collectionVariables.get('vacFechaFin')); });", "pm.collectionVariables.set('vacacionId', v.id);"] } }
+          ],
+          "request": { "method": "POST", "header": [{ "key": "Content-Type", "value": "application/json" }], "body": { "mode": "raw", "raw": "{\"empleadoId\":\"{{empleadoId}}\",\"fechaInicio\":\"{{vacFechaInicio}}\",\"fechaFin\":\"{{vacFechaFin}}\"}", "options": { "raw": { "language": "json" } } }, "url": { "raw": "{{baseUrl}}/vacations", "host": ["{{baseUrl}}"], "path": ["vacations"] } }
+        },
+        {
+          "name": "POST fechaInicio igual a fechaFin (debe 400)",
+          "event": [{ "listen": "prerequest", "script": { "type": "text/javascript", "exec": ["const d = new Date(); d.setUTCHours(0,0,0,0); d.setUTCDate(d.getUTCDate()+25); pm.collectionVariables.set('vacFechaIgual', d.toISOString().slice(0,10));"] } }, { "listen": "test", "script": { "type": "text/javascript", "exec": ["pm.test('HTTP 400 por intervalo de cero días', () => pm.response.to.have.status(400));", "pm.test('Mensaje de validación', () => pm.expect(pm.response.json().message).to.be.a('string').and.not.empty);"] } }],
+          "request": { "method": "POST", "header": [{ "key": "Content-Type", "value": "application/json" }], "body": { "mode": "raw", "raw": "{\"empleadoId\":\"{{empleadoId}}\",\"fechaInicio\":\"{{vacFechaIgual}}\",\"fechaFin\":\"{{vacFechaIgual}}\"}", "options": { "raw": { "language": "json" } } }, "url": { "raw": "{{baseUrl}}/vacations", "host": ["{{baseUrl}}"], "path": ["vacations"] } }
+        },
+        {
+          "name": "GET listar períodos",
+          "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": ["pm.test('HTTP 200 y array', () => { pm.response.to.have.status(200); pm.expect(pm.response.json()).to.be.an('array'); });", "pm.test('Incluye período programado', () => pm.expect(pm.response.json().some(v => v.id === pm.collectionVariables.get('vacacionId'))).to.eql(true));"] } }],
+          "request": { "method": "GET", "header": [], "url": { "raw": "{{baseUrl}}/vacations", "host": ["{{baseUrl}}"], "path": ["vacations"] } }
+        },
+        {
+          "name": "GET período por ID",
+          "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": ["pm.test('HTTP 200', () => pm.response.to.have.status(200));", "const v = pm.response.json();", "pm.test('ID, estado y empleado coherentes', () => { pm.expect(v.id).to.eql(pm.collectionVariables.get('vacacionId')); pm.expect(v.estado).to.eql('PROGRAMADA'); pm.expect(v.empleadoId).to.eql(pm.collectionVariables.get('empleadoId')); });"] } }],
+          "request": { "method": "GET", "header": [], "url": { "raw": "{{baseUrl}}/vacations/{{vacacionId}}", "host": ["{{baseUrl}}"], "path": ["vacations", "{{vacacionId}}"] } }
+        },
+        {
+          "name": "GET períodos filtrados por empleadoId",
+          "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": ["pm.test('HTTP 200 y array', () => { pm.response.to.have.status(200); pm.expect(pm.response.json()).to.be.an('array'); });", "pm.test('Todos pertenecen al empleado consultado', () => pm.response.json().forEach(v => pm.expect(v.empleadoId).to.eql(pm.collectionVariables.get('empleadoId'))));"] } }],
+          "request": { "method": "GET", "header": [], "url": { "raw": "{{baseUrl}}/vacations?empleadoId={{empleadoId}}", "host": ["{{baseUrl}}"], "path": ["vacations"], "query": [{ "key": "empleadoId", "value": "{{empleadoId}}" }] } }
+        },
+        {
+          "name": "GET período por alias /vacaciones",
+          "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": ["pm.test('HTTP 200 alias español', () => pm.response.to.have.status(200));", "pm.test('Mismo recurso del alias inglés', () => pm.expect(pm.response.json().id).to.eql(pm.collectionVariables.get('vacacionId')));"] } }],
+          "request": { "method": "GET", "header": [], "url": { "raw": "{{baseUrl}}/vacaciones/{{vacacionId}}", "host": ["{{baseUrl}}"], "path": ["vacaciones", "{{vacacionId}}"] } }
+        },
+        {
+          "name": "DELETE cancelar período futuro",
+          "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": ["pm.test('HTTP 200 cancelación lógica', () => pm.response.to.have.status(200));", "const b = pm.response.json();", "pm.test('Período queda CANCELADA y no se elimina', () => { pm.expect(b.message).to.be.a('string'); pm.expect(b.data.id).to.eql(pm.collectionVariables.get('vacacionId')); pm.expect(b.data.estado).to.eql('CANCELADA'); });"] } }],
+          "request": { "method": "DELETE", "header": [], "url": { "raw": "{{baseUrl}}/vacations/{{vacacionId}}", "host": ["{{baseUrl}}"], "path": ["vacations", "{{vacacionId}}"] } }
+        }
+      ]
+    },
+    {
+      "name": "06. Microservicio Vacaciones - Casos Límite y Errores (400 / 404)",
+      "item": [
+        {
+          "name": "POST fechaFin menor que fechaInicio",
+          "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": ["pm.test('HTTP 400 fechas incoherentes', () => pm.response.to.have.status(400));", "pm.test('Error JSON con mensaje', () => pm.expect(pm.response.json().message).to.be.a('string').and.not.empty);"] } }],
+          "request": { "method": "POST", "header": [{ "key": "Content-Type", "value": "application/json" }], "body": { "mode": "raw", "raw": "{\"empleadoId\":\"{{empleadoId}}\",\"fechaInicio\":\"{{vacFechaInicio}}\",\"fechaFin\":\"2020-01-01\"}", "options": { "raw": { "language": "json" } } }, "url": { "raw": "{{baseUrl}}/vacations", "host": ["{{baseUrl}}"], "path": ["vacations"] } }
+        },
+        {
+          "name": "POST fechaInicio en el pasado",
+          "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": ["pm.test('HTTP 400 fecha pasada', () => pm.response.to.have.status(400));", "pm.test('Error JSON con mensaje', () => pm.expect(pm.response.json().message).to.be.a('string').and.not.empty);"] } }],
+          "request": { "method": "POST", "header": [{ "key": "Content-Type", "value": "application/json" }], "body": { "mode": "raw", "raw": "{\"empleadoId\":\"{{empleadoId}}\",\"fechaInicio\":\"2020-01-01\",\"fechaFin\":\"2020-01-05\"}", "options": { "raw": { "language": "json" } } }, "url": { "raw": "{{baseUrl}}/vacations", "host": ["{{baseUrl}}"], "path": ["vacations"] } }
+        },
+        {
+          "name": "POST crear período activo para caso de solapamiento",
+          "event": [
+            { "listen": "prerequest", "script": { "type": "text/javascript", "exec": ["const s = new Date(); s.setUTCHours(0,0,0,0); s.setUTCDate(s.getUTCDate()+40); const e = new Date(s); e.setUTCDate(e.getUTCDate()+5); pm.collectionVariables.set('vacConflictoInicio', s.toISOString().slice(0,10)); pm.collectionVariables.set('vacConflictoFin', e.toISOString().slice(0,10));"] } },
+            { "listen": "test", "script": { "type": "text/javascript", "exec": ["pm.test('HTTP 201 conflicto base', () => pm.response.to.have.status(201));", "const v = pm.response.json();", "pm.test('Período PROGRAMADA guardado para provocar solapamiento', () => { pm.expect(v.estado).to.eql('PROGRAMADA'); pm.expect(v.fechaInicio).to.eql(pm.collectionVariables.get('vacConflictoInicio')); });", "pm.collectionVariables.set('vacacionConflictoId', v.id);"] } }
+          ],
+          "request": { "method": "POST", "header": [{ "key": "Content-Type", "value": "application/json" }], "body": { "mode": "raw", "raw": "{\"empleadoId\":\"{{empleadoId}}\",\"fechaInicio\":\"{{vacConflictoInicio}}\",\"fechaFin\":\"{{vacConflictoFin}}\"}", "options": { "raw": { "language": "json" } } }, "url": { "raw": "{{baseUrl}}/vacations", "host": ["{{baseUrl}}"], "path": ["vacations"] } }
+        },
+        {
+          "name": "POST solapamiento con período PROGRAMADA",
+          "event": [{ "listen": "prerequest", "script": { "type": "text/javascript", "exec": ["const s = new Date(pm.collectionVariables.get('vacConflictoInicio') + 'T00:00:00Z'); s.setUTCDate(s.getUTCDate()+2); const e = new Date(s); e.setUTCDate(e.getUTCDate()+2); pm.collectionVariables.set('vacOverlapInicio', s.toISOString().slice(0,10)); pm.collectionVariables.set('vacOverlapFin', e.toISOString().slice(0,10));"] } }, { "listen": "test", "script": { "type": "text/javascript", "exec": ["pm.test('HTTP 400 por solapamiento', () => pm.response.to.have.status(400));", "pm.test('Respuesta identifica período en conflicto', () => { const m = pm.response.json().message; pm.expect(m).to.be.a('string').and.include('solapa'); pm.expect(m).to.include(pm.collectionVariables.get('vacConflictoInicio')); });"] } }],
+          "request": { "method": "POST", "header": [{ "key": "Content-Type", "value": "application/json" }], "body": { "mode": "raw", "raw": "{\"empleadoId\":\"{{empleadoId}}\",\"fechaInicio\":\"{{vacOverlapInicio}}\",\"fechaFin\":\"{{vacOverlapFin}}\"}", "options": { "raw": { "language": "json" } } }, "url": { "raw": "{{baseUrl}}/vacations", "host": ["{{baseUrl}}"], "path": ["vacations"] } }
+        },
+        {
+          "name": "POST empleado inexistente (contrato actual 404; requisito puede ser 400)",
+          "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": ["pm.test('HTTP 404 actual de empleado inexistente (400 es alternativa contractual)', () => pm.expect([400,404]).to.include(pm.response.code));", "pm.test('Respuesta de error JSON', () => pm.expect(pm.response.json().message).to.be.a('string').and.not.empty);"] } }],
+          "request": { "method": "POST", "header": [{ "key": "Content-Type", "value": "application/json" }], "body": { "mode": "raw", "raw": "{\"empleadoId\":\"QA-EMP-NO-EXISTE\",\"fechaInicio\":\"{{vacFechaInicio}}\",\"fechaFin\":\"{{vacFechaFin}}\"}", "options": { "raw": { "language": "json" } } }, "url": { "raw": "{{baseUrl}}/vacations", "host": ["{{baseUrl}}"], "path": ["vacations"] } },
+          "description": "Acepta 400 o 404 porque la especificación del reto y el comportamiento actual no coinciden; el servicio actual responde 404."
+        },
+        {
+          "name": "DELETE período inexistente",
+          "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": ["pm.test('HTTP 404 período inexistente', () => pm.response.to.have.status(404));", "pm.test('Cuerpo de error 404', () => pm.expect(pm.response.json().status).to.eql(404));"] } }],
+          "request": { "method": "DELETE", "header": [], "url": { "raw": "{{baseUrl}}/vacations/UUID-INEXISTENTE", "host": ["{{baseUrl}}"], "path": ["vacations", "UUID-INEXISTENTE"] } }
+        },
+        {
+          "name": "POST período que inicia hoy",
+          "event": [
+            { "listen": "prerequest", "script": { "type": "text/javascript", "exec": ["const t = new Date(); t.setUTCHours(0,0,0,0); const n = new Date(t); n.setUTCDate(n.getUTCDate()+1); pm.collectionVariables.set('vacHoy', t.toISOString().slice(0,10)); pm.collectionVariables.set('vacManana', n.toISOString().slice(0,10));"] } },
+            { "listen": "test", "script": { "type": "text/javascript", "exec": ["pm.test('HTTP 201 se permite programar para hoy', () => pm.response.to.have.status(201));", "const v = pm.response.json();", "pm.test('Período inicia hoy', () => pm.expect(v.fechaInicio).to.eql(pm.collectionVariables.get('vacHoy')));", "pm.collectionVariables.set('vacacionIniciadaId', v.id);"] } }
+          ],
+          "request": { "method": "POST", "header": [{ "key": "Content-Type", "value": "application/json" }], "body": { "mode": "raw", "raw": "{\"empleadoId\":\"{{empleadoId}}\",\"fechaInicio\":\"{{vacHoy}}\",\"fechaFin\":\"{{vacManana}}\"}", "options": { "raw": { "language": "json" } } }, "url": { "raw": "{{baseUrl}}/vacations", "host": ["{{baseUrl}}"], "path": ["vacations"] } }
+        },
+        {
+          "name": "DELETE período ya iniciado (hoy) debe 400",
+          "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": ["pm.test('HTTP 400 no permite cancelar período iniciado', () => pm.response.to.have.status(400));", "pm.test('Mensaje contractual de cancelación', () => pm.expect(pm.response.json().message).to.eql('No es posible cancelar un período de vacaciones que ya ha iniciado o finalizado'));"] } }],
+          "request": { "method": "DELETE", "header": [], "url": { "raw": "{{baseUrl}}/vacations/{{vacacionIniciadaId}}", "host": ["{{baseUrl}}"], "path": ["vacations", "{{vacacionIniciadaId}}"] } }
+        }
+      ]
+    },
+    {
+      "name": "07. Verificación de Evento vacaciones.programadas",
+      "item": [
+        {
+          "name": "Crear cola temporal de captura fanout",
+          "event": [
+            { "listen": "prerequest", "script": { "type": "text/javascript", "exec": ["pm.collectionVariables.set('captureQueue', 'qa.vacaciones.capture.' + Date.now());"] } },
+            { "listen": "test", "script": { "type": "text/javascript", "exec": ["pm.test('HTTP 201 cola temporal declarada', () => pm.response.to.have.status(201));", "const q = pm.response.json();", "pm.test('Nombre de cola temporal correcto', () => pm.expect(q.name).to.eql(pm.collectionVariables.get('captureQueue')));"] } }
+          ],
+          "request": { "auth": { "type": "basic", "basic": [{ "key": "username", "value": "{{rabbitmqUser}}", "type": "string" }, { "key": "password", "value": "{{rabbitmqPassword}}", "type": "string" }] }, "method": "PUT", "header": [{ "key": "Content-Type", "value": "application/json" }], "body": { "mode": "raw", "raw": "{\"durable\":false,\"auto_delete\":true,\"arguments\":{\"x-expires\":60000}}", "options": { "raw": { "language": "json" } } }, "url": { "raw": "{{rabbitmqApiUrl}}/api/queues/%2F/{{captureQueue}}", "host": ["{{rabbitmqApiUrl}}"], "path": ["api", "queues", "%2F", "{{captureQueue}}"] } },
+          "description": "Cola efímera para capturar el evento real publicado por vacations-service vía el exchange fanout."
+        },
+        {
+          "name": "Vincular cola temporal a hr.events",
+          "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": ["pm.test('HTTP 201 binding creado', () => pm.response.to.have.status(201));", "pm.test('Respuesta JSON del binding', () => pm.expect(pm.response.json()).to.be.an('object'));"] } }],
+          "request": { "auth": { "type": "basic", "basic": [{ "key": "username", "value": "{{rabbitmqUser}}", "type": "string" }, { "key": "password", "value": "{{rabbitmqPassword}}", "type": "string" }] }, "method": "POST", "header": [{ "key": "Content-Type", "value": "application/json" }], "body": { "mode": "raw", "raw": "{\"routing_key\":\"\"}", "options": { "raw": { "language": "json" } } }, "url": { "raw": "{{rabbitmqApiUrl}}/api/bindings/%2F/e/hr.events/q/{{captureQueue}}", "host": ["{{rabbitmqApiUrl}}"], "path": ["api", "bindings", "%2F", "e", "hr.events", "q", "{{captureQueue}}"] } }
+        },
+        {
+          "name": "POST período para capturar vacaciones.programadas",
+          "event": [
+            { "listen": "prerequest", "script": { "type": "text/javascript", "exec": ["const s = new Date(); s.setUTCHours(0,0,0,0); s.setUTCDate(s.getUTCDate()+70); const e = new Date(s); e.setUTCDate(e.getUTCDate()+4); pm.collectionVariables.set('vacCaptureInicio', s.toISOString().slice(0,10)); pm.collectionVariables.set('vacCaptureFin', e.toISOString().slice(0,10)); pm.collectionVariables.set('eventId', 'QA-VAC-EVENT-' + Date.now());"] } },
+            { "listen": "test", "script": { "type": "text/javascript", "exec": ["pm.test('HTTP 201 período creado', () => pm.response.to.have.status(201));", "const v = pm.response.json();", "pm.test('Período listo para publicar evento', () => { pm.expect(v.estado).to.eql('PROGRAMADA'); pm.expect(v.fechaInicio).to.eql(pm.collectionVariables.get('vacCaptureInicio')); });", "pm.collectionVariables.set('vacacionId', v.id);"] } }
+          ],
+          "request": { "method": "POST", "header": [{ "key": "Content-Type", "value": "application/json" }], "body": { "mode": "raw", "raw": "{\"empleadoId\":\"{{empleadoId}}\",\"fechaInicio\":\"{{vacCaptureInicio}}\",\"fechaFin\":\"{{vacCaptureFin}}\"}", "options": { "raw": { "language": "json" } } }, "url": { "raw": "{{baseUrl}}/vacations", "host": ["{{baseUrl}}"], "path": ["vacations"] } },
+          "description": "La publicación es asíncrona/fire-and-forget; la captura en la cola fanout temporal demuestra la recepción efectiva."
+        },
+        {
+          "name": "Leer y validar envelope vacations.programadas en RabbitMQ",
+          "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": ["pm.test('HTTP 200 RabbitMQ queue get', () => pm.response.to.have.status(200));", "const msgs = pm.response.json();", "pm.test('Se capturó el evento publicado por el servicio', () => {", "  pm.expect(msgs).to.be.an('array').and.not.empty;", "  const found = msgs.map(m => { try { return JSON.parse(m.payload); } catch (_) { return null; } }).find(e => e && e.type === 'vacaciones.programadas' && e.data && e.data.id === pm.collectionVariables.get('vacacionId'));",
+              "  pm.expect(found, 'envelope del período creado').to.be.an('object');",
+              "  ['id','type','version','occurredAt','producer','data'].forEach(k => pm.expect(found).to.have.property(k));",
+              "  pm.expect(found.type).to.eql('vacaciones.programadas');",
+              "  pm.expect(found.producer).to.eql('vacations-service');",
+              "  pm.expect(found.data.empleadoId).to.eql(pm.collectionVariables.get('empleadoId'));",
+              "  pm.expect(found.data.estado).to.eql('PROGRAMADA');",
+              "});"] } }],
+          "request": { "auth": { "type": "basic", "basic": [{ "key": "username", "value": "{{rabbitmqUser}}", "type": "string" }, { "key": "password", "value": "{{rabbitmqPassword}}", "type": "string" }] }, "method": "POST", "header": [{ "key": "Content-Type", "value": "application/json" }] , "body": { "mode": "raw", "raw": "{\"count\":10,\"ackmode\":\"ack_requeue_true\",\"encoding\":\"auto\",\"truncate\":50000}", "options": { "raw": { "language": "json" } } }, "url": { "raw": "{{rabbitmqApiUrl}}/api/queues/%2F/{{captureQueue}}/get", "host": ["{{rabbitmqApiUrl}}"], "path": ["api", "queues", "%2F", "{{captureQueue}}", "get"] } },
+          "description": "ack_requeue_true vuelve a encolar el mensaje después de inspeccionarlo."
+        }
+      ]
+    }
+  ]
+}

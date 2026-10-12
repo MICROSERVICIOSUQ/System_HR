@@ -2,6 +2,7 @@ package com.microservicios.employees.exception;
 
 import com.microservicios.employees.exception.ErrorResponse.InvalidField;
 import jakarta.servlet.http.HttpServletRequest;
+import io.github.resilience4j.circuitbreaker.CallNotPermittedException;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.http.converter.HttpMessageNotReadableException;
@@ -14,8 +15,10 @@ import org.springframework.web.client.HttpServerErrorException;
 import org.springframework.web.client.ResourceAccessException;
 import org.springframework.web.HttpRequestMethodNotSupportedException;
 import org.springframework.web.bind.MethodArgumentNotValidException;
+import org.springframework.web.bind.MissingServletRequestParameterException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
+import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
 import org.springframework.web.servlet.NoHandlerFoundException;
 import org.springframework.web.servlet.resource.NoResourceFoundException;
 
@@ -87,6 +90,30 @@ public class GlobalExceptionHandler {
                 request, null);
     }
 
+    /** 400 — argumento o parámetro inválido en la solicitud (ej. rango de fechas inconsistente). */
+    @ExceptionHandler(IllegalArgumentException.class)
+    public ResponseEntity<ErrorResponse> illegalArgument(IllegalArgumentException ex,
+                                                         HttpServletRequest request) {
+        return construir(HttpStatus.BAD_REQUEST, ex.getMessage(), request, null);
+    }
+
+    /** 400 — error en el tipo o formato de un parámetro de consulta (ej. fecha mal formada). */
+    @ExceptionHandler(MethodArgumentTypeMismatchException.class)
+    public ResponseEntity<ErrorResponse> typeMismatch(MethodArgumentTypeMismatchException ex,
+                                                      HttpServletRequest request) {
+        String mensaje = String.format("El parámetro '%s' tiene un formato inválido: '%s'",
+                ex.getName(), ex.getValue());
+        return construir(HttpStatus.BAD_REQUEST, mensaje, request, null);
+    }
+
+    /** 400 — parámetro de consulta obligatorio ausente. */
+    @ExceptionHandler(MissingServletRequestParameterException.class)
+    public ResponseEntity<ErrorResponse> missingParam(MissingServletRequestParameterException ex,
+                                                      HttpServletRequest request) {
+        String mensaje = String.format("El parámetro '%s' es obligatorio", ex.getParameterName());
+        return construir(HttpStatus.BAD_REQUEST, mensaje, request, null);
+    }
+
     /** 404 — ruta inexistente o método no soportado en una ruta existente. */
     @ExceptionHandler({
             NoHandlerFoundException.class,
@@ -100,7 +127,8 @@ public class GlobalExceptionHandler {
     /** 503 - la dependencia de departamentos no esta disponible tras los reintentos. */
     @ExceptionHandler({
             ResourceAccessException.class,
-            HttpServerErrorException.class
+            HttpServerErrorException.class,
+            CallNotPermittedException.class
     })
     public ResponseEntity<ErrorResponse> departmentServiceUnavailable(RuntimeException ex,
                                                                       HttpServletRequest request) {
