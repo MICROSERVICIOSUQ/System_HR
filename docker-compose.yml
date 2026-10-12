@@ -17,6 +17,12 @@ services:
     environment:
       - EMPLEADOS_URL=http://employees-service:${EMPLEADOS_PORT:-8080}
       - DEPARTAMENTOS_URL=http://departments-service:${DEPARTAMENTOS_PORT:-8081}
+      - NOTIFICACIONES_URL=http://notifications-service:${NOTIFICACIONES_PORT:-8082}
+      - PERFILES_URL=http://profiles-service:${PERFILES_PORT:-8083}
+      - VACACIONES_URL=http://vacations-service:${VACACIONES_PORT:-8084}
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
     networks:
       - microservices-network
     restart: unless-stopped
@@ -28,12 +34,16 @@ services:
     depends_on:
       database-departamentos:
         condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
     environment:
       NODE_ENV: production
       PORT: ${DEPARTAMENTOS_PORT:-8081}
       DATABASE_URL: postgresql://${DEPARTAMENTOS_DB_USER:-postgres}:${DEPARTAMENTOS_DB_PASSWORD:-postgres}@database-departamentos:5432/${DEPARTAMENTOS_DB_NAME:-gestion_departamentos}
+      RABBITMQ_URL: amqp://${RABBITMQ_USER:-admin}:${RABBITMQ_PASSWORD:-admin}@${RABBITMQ_HOST:-rabbitmq}:${RABBITMQ_PORT:-5672}
+      EMPLOYEES_SERVICE_URL: http://employees-service:${EMPLEADOS_PORT:-8080}
     expose:
-      - "${DEPARTAMENTOS_PORT:-8081}"  
+      - "${DEPARTAMENTOS_PORT:-8081}"
     restart: unless-stopped
     healthcheck:
       test: ["CMD-SHELL", "curl -f --silent http://localhost:$${PORT:-8081}/health"]
@@ -55,16 +65,110 @@ services:
       SPRING_DATASOURCE_PASSWORD: ${EMPLEADOS_DB_PASSWORD:-postgres}
       SPRING_JPA_DDL_AUTO: validate
       DEPARTMENTS_SERVICE_URL: ${DEPARTMENTS_SERVICE_URL:-http://departments-service:${DEPARTAMENTOS_PORT:-8081}}
+      RABBITMQ_HOST: ${RABBITMQ_HOST:-rabbitmq}
+      RABBITMQ_PORT: ${RABBITMQ_PORT:-5672}
+      RABBITMQ_USER: ${RABBITMQ_USER:-admin}
+      RABBITMQ_PASSWORD: ${RABBITMQ_PASSWORD:-admin}
+      RABBITMQ_URL: amqp://${RABBITMQ_USER:-admin}:${RABBITMQ_PASSWORD:-admin}@${RABBITMQ_HOST:-rabbitmq}:${RABBITMQ_PORT:-5672}
     depends_on:
       database-empleados:
         condition: service_healthy
       departments-service:
         condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
     expose:
-      - "${EMPLEADOS_PORT:-8080}"  
+      - "${EMPLEADOS_PORT:-8080}"
     restart: unless-stopped
     healthcheck:
       test: ["CMD-SHELL", "curl -f --silent http://localhost:$${SERVER_PORT:-8080}/empleados/health"]
+      interval: 30s
+      timeout: 5s
+      start_period: 20s
+      retries: 3
+    networks:
+      - microservices-network
+
+  notifications-service:
+    build:
+      context: ./services/notifications-service
+      dockerfile: Dockerfile
+    depends_on:
+      database-notificaciones:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+    environment:
+      NODE_ENV: production
+      PORT: ${NOTIFICACIONES_PORT:-8082}
+      DATABASE_URL: postgresql://${NOTIFICACIONES_DB_USER:-postgres}:${NOTIFICACIONES_DB_PASSWORD:-postgres}@database-notificaciones:5432/${NOTIFICACIONES_DB_NAME:-gestion_notificaciones}
+      RABBITMQ_HOST: ${RABBITMQ_HOST:-rabbitmq}
+      RABBITMQ_PORT: ${RABBITMQ_PORT:-5672}
+      RABBITMQ_USER: ${RABBITMQ_USER:-admin}
+      RABBITMQ_PASSWORD: ${RABBITMQ_PASSWORD:-admin}
+    expose:
+      - "${NOTIFICACIONES_PORT:-8082}"
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f --silent http://localhost:$${PORT:-8082}/health"]
+      interval: 30s
+      timeout: 5s
+      start_period: 20s
+      retries: 3
+    networks:
+      - microservices-network
+
+  profiles-service:
+    build:
+      context: ./services/profiles-service
+      dockerfile: Dockerfile
+    depends_on:
+      database-perfiles:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+    environment:
+      NODE_ENV: production
+      PORT: ${PERFILES_PORT:-8083}
+      DATABASE_URL: postgresql://${PERFILES_DB_USER:-postgres}:${PERFILES_DB_PASSWORD:-postgres}@database-perfiles:5432/${PERFILES_DB_NAME:-gestion_perfiles}
+      RABBITMQ_HOST: ${RABBITMQ_HOST:-rabbitmq}
+      RABBITMQ_PORT: ${RABBITMQ_PORT:-5672}
+      RABBITMQ_USER: ${RABBITMQ_USER:-admin}
+      RABBITMQ_PASSWORD: ${RABBITMQ_PASSWORD:-admin}
+    expose:
+      - "${PERFILES_PORT:-8083}"
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f --silent http://localhost:$${PORT:-8083}/health"]
+      interval: 30s
+      timeout: 5s
+      start_period: 20s
+      retries: 3
+    networks:
+      - microservices-network
+
+  vacations-service:
+    build:
+      context: ./services/vacations-service
+      dockerfile: Dockerfile
+    depends_on:
+      db-vacaciones:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+    environment:
+      NODE_ENV: production
+      PORT: ${VACACIONES_PORT:-8084}
+      DATABASE_URL: postgresql://${VACACIONES_DB_USER:-postgres}:${VACACIONES_DB_PASSWORD:-postgres}@db-vacaciones:5432/${VACACIONES_DB_NAME:-gestion_vacaciones}
+      RABBITMQ_HOST: ${RABBITMQ_HOST:-rabbitmq}
+      RABBITMQ_PORT: ${RABBITMQ_PORT:-5672}
+      RABBITMQ_USER: ${RABBITMQ_USER:-admin}
+      RABBITMQ_PASSWORD: ${RABBITMQ_PASSWORD:-admin}
+    expose:
+      - "${VACACIONES_PORT:-8084}"
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f --silent http://localhost:$${PORT:-8084}/health"]
       interval: 30s
       timeout: 5s
       start_period: 20s

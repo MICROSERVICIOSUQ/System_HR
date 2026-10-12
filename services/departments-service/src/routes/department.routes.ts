@@ -10,6 +10,7 @@ router.get('/', controller.getAll);
 router.get('/:id', validateParams(departmentIdSchema), controller.getById);
 router.post('/', validateBody(createDepartmentSchema), controller.create);
 router.put('/:id', validateParams(departmentIdSchema), validateBody(updateDepartmentSchema), controller.update);
+router.patch('/:id', validateParams(departmentIdSchema), validateBody(updateDepartmentSchema), controller.update);
 router.delete('/:id', validateParams(departmentIdSchema), controller.remove);
 
 export default router;

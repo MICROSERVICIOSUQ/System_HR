@@ -1,0 +1,30 @@
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+/// Read Model CQRS: proyección desnormalizada de empleados construida exclusivamente desde eventos RabbitMQ.
+model EmployeeProfile {
+  /// UUID interno generado por la base de datos
+  id             String    @id @default(uuid())
+  /// ID del empleado (clave de negocio, UNIQUE)
+  employeeId     String    @unique
+  nombre         String
+  apellido       String
+  email          String
+  cargo          String
+  departamentoId String
+  fechaIngreso   DateTime
+  /// Fecha de retiro; null mientras el empleado está ACTIVO
+  fechaRetiro    DateTime?
+  /// ACTIVO | RETIRADO
+  estado         String    @default("ACTIVO")
+  /// UUID del último evento aplicado (idempotencia)
+  lastEventId    String    @unique
+  /// Actualizado automáticamente en cada operación
+  updatedAt      DateTime  @updatedAt
+}

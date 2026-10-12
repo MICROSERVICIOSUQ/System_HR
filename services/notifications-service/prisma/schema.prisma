@@ -1,0 +1,20 @@
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+model NotificationHistory {
+  id           String   @id @default(uuid())
+  messageId    String   @unique
+  eventType    String
+  producer     String
+  employeeId   String
+  employeeName String
+  email        String
+  processedAt  DateTime @default(now())
+  payload      Json
+}

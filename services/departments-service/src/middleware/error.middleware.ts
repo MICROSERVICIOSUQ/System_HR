@@ -1,5 +1,6 @@
 import type { NextFunction, Request, Response } from 'express';
 import { DatabaseUnavailableError } from '../utils/database-retry.ts';
+import { EmployeeServiceUnavailableError } from '../clients/employee.client.ts';
 
 /** Detalle de un campo que no superó la validación. */
 export interface FieldError {
@@ -32,7 +33,7 @@ export const notFoundHandler = (req: Request, res: Response) => {
 
 export const errorHandler = (
   err: Error,
-  _req: Request,
+  req: Request,
   res: Response,
   _next: NextFunction,
 ) => {
@@ -52,6 +53,39 @@ export const errorHandler = (
       status: 'error',
       message: err.message,
     });
+  }
+
+  if (err instanceof EmployeeServiceUnavailableError) {
+    return res.status(503).json({
+      status: 'error',
+      message: err.message,
+    });
+  }
+
+  if (err.name === 'PrismaClientKnownRequestError') {
+    const code = (err as Error & { code?: string }).code;
+
+    if (code === 'P2002') {
+      return res.status(409).json({
+        status: 'error',
+        message: 'Ya existe un departamento con ese identificador.',
+      });
+    }
+
+    if (code === 'P2025') {
+      const id = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
+      return res.status(404).json({
+        status: 'error',
+        message: `El departamento con id ${id} no existe`,
+      });
+    }
+
+    if (code === 'P2003') {
+      return res.status(409).json({
+        status: 'error',
+        message: 'No se puede eliminar el departamento porque tiene empleados asociados.',
+      });
+    }
   }
 
   if (err.name === 'PrismaClientValidationError') {

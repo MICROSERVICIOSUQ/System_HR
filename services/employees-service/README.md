@@ -1,103 +1,155 @@
-# Servicio de empleados
+# Servicio de empleados (employees-service)
 
-API REST con Java 21, Spring Boot, JPA y PostgreSQL. Registra y consulta empleados, verifica duplicados y consulta a departamentos antes de guardar.
+API REST con Java 21, Spring Boot 3.4, JPA, PostgreSQL y Spring AMQP (RabbitMQ).
+Registra, actualiza y retira empleados, verifica duplicados, valida existencia de departamentos y actúa como **productor de eventos de dominio** hacia el bus de mensajería asíncrona.
+
+---
 
 ## Acceso
 
-URL pública: `http://localhost:8080`, mediante el API Gateway. El servicio no publica su puerto directamente al host.
+URL pública: `http://localhost:8080`, mediante el API Gateway. El microservicio expone sus puertos internamente a la red de Docker (`microservices-network`).
 
 | Método | Ruta pública | Resultado principal |
 |---|---|---|
 | GET | `/empleados/health` | 200: salud del servicio |
 | GET | `/empleados/circuit-breaker` | 200: estado y contadores del circuito |
-| POST | `/empleados` | 201: empleado creado |
-| GET | `/empleados` | 200: listado |
-| GET | `/empleados/{id}` | 200 o 404 |
+| POST | `/empleados` | 201: empleado registrado + emite `empleado.creado` |
+| GET | `/empleados` | 200: listado de empleados; admite filtros y paginación |
+| GET | `/empleados/auditoria?desde=YYYY-MM-DD&hasta=YYYY-MM-DD` | 200: retirados en un rango; admite paginación |
+| GET | `/empleados/{id}` | 200 o 404: consulta por identificador |
+| PUT | `/empleados/{id}` | 200: empleado actualizado + emite `empleado.actualizado` |
+| DELETE | `/empleados/{id}` | 200: retiro lógico (estado `RETIRADO`) + emite `empleado.retirado` |
 
-La salud del servicio es independiente de la disponibilidad de departamentos; el estado de esa dependencia se consulta en el endpoint del Circuit Breaker.
+Los listados aceptan `page`, `limit` (el alias histórico `size` también se
+mantiene), `sortBy` y `order=ASC|DESC`. Los valores predeterminados son
+`page=1`, `limit=10`, `sortBy=id` y `order=ASC`; el límite máximo es 100.
+Los campos ordenables son `id`, `employeeNumber`, `nombre`, `apellido`, `email`,
+`cargo`, `area`, `departamentoId`, `fechaIngreso`, `fechaRetiro` y `status`.
+Cuando se envía alguno de esos parámetros la respuesta usa
+`{data,meta:{total,page,limit,totalPages}}`; sin parámetros se conserva el
+array histórico. Parámetros inválidos responden 400. Una página fuera de rango
+devuelve `data: []` y `totalPages` es 0 cuando no hay resultados.
 
-## Datos del registro
+---
 
-Son obligatorios `id`, `nombre`, `apellido`, `email`, `numeroEmpleado`, `cargo`, `area`, `departamentoId` y `fechaIngreso`.
+## Productor de Eventos (RabbitMQ)
 
-`estado` es opcional al crear. El servicio asigna `ACTIVO`; un valor fuera del enum se rechaza por formato inválido.
+El microservicio actúa exclusivamente como **productor** de eventos de dominio. Desconoce por completo a los servicios consumidores (`profiles-service`, `notifications-service`, `vacations-service`).
 
-El ID lo suministra el cliente. El email y el número de empleado deben ser únicos. La validación de departamento sí consulta a `departments-service`.
-
-## Crear un empleado
-
-Primero debe existir el departamento `IT`. Desde el host:
-
-```bash
-curl -i -X POST http://localhost:8080/empleados \
-  -H 'Content-Type: application/json' \
-  -d '{
-    "id":"E001",
-    "nombre":"Ana",
-    "apellido":"Pérez",
-    "email":"ana.perez@example.com",
-    "numeroEmpleado":"EMP-001",
-    "cargo":"Desarrolladora",
-    "area":"Tecnología",
-    "departamentoId":"IT",
-    "fechaIngreso":"2026-09-22"
-  }'
-```
-
-Devuelve `201 Created` con el empleado registrado. Repetir este ejemplo provoca un rechazo por duplicado.
-
-## Errores
-
-| Código | Motivo |
-|---|---|
-| 400 | Datos inválidos, duplicados o departamento inexistente |
-| 404 | Empleado inexistente o ruta interna no encontrada |
-| 503 | Departamentos no disponible, circuito abierto o persistencia no disponible |
-
-Los errores incluyen `timestamp`, `status`, `error`, `message` y `path`. Los errores de validación añaden el detalle por campo.
-
-## Flujo de registro y resiliencia
+### Topología de Publicación
 
 ```text
-Validación de campos
-    → verificación de email, número e ID
-    → DepartmentClient: Circuit Breaker
-        → DepartmentHttpClient: HTTP con reintentos
-    → guardar como ACTIVO
+employees-service
+        │
+        ▼ (Fanout - routing key "")
+   [hr.events] (Exchange durable)
+        │
+        ├──► profiles.queue
+        ├──► notifications.queue
+        └──► vacations.queue
 ```
 
-El circuito protege exclusivamente la consulta HTTP. Los duplicados y los errores de PostgreSQL no cuentan como fallos de departamentos.
+* **Exchange:** `hr.events` (tipo `fanout`, durable = true).
+* **Routing Key:** vacía (`""`), dado que el exchange fanout distribuye a todas las colas suscritas.
+* **Colas:** No se declaran colas de consumidores en este servicio; pertenecen a la infraestructura central.
 
-Resilience4j utiliza una ventana de 3 operaciones, un mínimo de 3 y un umbral de fallos del 100 %. Espera 30 segundos en OPEN y permite una operación en HALF_OPEN. Una operación incluye hasta cuatro intentos HTTP, con esperas de 1, 2 y 4 segundos. Los timeouts son 3 segundos para conectar y 5 para leer.
+### Eventos Publicados
 
-Un 404 de departamentos significa que el servicio respondió correctamente: el registro devuelve 400 por departamento inexistente y el circuito puede cerrarse durante la recuperación.
+| Evento | Cuándo se emite | Contrato |
+|---|---|---|
+| `empleado.creado` | Tras persistir exitosamente un nuevo empleado (POST /empleados). | `shared-events/schemas/empleado.schema.json` |
+| `empleado.actualizado` | Tras actualizar los datos de un empleado (PUT /empleados/{id}). | `shared-events/schemas/empleado.schema.json` |
+| `empleado.retirado` | Tras realizar el retiro lógico cambiando el estado a `RETIRADO` (DELETE /empleados/{id}). | `shared-events/schemas/empleado.schema.json` |
 
-## Fallback
+### Estructura Canónica del Envelope
 
-Ante indisponibilidad o circuito abierto, se devuelve `503` y no se guarda el empleado. Se prioriza validar la referencia al departamento antes de persistir. No existen registros pendientes que reconciliar.
+Todos los mensajes se emiten utilizando el sobre estándar definido en el proyecto:
 
-## Observación
+```json
+{
+  "id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+  "type": "empleado.creado",
+  "version": "1.0",
+  "occurredAt": "2026-09-27T22:00:00.000Z",
+  "producer": "employees-service",
+  "data": {
+    "id": "E001",
+    "nombre": "Ana",
+    "apellido": "Pérez",
+    "email": "ana.perez@example.com",
+    "departamentoId": "IT",
+    "cargo": "Desarrolladora",
+    "fechaIngreso": "2026-09-22",
+    "fechaRetiro": null
+  }
+}
+```
+
+* `id`: UUID v4 único generado por cada evento (nunca es el ID del empleado).
+* `occurredAt`: Marca temporal ISO-8601 en formato UTC (`Instant.now()`).
+* `producer`: Identificador del emisor (`employees-service`).
+* `data.fechaRetiro`: Contiene la fecha (`yyyy-MM-dd`) cuando el estado es `RETIRADO`, o `null` si está activo.
+
+---
+
+## Decisión de Arquitectura: Transaccionalidad y Consistencia
+
+### ¿Por qué no Outbox Pattern en esta etapa?
+El patrón *Transactional Outbox* requiere una tabla adicional en base de datos (`outbox_events`), coordinación transaccional local y un proceso en segundo plano (poller periódico o Change Data Capture como Debezium) para publicar en RabbitMQ. 
+
+Para esta fase del Reto 4, se adopta la **estrategia de publicación confiable post-persistencia**:
+1. La operación de base de datos se ejecuta primero (validaciones, asignación de estado y `repository.save()`).
+2. Si la base de datos falla o se produce un rollback, **nunca se publica el evento en RabbitMQ**, evitando inconsistencias por eventos fantasmas.
+3. Tras la persistencia exitosa, se emite el evento al exchange `hr.events`.
+4. Si ocurre un fallo en RabbitMQ, el error se captura y se registra con log detallado a nivel `ERROR` (incluyendo tipo, id de evento, id de empleado y causa raíz) para alerta inmediata a observabilidad, manteniendo intacta la respuesta HTTP de persistencia (`201` o `200`) para no degradar el contrato con clientes HTTP.
+
+---
+
+## Variables de Entorno
+
+| Variable | Valor predeterminado (Local) | Valor en Docker Compose |
+|---|---|---|
+| `SERVER_PORT` | `8080` | `8080` |
+| `SPRING_DATASOURCE_URL` | `jdbc:postgresql://localhost:5433/gestion_empleados` | `jdbc:postgresql://database-empleados:5432/gestion_empleados` |
+| `SPRING_DATASOURCE_USERNAME` | `postgres` | `postgres` |
+| `SPRING_DATASOURCE_PASSWORD` | `postgres` | `postgres` |
+| `DEPARTMENTS_SERVICE_URL` | `http://localhost:8081` | `http://departments-service:8081` |
+| `RABBITMQ_HOST` | `localhost` | `rabbitmq` |
+| `RABBITMQ_PORT` | `5672` | `5672` |
+| `RABBITMQ_USER` | `admin` | `admin` |
+| `RABBITMQ_PASSWORD` | `admin` | `admin` |
+
+---
+
+## Flujo de Registro y Resiliencia
+
+```text
+Validación de campos (@Valid)
+    → Verificación de duplicados (email, número e ID)
+    → DepartmentClient (Resilience4j Circuit Breaker)
+        → DepartmentHttpClient (HTTP con reintentos exponenciales)
+    → Guardar en PostgreSQL (estado ACTIVO)
+    → Publicar evento 'empleado.creado' en exchange 'hr.events'
+```
+
+---
+
+## Pruebas Automatizadas
+
+Desde el directorio `services/employees-service`:
 
 ```bash
-curl -s http://localhost:8080/empleados/circuit-breaker
-docker compose logs -f employees-service
+./mvnw test
 ```
 
-El endpoint devuelve el nombre del circuito, estado y contadores. Los logs muestran los reintentos y cambios de estado.
+La suite cuenta con **pruebas automatizadas**:
+* `EmployeeEndpointsTest` (18 pruebas): Cobertura completa de endpoints REST, validaciones, códigos de error HTTP (400, 404, 503) y Circuit Breaker.
+* `EmployeeEventPublisherTest` (4 pruebas): Verificación de generación de `empleado.creado`, `empleado.actualizado`, `empleado.retirado`, formato estricto del Envelope (UUID, ISO-8601, productor) y garantía de no publicación ante fallos de validación/rollback.
+* `DepartmentCircuitBreakerTest` (4 pruebas): Comportamiento de estados del circuito (CLOSED, OPEN, HALF_OPEN) con servidor mock.
+* `DepartmentClientRetryTest` (1 prueba): Validación de reintentos exponenciales ante fallos de red.
+* `DepartmentCacheTest` y `DepartmentCacheFallbackTest`: Cobertura completa del caso alternativo de contingencia mediante caché en memoria ante indisponibilidad de departamentos.
 
-## Ejecución y pruebas
-
-El sistema completo se inicia con `docker compose up --build -d` desde la raíz. Compose proporciona la base de datos y la URL interna de departamentos. Flyway administra el esquema y Hibernate lo valida.
-
-Con Java 21 y Maven, desde la carpeta del servicio:
-
-```bash
-mvn test
-```
-
-Las pruebas verificadas cubren endpoints, validaciones, reintentos, apertura, rechazo sin llamadas a la red, recuperación, fallo de la llamada de prueba y aislamiento de errores de negocio.
-
-OpenAPI y Swagger siguen siendo rutas internas del servicio; actualmente el Gateway no las publica. Para la prueba integral del Reto 3, consulta `tests/README.md` desde la raíz del repositorio.
+---
 
 ## Caso alternativo — Caché de contingencia
 
@@ -105,7 +157,7 @@ Como mejora para la resiliencia, el sistema cuenta con un caché temporal de inf
 
 * **Propósito:** Mantener temporalmente la capacidad de validar departamentos durante una interrupción de la comunicación con `departments-service`.
 * **Ubicación:** Integrado en el `DepartmentClient` dentro de `employees-service`.
-* **TTL:** 30 minutos (configurable vía `departments.cache.ttl-minutes`).
+* **TTL:** 30 minutos (configurable vía `departments.cache.ttl-minutes` / `DEPARTMENTS_CACHE_TTL_MINUTES`).
 * **Fuente de verdad:** El servicio real y su base de datos. El caché se alimenta estrictamente de las respuestas exitosas de `departments-service`.
 * **Cuándo se utiliza:** Únicamente como fallback tras agotar los reintentos HTTP o cuando el Circuit Breaker está abierto (`OPEN`). 
 * **Cuándo NO se utiliza:** Nunca se utiliza como primera opción frente al servicio disponible. Además, un `404` (departamento inexistente) del servicio real no usa el caché porque constituye una comunicación exitosa.

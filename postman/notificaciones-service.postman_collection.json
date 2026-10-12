@@ -1,0 +1,93 @@
+{
+  "info": {
+    "name": "notificaciones-service",
+    "description": "Consultas del historial inmutable de notificaciones, paginación e idempotencia.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    { "key": "notificacionesBaseUrl", "value": "http://localhost:8082" },
+    { "key": "notificationMessageId", "value": "e1f2a3b4-c5d6-7890-abcd-ef1234567890" }
+  ],
+  "item": [
+    {
+      "name": "1. GET /notifications listado",
+      "request": {
+        "method": "GET",
+        "url": {
+          "raw": "{{notificacionesBaseUrl}}/notifications",
+          "host": ["{{notificacionesBaseUrl}}"],
+          "path": ["notifications"]
+        }
+      },
+      "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": [
+        "pm.test('Status 200', () => pm.response.to.have.status(200));",
+        "pm.test('Devuelve historial como array', () => pm.expect(pm.response.json()).to.be.an('array'));"
+      ] } }]
+    },
+    {
+      "name": "2. GET /notifications paginado",
+      "request": {
+        "method": "GET",
+        "url": {
+          "raw": "{{notificacionesBaseUrl}}/notifications?page=1&limit=10",
+          "host": ["{{notificacionesBaseUrl}}"],
+          "path": ["notifications"],
+          "query": [
+            { "key": "page", "value": "1" },
+            { "key": "limit", "value": "10" }
+          ]
+        }
+      },
+      "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": [
+        "pm.test('Status 200', () => pm.response.to.have.status(200));",
+        "const body = pm.response.json();",
+        "pm.test('Página con data y meta', () => { pm.expect(body.data).to.be.an('array'); pm.expect(body.meta.totalPages).to.be.a('number'); });"
+      ] } }]
+    },
+    {
+      "name": "3. GET /notifications/:messageId",
+      "request": {
+        "method": "GET",
+        "url": {
+          "raw": "{{notificacionesBaseUrl}}/notifications/{{notificationMessageId}}",
+          "host": ["{{notificacionesBaseUrl}}"],
+          "path": ["notifications", "{{notificationMessageId}}"]
+        }
+      },
+      "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": [
+        "pm.test('Status 200 o 404 según exista el evento', () => pm.expect([200, 404]).to.include(pm.response.code));",
+        "if (pm.response.code === 200) pm.test('Devuelve messageId consultado', () => pm.expect(pm.response.json().messageId).to.eql(pm.collectionVariables.get('notificationMessageId')));"
+      ] } }]
+    },
+    {
+      "name": "4. POST /notifications rechazado",
+      "request": {
+        "method": "POST",
+        "header": [{ "key": "Content-Type", "value": "application/json" }],
+        "body": { "mode": "raw", "raw": "{}", "options": { "raw": { "language": "json" } } },
+        "url": {
+          "raw": "{{notificacionesBaseUrl}}/notifications",
+          "host": ["{{notificacionesBaseUrl}}"],
+          "path": ["notifications"]
+        }
+      },
+      "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": [
+        "pm.test('Status 405 Method Not Allowed', () => pm.response.to.have.status(405));"
+      ] } }]
+    },
+    {
+      "name": "5. DELETE /notifications/:messageId rechazado",
+      "request": {
+        "method": "DELETE",
+        "url": {
+          "raw": "{{notificacionesBaseUrl}}/notifications/{{notificationMessageId}}",
+          "host": ["{{notificacionesBaseUrl}}"],
+          "path": ["notifications", "{{notificationMessageId}}"]
+        }
+      },
+      "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": [
+        "pm.test('Status 405 Method Not Allowed', () => pm.response.to.have.status(405));"
+      ] } }]
+    }
+  ]
+}

@@ -284,6 +284,180 @@
         }
       },
       "response": []
+    },
+    {
+      "name": "8. PUT /empleados/{id} actualización",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('Status 200 OK', () => pm.response.to.have.status(200));",
+              "const e = pm.response.json();",
+              "pm.test('Cargo y área actualizados', () => {",
+              "    pm.expect(e.id).to.eql('E101');",
+              "    pm.expect(e.cargo).to.eql('Líder Técnica');",
+              "    pm.expect(e.area).to.eql('Arquitectura');",
+              "});"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "PUT",
+        "header": [{ "key": "Content-Type", "value": "application/json" }],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"cargo\": \"Líder Técnica\",\n  \"area\": \"Arquitectura\"\n}",
+          "options": { "raw": { "language": "json" } }
+        },
+        "url": {
+          "raw": "{{empleadosBaseUrl}}/empleados/E101",
+          "host": ["{{empleadosBaseUrl}}"],
+          "path": ["empleados", "E101"]
+        }
+      },
+      "response": []
+    },
+    {
+      "name": "9. PATCH /empleados/{id} actualización parcial",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('Status 200 OK', () => pm.response.to.have.status(200));",
+              "const e = pm.response.json();",
+              "pm.test('Cargo actualizado por PATCH', () => {",
+              "    pm.expect(e.id).to.eql('E101');",
+              "    pm.expect(e.cargo).to.eql('Directora de Tecnología');",
+              "});"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "PATCH",
+        "header": [{ "key": "Content-Type", "value": "application/json" }],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"cargo\": \"Directora de Tecnología\"\n}",
+          "options": { "raw": { "language": "json" } }
+        },
+        "url": {
+          "raw": "{{empleadosBaseUrl}}/empleados/E101",
+          "host": ["{{empleadosBaseUrl}}"],
+          "path": ["empleados", "E101"]
+        }
+      },
+      "response": []
+    },
+    {
+      "name": "10. GET /empleados con filtros y paginación",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('Status 200 OK', () => pm.response.to.have.status(200));",
+              "const body = pm.response.json();",
+              "const list = body.data;",
+              "pm.test('Devuelve data/meta y registros que coinciden con filtro', () => {",
+              "    pm.expect(list).to.be.an('array');",
+              "    pm.expect(body.meta.total).to.be.a('number');",
+              "    list.forEach(e => {",
+              "        pm.expect(e.departamentoId).to.eql('DEP-EMP');",
+              "        pm.expect(e.estado).to.eql('ACTIVO');",
+              "    });",
+              "});"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "{{empleadosBaseUrl}}/empleados?departamentoId=DEP-EMP&estado=ACTIVO&page=1&limit=10&sortBy=id&order=ASC",
+          "host": ["{{empleadosBaseUrl}}"],
+          "path": ["empleados"],
+          "query": [
+            { "key": "departamentoId", "value": "DEP-EMP" },
+            { "key": "estado", "value": "ACTIVO" },
+            { "key": "page", "value": "1" },
+            { "key": "limit", "value": "10" },
+            { "key": "sortBy", "value": "id" },
+            { "key": "order", "value": "ASC" }
+          ]
+        }
+      },
+      "response": []
+    },
+    {
+      "name": "11. DELETE /empleados/{id} baja lógica",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('Status 200 OK', () => pm.response.to.have.status(200));",
+              "const e = pm.response.json();",
+              "pm.test('Estado cambia a RETIRADO con fechaRetiro', () => {",
+              "    pm.expect(e.id).to.eql('E101');",
+              "    pm.expect(e.estado).to.eql('RETIRADO');",
+              "    pm.expect(e.fechaRetiro).to.be.a('string').and.not.empty;",
+              "});"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "DELETE",
+        "header": [],
+        "url": {
+          "raw": "{{empleadosBaseUrl}}/empleados/E101",
+          "host": ["{{empleadosBaseUrl}}"],
+          "path": ["empleados", "E101"]
+        }
+      },
+      "response": []
+    },
+    {
+      "name": "12. GET /empleados/auditoria de retirados",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('Status 200 OK', () => pm.response.to.have.status(200));",
+              "const list = pm.response.json();",
+              "pm.test('Lista contiene E101 con estado RETIRADO', () => {",
+              "    pm.expect(list).to.be.an('array');",
+              "    pm.expect(list.some(e => e.id === 'E101' && e.estado === 'RETIRADO')).to.eql(true);",
+              "});"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "{{empleadosBaseUrl}}/empleados/auditoria?desde=2026-01-01&hasta=2026-12-31",
+          "host": ["{{empleadosBaseUrl}}"],
+          "path": ["empleados", "auditoria"],
+          "query": [
+            { "key": "desde", "value": "2026-01-01" },
+            { "key": "hasta", "value": "2026-12-31" }
+          ]
+        }
+      },
+      "response": []
     }
   ]
 }

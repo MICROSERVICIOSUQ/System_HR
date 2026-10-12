@@ -1,0 +1,87 @@
+{
+  "info": {
+    "name": "System_HR - listados paginados",
+    "description": "Verifica page, limit, sortBy, order, filtros y la respuesta data/meta de los listados.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "item": [
+    {
+      "name": "Departments - listado paginado",
+      "request": {
+        "method": "GET",
+        "url": "{{departamentosBaseUrl}}/departamentos?page=1&limit=10&sortBy=createdAt&order=DESC"
+      },
+      "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": [
+        "pm.test('200', () => pm.response.to.have.status(200));",
+        "const body = pm.response.json();",
+        "pm.expect(body.data).to.be.an('array');",
+        "pm.expect(body.meta).to.have.property('totalPages');"
+      ] } }]
+    },
+    {
+      "name": "Employees - listado filtrado y paginado",
+      "request": {
+        "method": "GET",
+        "url": "{{empleadosBaseUrl}}/empleados?estado=ACTIVO&page=1&limit=10&sortBy=id&order=ASC"
+      },
+      "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": [
+        "pm.test('200', () => pm.response.to.have.status(200));",
+        "const body = pm.response.json();",
+        "pm.expect(body.data).to.be.an('array');",
+        "pm.expect(body.meta.limit).to.eql(10);"
+      ] } }]
+    },
+    {
+      "name": "Profiles - listado filtrado y paginado",
+      "request": {
+        "method": "GET",
+        "url": "{{perfilesBaseUrl}}/profiles?estado=ACTIVO&page=1&limit=10&sortBy=updatedAt&order=DESC"
+      },
+      "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": [
+        "pm.test('200', () => pm.response.to.have.status(200));",
+        "const body = pm.response.json();",
+        "pm.expect(body.data).to.be.an('array');",
+        "pm.expect(body.meta).to.have.property('total');"
+      ] } }]
+    },
+    {
+      "name": "Notifications - historial paginado",
+      "request": {
+        "method": "GET",
+        "url": "{{notificacionesBaseUrl}}/notifications?page=1&limit=10&sortBy=processedAt&order=DESC"
+      },
+      "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": [
+        "pm.test('200', () => pm.response.to.have.status(200));",
+        "const body = pm.response.json();",
+        "pm.expect(body.data).to.be.an('array');",
+        "pm.expect(body.meta.totalPages).to.be.a('number');"
+      ] } }]
+    },
+    {
+      "name": "Vacations - períodos filtrados y paginados",
+      "request": {
+        "method": "GET",
+        "url": "{{vacacionesBaseUrl}}/vacations?estado=PROGRAMADA&page=1&limit=10&sortBy=fechaCreacion&order=DESC"
+      },
+      "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": [
+        "pm.test('200', () => pm.response.to.have.status(200));",
+        "const body = pm.response.json();",
+        "pm.expect(body.data).to.be.an('array');",
+        "pm.expect(body.meta).to.have.property('totalPages');"
+      ] } }]
+    },
+    {
+      "name": "Vacations - saldos filtrados y paginados",
+      "request": {
+        "method": "GET",
+        "url": "{{vacacionesBaseUrl}}/vacations/balances?estado=ACTIVO&page=1&limit=10&sortBy=updatedAt&order=DESC"
+      },
+      "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": [
+        "pm.test('200', () => pm.response.to.have.status(200));",
+        "const body = pm.response.json();",
+        "pm.expect(body.data).to.be.an('array');",
+        "pm.expect(body.meta).to.have.property('total');"
+      ] } }]
+    }
+  ]
+}

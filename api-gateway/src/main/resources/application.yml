@@ -19,6 +19,18 @@ spring:
           uri: ${DEPARTAMENTOS_URL:http://departments-service:8081}
           predicates:
             - Path=/departamentos,/departamentos/**
+        - id: notificaciones-route
+          uri: ${NOTIFICACIONES_URL:http://notifications-service:8082}
+          predicates:
+            - Path=/notifications,/notifications/**
+        - id: perfiles-route
+          uri: ${PERFILES_URL:http://profiles-service:8083}
+          predicates:
+            - Path=/profiles,/profiles/**
+        - id: vacaciones-route
+          uri: ${VACACIONES_URL:http://vacations-service:8084}
+          predicates:
+            - Path=/vacations,/vacations/**,/vacaciones,/vacaciones/**
 
 management:
   endpoints:

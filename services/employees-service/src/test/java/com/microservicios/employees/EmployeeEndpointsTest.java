@@ -16,7 +16,9 @@ import org.springframework.test.web.servlet.MockMvc;
 
 import static org.hamcrest.Matchers.containsInAnyOrder;
 import static org.hamcrest.Matchers.hasSize;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
@@ -33,6 +35,9 @@ class EmployeeEndpointsTest {
 
     @MockBean
     private DepartmentClient departmentClient;
+
+    @MockBean
+    private com.microservicios.employees.messaging.EmployeeEventPublisher eventPublisher;
 
     @BeforeEach
     void existingDepartment() {
@@ -304,5 +309,148 @@ class EmployeeEndpointsTest {
                 .andExpect(status().isCreated())
                 .andExpect(jsonPath("$.id").value("E099"))
                 .andExpect(jsonPath("$.estado").value("ACTIVO"));
+    }
+
+    @Test
+    @Order(19)
+    void auditEndpointFiltersRetiredEmployeesByDateRangeAndVerifiesLogicalDelete() throws Exception {
+        // 1. Verificar que antes del retiro, la auditoría no incluye a E001
+        mockMvc.perform(get("/empleados/auditoria?desde=2020-01-01&hasta=2030-12-31"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$").isArray())
+                .andExpect(jsonPath("$[?(@.id == 'E001')]").doesNotExist());
+
+        // 2. Ejecutar baja lógica de E001 (DELETE /empleados/E001)
+        mockMvc.perform(delete("/empleados/E001"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.id").value("E001"))
+                .andExpect(jsonPath("$.employeeId").value("E001"))
+                .andExpect(jsonPath("$.estado").value("RETIRADO"))
+                .andExpect(jsonPath("$.fechaRetiro").isNotEmpty());
+
+        // 3. Demostrar que el registro NO fue eliminado físicamente (GET /empleados/E001 responde 200 OK)
+        mockMvc.perform(get("/empleados/E001"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.id").value("E001"))
+                .andExpect(jsonPath("$.employeeId").value("E001"))
+                .andExpect(jsonPath("$.nombre").value("Juan"))
+                .andExpect(jsonPath("$.estado").value("RETIRADO"))
+                .andExpect(jsonPath("$.fechaRetiro").isNotEmpty());
+
+        // 4. Consultar auditoría en rango que cubre la fecha actual: debe retornar a E001
+        mockMvc.perform(get("/empleados/auditoria?desde=2026-01-01&hasta=2026-12-31"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$").isArray())
+                .andExpect(jsonPath("$[?(@.employeeId == 'E001')].nombre").value("Juan"))
+                .andExpect(jsonPath("$[?(@.employeeId == 'E001')].estado").value("RETIRADO"))
+                .andExpect(jsonPath("$[?(@.employeeId == 'E001')].fechaRetiro").isNotEmpty());
+
+        // 5. Consultar auditoría en un rango de fechas fuera del rango de retiro: no debe retornar registros
+        mockMvc.perform(get("/empleados/auditoria?desde=2024-01-01&hasta=2024-12-31"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$", hasSize(0)));
+
+        // 6. Probar alias de parámetros fechaInicio y fechaFin
+        mockMvc.perform(get("/empleados/auditoria?fechaInicio=2026-01-01&fechaFin=2026-12-31"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$").isArray())
+                .andExpect(jsonPath("$[?(@.employeeId == 'E001')].nombre").value("Juan"));
+    }
+
+    @Test
+    @Order(20)
+    void auditEndpointValidatesDateParameters() throws Exception {
+        // Validación: desde > hasta debe retornar 400
+        mockMvc.perform(get("/empleados/auditoria?desde=2026-12-31&hasta=2026-01-01"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.status").value(400))
+                .andExpect(jsonPath("$.message").value(org.hamcrest.Matchers.containsString("no puede ser posterior a la fecha 'hasta'")));
+
+        // Validación: fecha con formato inválido debe retornar 400
+        mockMvc.perform(get("/empleados/auditoria?desde=no-es-fecha&hasta=2026-12-31"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.status").value(400));
+
+        // Validación: parámetros faltantes debe retornar 400
+        mockMvc.perform(get("/empleados/auditoria"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.status").value(400));
+    }
+
+    @Test
+    @Order(21)
+    void updateEmployeeViaPutSuccessfully() throws Exception {
+        String updatePayload = """
+                {
+                  "cargo": "Principal Architect",
+                  "area": "Innovación"
+                }
+                """;
+
+        mockMvc.perform(put("/empleados/E099")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(updatePayload))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.id").value("E099"))
+                .andExpect(jsonPath("$.cargo").value("Principal Architect"))
+                .andExpect(jsonPath("$.area").value("Innovación"))
+                .andExpect(jsonPath("$.nombre").value("Carlos"));
+    }
+
+    @Test
+    @Order(22)
+    void updateEmployeeViaPatchSuccessfully() throws Exception {
+        String patchPayload = """
+                {
+                  "cargo": "VP of Engineering"
+                }
+                """;
+
+        mockMvc.perform(patch("/empleados/E099")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(patchPayload))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.id").value("E099"))
+                .andExpect(jsonPath("$.cargo").value("VP of Engineering"))
+                .andExpect(jsonPath("$.area").value("Innovación"));
+    }
+
+    @Test
+    @Order(23)
+    void getAllEmployeesSupportsFilteringByDepartmentStatusAndCargo() throws Exception {
+        mockMvc.perform(get("/empleados?departamentoId=IT&estado=ACTIVO"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$").isArray())
+                .andExpect(jsonPath("$[?(@.id == 'E099')]").exists())
+                .andExpect(jsonPath("$[?(@.id == 'E001')]").doesNotExist()); // E001 fue retirado en orden 19
+
+        mockMvc.perform(get("/empleados?cargo=Engineering"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$").isArray())
+                .andExpect(jsonPath("$[?(@.id == 'E099')].cargo").value("VP of Engineering"));
+    }
+
+    @Test
+    @Order(24)
+    void getAllEmployeesSupportsPagination() throws Exception {
+        mockMvc.perform(get("/empleados?page=1&limit=1&sortBy=id&order=ASC"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data").isArray())
+                .andExpect(jsonPath("$.data", hasSize(1)))
+                .andExpect(jsonPath("$.meta.total").isNumber())
+                .andExpect(jsonPath("$.meta.totalPages").isNumber());
+    }
+
+    @Test
+    @Order(25)
+    void getAllEmployeesRejectsInvalidPaginationAndSorting() throws Exception {
+        mockMvc.perform(get("/empleados?page=0&limit=10"))
+                .andExpect(status().isBadRequest());
+
+        mockMvc.perform(get("/empleados?page=1&limit=10&sortBy=password"))
+                .andExpect(status().isBadRequest());
+
+        mockMvc.perform(get("/empleados?page=1&limit=10&order=SIDEWAYS"))
+                .andExpect(status().isBadRequest());
     }
 }

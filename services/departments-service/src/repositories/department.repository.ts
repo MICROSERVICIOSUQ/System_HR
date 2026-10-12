@@ -3,12 +3,29 @@ import type { Prisma } from '../generated/prisma/client.ts';
 import { withDatabaseRetry } from '../utils/database-retry.ts';
 
 export class DepartmentRepository {
-  async findAll() {
-    return withDatabaseRetry(() =>
-      prisma.departamento.findMany({
-        orderBy: { createdAt: 'desc' },
-      }),
-    );
+  async findAll(pagination?: {
+    page: number;
+    limit: number;
+    sortBy: 'id' | 'nombre' | 'descripcion' | 'createdAt' | 'updatedAt';
+    order: 'asc' | 'desc';
+  }) {
+    return withDatabaseRetry(() => {
+      if (!pagination) {
+        return prisma.departamento.findMany({
+          orderBy: { createdAt: 'desc' },
+        });
+      }
+
+      const orderBy = { [pagination.sortBy]: pagination.order };
+      return prisma.$transaction([
+        prisma.departamento.count(),
+        prisma.departamento.findMany({
+          skip: (pagination.page - 1) * pagination.limit,
+          take: pagination.limit,
+          orderBy,
+        }),
+      ]).then(([total, data]) => ({ total, data }));
+    });
   }
 
   async findById(id: string) {
