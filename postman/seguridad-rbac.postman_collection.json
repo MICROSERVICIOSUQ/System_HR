@@ -1,0 +1,722 @@
+{
+  "info": {
+    "name": "Seguridad y RBAC (Reto 5)",
+    "description": "Evidencia automatizable de los criterios de validación de token (401) y control de acceso (403), incluida la autorización por propiedad del recurso.\n\nEl flujo está ENCADENADO: crea un departamento y dos empleados con el token de ADMIN, activa el primero y después comprueba qué puede y qué no puede hacer cada rol.\n\nPRECONDICIÓN: sistema recién levantado (`docker compose down -v && docker compose up --build`).\n\nATENCIÓN: los requests 5 y 6 necesitan que pegue a mano el token de activación que aparece en el log de notificaciones. El request 4 imprime el comando exacto en la consola de Postman.\n\nRequiere el environment `system-hr.postman_environment.json`.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    { "key": "adminToken", "value": "", "type": "string" },
+    { "key": "userToken", "value": "", "type": "string" },
+    { "key": "propioId", "value": "E601", "type": "string" },
+    { "key": "ajenoId", "value": "E602", "type": "string" },
+    { "key": "propioEmail", "value": "carlos.ruiz@empresa.com", "type": "string" },
+    { "key": "propioPassword", "value": "Secreta123", "type": "string" },
+    { "key": "resetToken", "value": "", "type": "string" }
+  ],
+  "item": [
+    {
+      "name": "0. Peticiones sin token (401)",
+      "item": [
+        {
+          "name": "0.1 GET /empleados sin cabecera Authorization",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 401 Unauthorized', () => pm.response.to.have.status(401));",
+                  "",
+                  "pm.test('Cuerpo de error con la forma estándar', () => {",
+                  "    const b = pm.response.json();",
+                  "    pm.expect(b.status).to.eql(401);",
+                  "    pm.expect(b.error).to.eql('Unauthorized');",
+                  "    pm.expect(b.message).to.include('token de acceso');",
+                  "    pm.expect(b.path).to.eql('/empleados');",
+                  "});",
+                  "",
+                  "pm.test('Incluye la cabecera WWW-Authenticate', () => {",
+                  "    pm.expect(pm.response.headers.get('WWW-Authenticate')).to.include('Bearer');",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{gatewayBaseUrl}}/empleados",
+              "host": ["{{gatewayBaseUrl}}"],
+              "path": ["empleados"]
+            },
+            "description": "Paso 4 del flujo de prueba del enunciado: sin cabeceras debe fallar con 401."
+          },
+          "response": []
+        },
+        {
+          "name": "0.2 GET /empleados con token alterado",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 401', () => pm.response.to.have.status(401));",
+                  "pmical = null;",
+                  "pm.test('Rechazado por firma inválida', () => {",
+                  "    pm.expect(pm.response.json().message).to.include('inválido');",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJoYWNrZXIiLCJyb2xlIjoiQURNSU4iLCJpYXQiOjE3MTIzNDU2NzgsImV4cCI6OTk5OTk5OTk5OX0.firma-falsificada"
+              }
+            ],
+            "url": {
+              "raw": "{{gatewayBaseUrl}}/empleados",
+              "host": ["{{gatewayBaseUrl}}"],
+              "path": ["empleados"]
+            },
+            "description": "Token con payload que se autoproclama ADMIN pero con firma falsificada. El gateway lo rechaza al verificar la firma HS256: sin el secreto no se puede forjar un token válido."
+          },
+          "response": []
+        },
+        {
+          "name": "0.3 Cabeceras de identidad falsificadas por el cliente",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 401: el gateway borra las cabeceras del cliente', () => {",
+                  "    pm.response.to.have.status(401);",
+                  "});",
+                  "",
+                  "pm.test('No basta con decir que eres ADMIN', () => {",
+                  "    pm.expect(pm.response.json().message).to.include('token de acceso');",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              { "key": "X-Auth-User", "value": "admin" },
+              { "key": "X-Auth-Role", "value": "ADMIN" }
+            ],
+            "url": {
+              "raw": "{{gatewayBaseUrl}}/empleados",
+              "host": ["{{gatewayBaseUrl}}"],
+              "path": ["empleados"]
+            },
+            "description": "Los servicios confían en X-Auth-User y X-Auth-Role porque solo el gateway está publicado al host. Para que esa confianza sea segura, el gateway ELIMINA esas cabeceras si llegan del cliente antes de validar. Sin eso, este request habría pasado como administrador."
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "1. Preparación con rol ADMIN",
+      "item": [
+        {
+          "name": "1.1 Login ADMIN",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 200', () => pm.response.to.have.status(200));",
+                  "pm.test('Rol ADMIN', () => pm.expect(pm.response.json().rol).to.eql('ADMIN'));",
+                  "pm.collectionVariables.set('adminToken', pm.response.json().token);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"usuario\": \"{{adminUsuario}}\",\n  \"password\": \"{{adminPassword}}\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": {
+              "raw": "{{gatewayBaseUrl}}/auth/login",
+              "host": ["{{gatewayBaseUrl}}"],
+              "path": ["auth", "login"]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "1.2 Crear departamento IT (ADMIN)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('201 creado, o 400/409 si ya existía', () => {",
+                  "    pm.expect(pm.response.code).to.be.oneOf([201, 400, 409]);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Authorization", "value": "Bearer {{adminToken}}" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"id\": \"IT\",\n  \"nombre\": \"Tecnología\",\n  \"descripcion\": \"Departamento de tecnología\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": {
+              "raw": "{{gatewayBaseUrl}}/departamentos",
+              "host": ["{{gatewayBaseUrl}}"],
+              "path": ["departamentos"]
+            },
+            "description": "Escritura permitida solo a ADMIN. Es idempotente para esta colección: si IT ya existe, se continúa."
+          },
+          "response": []
+        },
+        {
+          "name": "1.3 Crear empleado propio E601 (ADMIN)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 201', () => pm.response.to.have.status(201));",
+                  "",
+                  "console.log('──────────────────────────────────────────────────────────────');",
+                  "console.log('Obtenga el token de activación de E601 con:');",
+                  "console.log('  docker compose logs notifications-service | Select-String NOTIFICACIÓN');",
+                  "console.log('Péguelo en la variable de colección resetToken y siga con 2.1');",
+                  "console.log('──────────────────────────────────────────────────────────────');"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Authorization", "value": "Bearer {{adminToken}}" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"id\": \"{{propioId}}\",\n  \"nombre\": \"Carlos\",\n  \"apellido\": \"Ruiz\",\n  \"email\": \"{{propioEmail}}\",\n  \"numeroEmpleado\": \"EMP-2026-601\",\n  \"cargo\": \"Analista\",\n  \"area\": \"Tecnología\",\n  \"departamentoId\": \"IT\",\n  \"fechaIngreso\": \"2026-05-01\",\n  \"estado\": \"ACTIVO\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": {
+              "raw": "{{gatewayBaseUrl}}/empleados",
+              "host": ["{{gatewayBaseUrl}}"],
+              "path": ["empleados"]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "1.4 Crear empleado ajeno E602 (ADMIN)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 201', () => pm.response.to.have.status(201));",
+                  "pm.test('Es un empleado distinto del anterior', () => {",
+                  "    pm.expect(pm.response.json().id).to.eql(pm.collectionVariables.get('ajenoId'));",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Authorization", "value": "Bearer {{adminToken}}" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"id\": \"{{ajenoId}}\",\n  \"nombre\": \"Marta\",\n  \"apellido\": \"Soto\",\n  \"email\": \"marta.soto@empresa.com\",\n  \"numeroEmpleado\": \"EMP-2026-602\",\n  \"cargo\": \"Diseñadora\",\n  \"area\": \"Producto\",\n  \"departamentoId\": \"IT\",\n  \"fechaIngreso\": \"2026-05-01\",\n  \"estado\": \"ACTIVO\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": {
+              "raw": "{{gatewayBaseUrl}}/empleados",
+              "host": ["{{gatewayBaseUrl}}"],
+              "path": ["empleados"]
+            },
+            "description": "Este empleado existe solo para comprobar que E601 NO puede modificar su perfil."
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "2. Activación y login del rol USER",
+      "item": [
+        {
+          "name": "2.1 Establecer contraseña de E601",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (!pm.collectionVariables.get('resetToken')) {",
+                  "    pm.test('SALTADO: falta pegar resetToken', () => {",
+                  "        pm.expect.fail('Copie el token de activación del log de notificaciones a la variable resetToken');",
+                  "    });",
+                  "} else {",
+                  "    pm.test('Status 200', () => pm.response.to.have.status(200));",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"token\": \"{{resetToken}}\",\n  \"nuevaPassword\": \"{{propioPassword}}\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": {
+              "raw": "{{gatewayBaseUrl}}/auth/reset-password",
+              "host": ["{{gatewayBaseUrl}}"],
+              "path": ["auth", "reset-password"]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "2.2 Login de E601 (rol USER)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 200', () => pm.response.to.have.status(200));",
+                  "",
+                  "const b = pm.response.json();",
+                  "pm.test('Rol USER y sub = E601', () => {",
+                  "    pm.expect(b.rol).to.eql('USER');",
+                  "    pm.expect(b.empleadoId).to.eql(pm.collectionVariables.get('propioId'));",
+                  "});",
+                  "",
+                  "pm.collectionVariables.set('userToken', b.token);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"usuario\": \"{{propioEmail}}\",\n  \"password\": \"{{propioPassword}}\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": {
+              "raw": "{{gatewayBaseUrl}}/auth/login",
+              "host": ["{{gatewayBaseUrl}}"],
+              "path": ["auth", "login"]
+            }
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "3. Lo que SÍ puede hacer un USER",
+      "item": [
+        {
+          "name": "3.1 GET /empleados con token válido (200)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 200', () => pm.response.to.have.status(200));",
+                  "pm.test('Devuelve la lista', () => {",
+                  "    pm.expect(pm.response.json()).to.be.an('array');",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{userToken}}" }],
+            "url": {
+              "raw": "{{gatewayBaseUrl}}/empleados",
+              "host": ["{{gatewayBaseUrl}}"],
+              "path": ["empleados"]
+            },
+            "description": "Paso 7 del flujo del enunciado: el mismo recurso que antes dio 401 ahora responde 200."
+          },
+          "response": []
+        },
+        {
+          "name": "3.2 GET /departamentos (lectura permitida)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 200', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{userToken}}" }],
+            "url": {
+              "raw": "{{gatewayBaseUrl}}/departamentos",
+              "host": ["{{gatewayBaseUrl}}"],
+              "path": ["departamentos"]
+            },
+            "description": "El rol USER tiene acceso de solo lectura sobre todos los recursos del ecosistema."
+          },
+          "response": []
+        },
+        {
+          "name": "3.3 PUT /perfiles/E601 — su propio perfil (200)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('No es 403: el gateway autoriza por propiedad del recurso', () => {",
+                  "    pm.expect(pm.response.code).to.not.eql(403);",
+                  "});",
+                  "",
+                  "pm.test('Status 200', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "PUT",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Authorization", "value": "Bearer {{userToken}}" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"cargo\": \"Analista Senior\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": {
+              "raw": "{{gatewayBaseUrl}}/perfiles/{{propioId}}",
+              "host": ["{{gatewayBaseUrl}}"],
+              "path": ["perfiles", "{{propioId}}"]
+            },
+            "description": "Paso 10 del enunciado, primera mitad. El id de la ruta coincide con el claim sub del token, así que la escritura se permite aunque el rol sea USER. Esto es ABAC, no RBAC."
+          },
+          "response": []
+        },
+        {
+          "name": "3.4 POST /auth/change-password (200)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 200', () => pm.response.to.have.status(200));",
+                  "pm.collectionVariables.set('propioPassword', 'Cambiada789');"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Authorization", "value": "Bearer {{userToken}}" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"passwordActual\": \"{{propioPassword}}\",\n  \"nuevaPassword\": \"Cambiada789\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": {
+              "raw": "{{gatewayBaseUrl}}/auth/change-password",
+              "host": ["{{gatewayBaseUrl}}"],
+              "path": ["auth", "change-password"]
+            },
+            "description": "La segunda excepción de escritura del rol USER: su propia contraseña."
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "4. Lo que NO puede hacer un USER (403)",
+      "item": [
+        {
+          "name": "4.1 DELETE /empleados/E602 (403)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 403 Forbidden', () => pm.response.to.have.status(403));",
+                  "",
+                  "pm.test('403 y no 401: la identidad se conoce, el permiso falta', () => {",
+                  "    const b = pm.response.json();",
+                  "    pm.expect(b.status).to.eql(403);",
+                  "    pm.expect(b.error).to.eql('Forbidden');",
+                  "    pm.expect(b.message).to.include('USER');",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "DELETE",
+            "header": [{ "key": "Authorization", "value": "Bearer {{userToken}}" }],
+            "url": {
+              "raw": "{{gatewayBaseUrl}}/empleados/{{ajenoId}}",
+              "host": ["{{gatewayBaseUrl}}"],
+              "path": ["empleados", "{{ajenoId}}"]
+            },
+            "description": "Paso 9 del enunciado: escritura denegada al rol USER."
+          },
+          "response": []
+        },
+        {
+          "name": "4.2 POST /departamentos (403)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 403', () => pm.response.to.have.status(403));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Authorization", "value": "Bearer {{userToken}}" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"id\": \"PROHIBIDO\",\n  \"nombre\": \"No debería crearse\",\n  \"descripcion\": \"Un USER no puede crear departamentos\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": {
+              "raw": "{{gatewayBaseUrl}}/departamentos",
+              "host": ["{{gatewayBaseUrl}}"],
+              "path": ["departamentos"]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "4.3 PUT /perfiles/E602 — perfil ajeno (403)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 403 Forbidden', () => pm.response.to.have.status(403));",
+                  "",
+                  "pm.test('Es 403, no 401: el token es válido pero el recurso es de otro', () => {",
+                  "    pm.expect(pm.response.json().status).to.eql(403);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "PUT",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Authorization", "value": "Bearer {{userToken}}" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"cargo\": \"Intento de modificar a otro\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": {
+              "raw": "{{gatewayBaseUrl}}/perfiles/{{ajenoId}}",
+              "host": ["{{gatewayBaseUrl}}"],
+              "path": ["perfiles", "{{ajenoId}}"]
+            },
+            "description": "Paso 10 del enunciado, segunda mitad. Mismo token, mismo verbo, misma ruta salvo el id: la única diferencia es que el recurso pertenece a otro empleado. El enunciado exige 403, no 401."
+          },
+          "response": []
+        },
+        {
+          "name": "4.4 POST /vacaciones (403)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 403', () => pm.response.to.have.status(403));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Authorization", "value": "Bearer {{userToken}}" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"empleadoId\": \"{{propioId}}\",\n  \"fechaInicio\": \"2026-12-01\",\n  \"fechaFin\": \"2026-12-05\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": {
+              "raw": "{{gatewayBaseUrl}}/vacaciones",
+              "host": ["{{gatewayBaseUrl}}"],
+              "path": ["vacaciones"]
+            },
+            "description": "Programar vacaciones es una operación de ADMIN, incluso sobre uno mismo: la excepción de propiedad del recurso se concedió solo al perfil y a la contraseña."
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "5. Lo que SÍ puede hacer un ADMIN",
+      "item": [
+        {
+          "name": "5.1 PUT /perfiles/E602 con token ADMIN (200)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('No es 403: ADMIN tiene acceso total', () => {",
+                  "    pm.expect(pm.response.code).to.not.eql(403);",
+                  "});",
+                  "pm.test('Status 200', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "PUT",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Authorization", "value": "Bearer {{adminToken}}" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"cargo\": \"Diseñadora Senior\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": {
+              "raw": "{{gatewayBaseUrl}}/perfiles/{{ajenoId}}",
+              "host": ["{{gatewayBaseUrl}}"],
+              "path": ["perfiles", "{{ajenoId}}"]
+            },
+            "description": "El mismo request que dio 403 con el token de USER. La diferencia es el rol del token, no la ruta."
+          },
+          "response": []
+        },
+        {
+          "name": "5.2 DELETE /empleados/E602 con token ADMIN",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 200 o 204', () => {",
+                  "    pm.expect(pm.response.code).to.be.oneOf([200, 204]);",
+                  "});",
+                  "",
+                  "console.log('Se publicó empleado.retirado: el auth-service debe desactivar la cuenta de E602 de forma permanente.');"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "DELETE",
+            "header": [{ "key": "Authorization", "value": "Bearer {{adminToken}}" }],
+            "url": {
+              "raw": "{{gatewayBaseUrl}}/empleados/{{ajenoId}}",
+              "host": ["{{gatewayBaseUrl}}"],
+              "path": ["empleados", "{{ajenoId}}"]
+            },
+            "description": "Paso 16 del enunciado: offboarding con el token del administrador. Cambia el estado a RETIRADO y publica empleado.retirado."
+          },
+          "response": []
+        },
+        {
+          "name": "5.3 Auditoría: el retirado aparece con su fechaRetiro",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 200', () => pm.response.to.have.status(200));",
+                  "",
+                  "pm.test('E602 figura como RETIRADO con fechaRetiro', () => {",
+                  "    const cuerpo = pm.response.json();",
+                  "    const lista = Array.isArray(cuerpo) ? cuerpo : (cuerpo.data || []);",
+                  "    const retirado = lista.find(e => e.id === pm.collectionVariables.get('ajenoId'));",
+                  "    pm.expect(retirado, 'E602 debe aparecer en el listado de retirados').to.not.be.undefined;",
+                  "    pm.expect(retirado.fechaRetiro).to.not.be.null;",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{adminToken}}" }],
+            "url": {
+              "raw": "{{gatewayBaseUrl}}/empleados?estado=RETIRADO",
+              "host": ["{{gatewayBaseUrl}}"],
+              "path": ["empleados"],
+              "query": [{ "key": "estado", "value": "RETIRADO" }]
+            },
+            "description": "Paso 18 del enunciado: la baja es lógica, el registro se conserva para auditoría."
+          },
+          "response": []
+        }
+      ]
+    }
+  ]
+}

@@ -1,5 +1,6 @@
 import app from './app.ts';
 import { RabbitMQConsumer } from './messaging/rabbitmq.consumer.ts';
+import { VacationScheduler } from './scheduler/vacation.scheduler.ts';
 
 const PORT = Number(process.env.PORT ?? 8084);
 
@@ -14,9 +15,14 @@ consumer.start().catch((err) => {
   console.error('[VACATIONS-SERVICE] Error fatal iniciando consumidor RabbitMQ:', err);
 });
 
+// Scheduler que hace avanzar los períodos al llegar sus fechas (Reto 5)
+const scheduler = new VacationScheduler();
+scheduler.start();
+
 // Manejo de apagado ordenado
 const shutdown = async () => {
   console.log('[VACATIONS-SERVICE] Recibida señal de apagado, cerrando recursos...');
+  scheduler.stop();
   await consumer.stop();
   server.close(() => {
     console.log('[VACATIONS-SERVICE] Servidor HTTP cerrado.');

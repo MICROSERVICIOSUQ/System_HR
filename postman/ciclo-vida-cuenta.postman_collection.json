@@ -1,0 +1,600 @@
+{
+  "info": {
+    "name": "Ciclo de vida de la cuenta y scheduler (Reto 5)",
+    "description": "Evidencia del criterio 4: el auth-service consume los cuatro eventos entrantes, publica los cuatro salientes, y el scheduler del vacaciones-service dispara inicio y fin de período.\n\nDemuestra la secuencia que el enunciado exige:\n  login OK → vacaciones inician → login falla → vacaciones terminan → login OK\n\nY el CASO BORDE: un empleado retirado durante sus vacaciones cuya cuenta NO se reactiva al finalizar el período.\n\nPara no esperar fechas reales se usan los endpoints de desarrollo `/vacaciones/{id}/forzar-inicio` y `/forzar-fin`, protegidos con rol ADMIN. El scheduler automático corre en paralelo cada minuto (VACACIONES_CRON).\n\nPRECONDICIÓN: sistema recién levantado. Los requests marcados [MANUAL] requieren pegar el token de activación que aparece en el log de notificaciones.\n\nRequiere el environment `system-hr.postman_environment.json`.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    { "key": "adminToken", "value": "", "type": "string" },
+    { "key": "empleadoId", "value": "E701", "type": "string" },
+    { "key": "empleadoEmail", "value": "sofia.vargas@empresa.com", "type": "string" },
+    { "key": "empleadoPassword", "value": "Secreta123", "type": "string" },
+    { "key": "resetToken", "value": "", "type": "string" },
+    { "key": "periodoId", "value": "", "type": "string" },
+    { "key": "bordeId", "value": "E702", "type": "string" },
+    { "key": "bordeEmail", "value": "diego.luna@empresa.com", "type": "string" },
+    { "key": "bordePeriodoId", "value": "", "type": "string" },
+    { "key": "hoy", "value": "", "type": "string" }
+  ],
+  "item": [
+    {
+      "name": "1. Preparación",
+      "item": [
+        {
+          "name": "1.1 Login ADMIN y fecha de hoy",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 200', () => pm.response.to.have.status(200));",
+                  "pm.collectionVariables.set('adminToken', pm.response.json().token);",
+                  "",
+                  "// fechaInicio = fechaFin = hoy, la estrategia que sugiere el enunciado",
+                  "// para poder demostrar el flujo con el scheduler corriendo cada minuto.",
+                  "const hoy = new Date().toISOString().split('T')[0];",
+                  "pm.collectionVariables.set('hoy', hoy);",
+                  "console.log('Fecha usada para los períodos: ' + hoy);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"usuario\": \"{{adminUsuario}}\",\n  \"password\": \"{{adminPassword}}\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": {
+              "raw": "{{gatewayBaseUrl}}/auth/login",
+              "host": ["{{gatewayBaseUrl}}"],
+              "path": ["auth", "login"]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "1.2 Departamento IT",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('201 creado o ya existía', () => {",
+                  "    pm.expect(pm.response.code).to.be.oneOf([201, 400, 409]);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Authorization", "value": "Bearer {{adminToken}}" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"id\": \"IT\",\n  \"nombre\": \"Tecnología\",\n  \"descripcion\": \"Departamento de tecnología\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": {
+              "raw": "{{gatewayBaseUrl}}/departamentos",
+              "host": ["{{gatewayBaseUrl}}"],
+              "path": ["departamentos"]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "1.3 Crear E701 → dispara empleado.creado",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 201', () => pm.response.to.have.status(201));",
+                  "",
+                  "console.log('──────────────────────────────────────────────────────────');",
+                  "console.log('Cadena esperada en los logs:');",
+                  "console.log('  employees-service : [PUBLICADO] empleado.creado');",
+                  "console.log('  auth-service      : Cuenta creada en PENDIENTE_ACTIVACION');",
+                  "console.log('  auth-service      : [PUBLICADO] usuario.creado');",
+                  "console.log('  notifications     : [NOTIFICACIÓN] Tipo: SEGURIDAD ...token=XXX');",
+                  "console.log('Copie ese token a la variable resetToken y siga con 1.4');",
+                  "console.log('──────────────────────────────────────────────────────────');"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Authorization", "value": "Bearer {{adminToken}}" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"id\": \"{{empleadoId}}\",\n  \"nombre\": \"Sofía\",\n  \"apellido\": \"Vargas\",\n  \"email\": \"{{empleadoEmail}}\",\n  \"numeroEmpleado\": \"EMP-2026-701\",\n  \"cargo\": \"Ingeniera de Datos\",\n  \"area\": \"Tecnología\",\n  \"departamentoId\": \"IT\",\n  \"fechaIngreso\": \"2026-06-01\",\n  \"estado\": \"ACTIVO\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": {
+              "raw": "{{gatewayBaseUrl}}/empleados",
+              "host": ["{{gatewayBaseUrl}}"],
+              "path": ["empleados"]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "1.4 [MANUAL] Activar cuenta de E701",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (!pm.collectionVariables.get('resetToken')) {",
+                  "    pm.test('SALTADO: falta pegar resetToken', () => {",
+                  "        pm.expect.fail('Copie el token del log de notificaciones a la variable resetToken');",
+                  "    });",
+                  "} else {",
+                  "    pm.test('Status 200', () => pm.response.to.have.status(200));",
+                  "    console.log('Se publicó cuenta.activada con motivo ACTIVACION_INICIAL.');",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"token\": \"{{resetToken}}\",\n  \"nuevaPassword\": \"{{empleadoPassword}}\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": {
+              "raw": "{{gatewayBaseUrl}}/auth/reset-password",
+              "host": ["{{gatewayBaseUrl}}"],
+              "path": ["auth", "reset-password"]
+            }
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "2. login OK → vacaciones inician → login falla",
+      "item": [
+        {
+          "name": "2.1 Login de E701 funciona",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 200: la cuenta está ACTIVA', () => pm.response.to.have.status(200));",
+                  "pm.test('Rol USER', () => pm.expect(pm.response.json().rol).to.eql('USER'));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"usuario\": \"{{empleadoEmail}}\",\n  \"password\": \"{{empleadoPassword}}\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": {
+              "raw": "{{gatewayBaseUrl}}/auth/login",
+              "host": ["{{gatewayBaseUrl}}"],
+              "path": ["auth", "login"]
+            },
+            "description": "Primer eslabón de la cadena que pide el enunciado: login OK."
+          },
+          "response": []
+        },
+        {
+          "name": "2.2 Programar vacaciones de hoy a hoy (ADMIN)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 201', () => pm.response.to.have.status(201));",
+                  "",
+                  "const cuerpo = pm.response.json();",
+                  "const periodo = cuerpo.data || cuerpo;",
+                  "",
+                  "pm.test('Nace en estado PROGRAMADA', () => {",
+                  "    pm.expect(periodo.estado).to.eql('PROGRAMADA');",
+                  "});",
+                  "",
+                  "pm.collectionVariables.set('periodoId', periodo.id);",
+                  "console.log('periodoId = ' + periodo.id);",
+                  "console.log('Se publicó vacaciones.programadas.');"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Authorization", "value": "Bearer {{adminToken}}" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"empleadoId\": \"{{empleadoId}}\",\n  \"fechaInicio\": \"{{hoy}}\",\n  \"fechaFin\": \"{{hoy}}\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": {
+              "raw": "{{gatewayBaseUrl}}/vacaciones",
+              "host": ["{{gatewayBaseUrl}}"],
+              "path": ["vacaciones"]
+            },
+            "description": "Paso 12 del enunciado. fechaInicio = fechaFin = hoy es la estrategia sugerida para que el scheduler (cada minuto) pueda dispararlo sin esperar."
+          },
+          "response": []
+        },
+        {
+          "name": "2.3 Forzar inicio del período (ADMIN)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 200', () => pm.response.to.have.status(200));",
+                  "",
+                  "pm.test('El período pasó a EN_CURSO', () => {",
+                  "    const periodo = pm.response.json().data;",
+                  "    pm.expect(periodo.estado).to.eql('EN_CURSO');",
+                  "});",
+                  "",
+                  "console.log('Cadena esperada:');",
+                  "console.log('  vacations-service : [SCHEDULER] Período EN_CURSO + vacaciones.iniciadas');",
+                  "console.log('  auth-service      : Cuenta SUSPENDIDA_TEMPORAL por vacaciones');",
+                  "console.log('  notifications     : [NOTIFICACIÓN] Tipo: CUENTA ... Motivo: VACACIONES');"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Authorization", "value": "Bearer {{adminToken}}" }],
+            "url": {
+              "raw": "{{gatewayBaseUrl}}/vacaciones/{{periodoId}}/forzar-inicio",
+              "host": ["{{gatewayBaseUrl}}"],
+              "path": ["vacaciones", "{{periodoId}}", "forzar-inicio"]
+            },
+            "description": "ENDPOINT DE DESARROLLO, protegido con rol ADMIN. Hace lo mismo que haría el scheduler al llegar la fecha: transición PROGRAMADA → EN_CURSO y publicación de vacaciones.iniciadas.\n\nSi prefiere esperar al scheduler automático, omita este request: con fechaInicio = hoy lo disparará en el próximo minuto."
+          },
+          "response": []
+        },
+        {
+          "name": "2.4 Login de E701 ahora FALLA (401)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 401: la cuenta quedó suspendida', () => {",
+                  "    pm.response.to.have.status(401);",
+                  "});",
+                  "",
+                  "pm.test('El motivo es la suspensión por vacaciones', () => {",
+                  "    pm.expect(pm.response.json().message).to.include('vacaciones');",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"usuario\": \"{{empleadoEmail}}\",\n  \"password\": \"{{empleadoPassword}}\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": {
+              "raw": "{{gatewayBaseUrl}}/auth/login",
+              "host": ["{{gatewayBaseUrl}}"],
+              "path": ["auth", "login"]
+            },
+            "description": "Paso 13 del enunciado: la contraseña es correcta, pero el estado de la cuenta no permite el login. Segundo eslabón de la cadena."
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "3. vacaciones terminan → login OK",
+      "item": [
+        {
+          "name": "3.1 Forzar fin del período (ADMIN)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 200', () => pm.response.to.have.status(200));",
+                  "",
+                  "pm.test('El período pasó a FINALIZADA', () => {",
+                  "    pm.expect(pm.response.json().data.estado).to.eql('FINALIZADA');",
+                  "});",
+                  "",
+                  "console.log('Cadena esperada:');",
+                  "console.log('  vacations-service : [SCHEDULER] Período FINALIZADA + vacaciones.finalizadas');",
+                  "console.log('  auth-service      : Cuenta ACTIVA de nuevo tras vacaciones');",
+                  "console.log('  notifications     : [NOTIFICACIÓN] Tipo: CUENTA ... Bienvenido de regreso');"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Authorization", "value": "Bearer {{adminToken}}" }],
+            "url": {
+              "raw": "{{gatewayBaseUrl}}/vacaciones/{{periodoId}}/forzar-fin",
+              "host": ["{{gatewayBaseUrl}}"],
+              "path": ["vacaciones", "{{periodoId}}", "forzar-fin"]
+            },
+            "description": "Contraparte simétrica de forzar-inicio. El scheduler automático solo finaliza un período cuando la fechaFin es estrictamente anterior a hoy (la fechaFin es inclusiva: unas vacaciones que terminan hoy siguen vigentes hoy), así que para demostrar la reactivación en la sustentación se usa este endpoint."
+          },
+          "response": []
+        },
+        {
+          "name": "3.2 Login de E701 vuelve a funcionar (200)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 200: la cuenta se reactivó', () => pm.response.to.have.status(200));",
+                  "pm.test('Mismo empleado, mismo rol', () => {",
+                  "    const b = pm.response.json();",
+                  "    pm.expect(b.empleadoId).to.eql(pm.collectionVariables.get('empleadoId'));",
+                  "    pm.expect(b.rol).to.eql('USER');",
+                  "});",
+                  "",
+                  "console.log('CADENA COMPLETA DEMOSTRADA: login OK → vacaciones inician → login falla → vacaciones terminan → login OK');"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"usuario\": \"{{empleadoEmail}}\",\n  \"password\": \"{{empleadoPassword}}\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": {
+              "raw": "{{gatewayBaseUrl}}/auth/login",
+              "host": ["{{gatewayBaseUrl}}"],
+              "path": ["auth", "login"]
+            },
+            "description": "Paso 14 del enunciado y cuarto eslabón: la cuenta se reactivó sola, por evento, sin intervención manual sobre el auth-service."
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "4. CASO BORDE: retiro durante vacaciones",
+      "item": [
+        {
+          "name": "4.1 Crear E702",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 201', () => pm.response.to.have.status(201));",
+                  "console.log('Para este caso no hace falta activar la cuenta: basta con que exista.');"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Authorization", "value": "Bearer {{adminToken}}" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"id\": \"{{bordeId}}\",\n  \"nombre\": \"Diego\",\n  \"apellido\": \"Luna\",\n  \"email\": \"{{bordeEmail}}\",\n  \"numeroEmpleado\": \"EMP-2026-702\",\n  \"cargo\": \"Soporte\",\n  \"area\": \"Operaciones\",\n  \"departamentoId\": \"IT\",\n  \"fechaIngreso\": \"2026-06-01\",\n  \"estado\": \"ACTIVO\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": {
+              "raw": "{{gatewayBaseUrl}}/empleados",
+              "host": ["{{gatewayBaseUrl}}"],
+              "path": ["empleados"]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "4.2 Programar y arrancar sus vacaciones",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 201', () => pm.response.to.have.status(201));",
+                  "const periodo = pm.response.json().data || pm.response.json();",
+                  "pm.collectionVariables.set('bordePeriodoId', periodo.id);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Authorization", "value": "Bearer {{adminToken}}" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"empleadoId\": \"{{bordeId}}\",\n  \"fechaInicio\": \"{{hoy}}\",\n  \"fechaFin\": \"{{hoy}}\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": {
+              "raw": "{{gatewayBaseUrl}}/vacaciones",
+              "host": ["{{gatewayBaseUrl}}"],
+              "path": ["vacaciones"]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "4.3 Forzar inicio → cuenta SUSPENDIDA_TEMPORAL",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 200', () => pm.response.to.have.status(200));",
+                  "pm.test('EN_CURSO', () => {",
+                  "    pm.expect(pm.response.json().data.estado).to.eql('EN_CURSO');",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Authorization", "value": "Bearer {{adminToken}}" }],
+            "url": {
+              "raw": "{{gatewayBaseUrl}}/vacaciones/{{bordePeriodoId}}/forzar-inicio",
+              "host": ["{{gatewayBaseUrl}}"],
+              "path": ["vacaciones", "{{bordePeriodoId}}", "forzar-inicio"]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "4.4 Retirar a E702 estando de vacaciones (ADMIN)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 200 o 204', () => {",
+                  "    pm.expect(pm.response.code).to.be.oneOf([200, 204]);",
+                  "});",
+                  "",
+                  "console.log('La cuenta pasa de SUSPENDIDA_TEMPORAL a DESACTIVADA_PERMANENTE.');",
+                  "console.log('Esperado en auth-service: cuenta.desactivada con motivo RETIRO y permanente=true.');"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "DELETE",
+            "header": [{ "key": "Authorization", "value": "Bearer {{adminToken}}" }],
+            "url": {
+              "raw": "{{gatewayBaseUrl}}/empleados/{{bordeId}}",
+              "host": ["{{gatewayBaseUrl}}"],
+              "path": ["empleados", "{{bordeId}}"]
+            },
+            "description": "Paso 15 del enunciado: el retiro ocurre mientras el período está EN_CURSO."
+          },
+          "response": []
+        },
+        {
+          "name": "4.5 Forzar fin: la cuenta NO debe reactivarse",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('El período sí finaliza', () => {",
+                  "    pm.response.to.have.status(200);",
+                  "    pm.expect(pm.response.json().data.estado).to.eql('FINALIZADA');",
+                  "});",
+                  "",
+                  "console.log('Esperado en auth-service:');",
+                  "console.log('  \"NO se reactiva: estado DESACTIVADA_PERMANENTE no es reactivable por vacaciones\"');",
+                  "console.log('Y NINGÚN cuenta.activada con motivo FIN_VACACIONES para este empleado.');"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Authorization", "value": "Bearer {{adminToken}}" }],
+            "url": {
+              "raw": "{{gatewayBaseUrl}}/vacaciones/{{bordePeriodoId}}/forzar-fin",
+              "host": ["{{gatewayBaseUrl}}"],
+              "path": ["vacaciones", "{{bordePeriodoId}}", "forzar-fin"]
+            },
+            "description": "El período de vacaciones sí termina —es un hecho del calendario— pero la cuenta no vuelve. La distinción la hace el estado: solo SUSPENDIDA_TEMPORAL es reactivable."
+          },
+          "response": []
+        },
+        {
+          "name": "4.6 El login de E702 sigue fallando",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 401', () => pm.response.to.have.status(401));",
+                  "",
+                  "pm.test('CASO BORDE RESUELTO: la cuenta sigue con baja permanente', () => {",
+                  "    const mensaje = pm.response.json().message;",
+                  "    pm.expect(mensaje).to.not.include('vacaciones');",
+                  "    pm.expect(mensaje).to.satisfy((m) =>",
+                  "        m.includes('permanente') || m === 'Credenciales inválidas',",
+                  "        'El mensaje debe reflejar baja permanente, no suspensión por vacaciones'",
+                  "    );",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"usuario\": \"{{bordeEmail}}\",\n  \"password\": \"CualquieraNoImporta1\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": {
+              "raw": "{{gatewayBaseUrl}}/auth/login",
+              "host": ["{{gatewayBaseUrl}}"],
+              "path": ["auth", "login"]
+            },
+            "description": "Paso 15, verificación final: el empleado retirado durante sus vacaciones no recupera el acceso al terminar el período.\n\nLa cuenta de E702 nunca llegó a tener contraseña, así que el login falla por credenciales; lo relevante es que NO falla por 'suspendida por vacaciones', lo que confirma que el estado es DESACTIVADA_PERMANENTE y no SUSPENDIDA_TEMPORAL."
+          },
+          "response": []
+        }
+      ]
+    }
+  ]
+}

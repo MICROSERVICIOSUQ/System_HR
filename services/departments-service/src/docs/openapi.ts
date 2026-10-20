@@ -5,7 +5,10 @@ export const openApiSpec = {
     version: '1.0.0',
     description:
       'API REST para la gestión y administración de departamentos de la organización. ' +
-      'Provee operaciones CRUD completas y valida la existencia de departamentos para otros servicios del ecosistema.',
+      'Provee operaciones CRUD completas y valida la existencia de departamentos para otros servicios del ecosistema. ' +
+      'Todos los endpoints salvo el de salud exigen un Access JWT. El token lo emite ' +
+      '`POST /auth/login` del auth-service y lo valida el api-gateway: pulse «Authorize» y pegue el token. ' +
+      'Las operaciones de escritura (POST, PUT, PATCH, DELETE) requieren rol ADMIN; el rol USER solo lee.',
   },
   servers: [
     {
@@ -13,9 +16,15 @@ export const openApiSpec = {
       description: 'Servidor local o interno',
     },
   ],
+  // Requisito global: toda operación espera el Bearer. El /health queda abierto
+  // porque lo consume el healthcheck de Docker, que no tiene token.
+  security: [{ BearerAuth: [] }],
   paths: {
     '/health': {
       get: {
+        // Un array vacío sobrescribe el requisito global: endpoint público,
+        // porque lo consume el healthcheck de Docker, que no envía token.
+        security: [],
         summary: 'Verificar estado y disponibilidad del servicio',
         description: 'Retorna el estado de disponibilidad del microservicio para health checks de Docker o monitoreo.',
         responses: {
@@ -328,6 +337,14 @@ export const openApiSpec = {
     },
   },
   components: {
+    securitySchemes: {
+      BearerAuth: {
+        type: 'http',
+        scheme: 'bearer',
+        bearerFormat: 'JWT',
+        description: 'Access JWT obtenido en POST /auth/login',
+      },
+    },
     schemas: {
       Departamento: {
         type: 'object',

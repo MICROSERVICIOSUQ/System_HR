@@ -41,7 +41,8 @@ model VacationPeriod {
   fechaInicio  DateTime @db.Date
   /// Fecha de fin del período (solo fecha, sin hora)
   fechaFin     DateTime @db.Date
-  /// Estado: PROGRAMADA | EN_CURSO | COMPLETADA | CANCELADA
+  /// Estado: PROGRAMADA | EN_CURSO | FINALIZADA | CANCELADA
+  /// El scheduler avanza PROGRAMADA -> EN_CURSO -> FINALIZADA al llegar las fechas.
   estado       String   @default("PROGRAMADA")
   /// Fecha/hora de creación del registro
   fechaCreacion DateTime @default(now())

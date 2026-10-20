@@ -13,6 +13,13 @@ const controller = new VacationController();
 
 router.post('/', controller.createPeriod);
 router.get('/', controller.getAllPeriods);
+
+// ── Endpoints de DESARROLLO para demostrar el scheduler sin esperar fechas ────
+// Se declaran antes de /:id para que no los capture esa ruta.
+// Ambos exigen rol ADMIN; la comprobación la hace el api-gateway.
+router.post('/:id/forzar-inicio', controller.forcePeriodStart);
+router.post('/:id/forzar-fin', controller.forcePeriodFinish);
+
 router.put('/:id', controller.updatePeriod);
 router.patch('/:id', controller.updatePeriod);
 router.get('/:id', controller.getPeriodById);

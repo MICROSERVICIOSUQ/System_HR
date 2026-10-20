@@ -56,6 +56,13 @@
       "durable": true,
       "auto_delete": false,
       "arguments": {}
+    },
+    {
+      "name": "auth.queue",
+      "vhost": "/",
+      "durable": true,
+      "auto_delete": false,
+      "arguments": {}
     }
   ],
   "bindings": [
@@ -79,6 +86,14 @@
       "source": "hr.events",
       "vhost": "/",
       "destination": "vacations.queue",
+      "destination_type": "queue",
+      "routing_key": "",
+      "arguments": {}
+    },
+    {
+      "source": "hr.events",
+      "vhost": "/",
+      "destination": "auth.queue",
       "destination_type": "queue",
       "routing_key": "",
       "arguments": {}

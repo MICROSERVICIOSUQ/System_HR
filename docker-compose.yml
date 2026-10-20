@@ -7,7 +7,9 @@ services:
       context: ./api-gateway
       dockerfile: Dockerfile
     ports:
-      - "8080:8080"
+      # Único puerto publicado al host: el borde. Los demás servicios usan
+      # 'expose', lo que impide esquivar la validación del JWT (ADR-008).
+      - "${GATEWAY_PORT:-8080}:8080"
     healthcheck:
       test: ["CMD", "curl", "-f", "--silent", "http://localhost:8080/health"]
       interval: 30s
@@ -20,12 +22,61 @@ services:
       - NOTIFICACIONES_URL=http://notifications-service:${NOTIFICACIONES_PORT:-8082}
       - PERFILES_URL=http://profiles-service:${PERFILES_PORT:-8083}
       - VACACIONES_URL=http://vacations-service:${VACACIONES_PORT:-8084}
+      - AUTH_URL=http://auth-service:${AUTH_PORT:-8085}
+      # El gateway valida la firma del JWT en el borde: necesita el mismo
+      # secreto simétrico con el que auth-service firma (Reto 5, ADR-008).
+      - JWT_SECRET=${JWT_SECRET:?Defina JWT_SECRET en .env (mínimo 32 caracteres)}
+      - JWT_ISSUER=${JWT_ISSUER:-system-hr-auth}
     depends_on:
       rabbitmq:
+        condition: service_healthy
+      auth-service:
         condition: service_healthy
     networks:
       - microservices-network
     restart: unless-stopped
+
+  auth-service:
+    build:
+      context: ./services/auth-service
+      dockerfile: Dockerfile
+    environment:
+      SERVER_PORT: ${AUTH_PORT:-8085}
+      SPRING_DATASOURCE_URL: jdbc:postgresql://db-auth:5432/${AUTH_DB_NAME:-gestion_auth}
+      SPRING_DATASOURCE_USERNAME: ${AUTH_DB_USER:-postgres}
+      SPRING_DATASOURCE_PASSWORD: ${AUTH_DB_PASSWORD:-postgres}
+      SPRING_JPA_DDL_AUTO: validate
+      # Secreto de firma. Falla el arranque si no está definido: es preferible
+      # a emitir tokens firmados con un valor por defecto conocido.
+      JWT_SECRET: ${JWT_SECRET:?Defina JWT_SECRET en .env (mínimo 32 caracteres)}
+      JWT_ISSUER: ${JWT_ISSUER:-system-hr-auth}
+      JWT_ACCESS_TTL_SECONDS: ${JWT_ACCESS_TTL_SECONDS:-3600}
+      JWT_RESET_TTL_SECONDS: ${JWT_RESET_TTL_SECONDS:-3600}
+      # Administrador semilla: sin él no hay forma de ejecutar ninguna
+      # operación de escritura, porque las cuentas de empleado nacen como USER.
+      AUTH_SEED_ADMIN_ID: ${AUTH_SEED_ADMIN_ID:-admin}
+      AUTH_SEED_ADMIN_EMAIL: ${AUTH_SEED_ADMIN_EMAIL:-admin@empresa.com}
+      AUTH_SEED_ADMIN_PASSWORD: ${AUTH_SEED_ADMIN_PASSWORD:-Admin12345}
+      RABBITMQ_HOST: ${RABBITMQ_HOST:-rabbitmq}
+      RABBITMQ_PORT: ${RABBITMQ_PORT:-5672}
+      RABBITMQ_USER: ${RABBITMQ_USER:-admin}
+      RABBITMQ_PASSWORD: ${RABBITMQ_PASSWORD:-admin}
+    depends_on:
+      db-auth:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+    expose:
+      - "${AUTH_PORT:-8085}"
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f --silent http://localhost:$${SERVER_PORT:-8085}/auth/health"]
+      interval: 30s
+      timeout: 5s
+      start_period: 40s
+      retries: 3
+    networks:
+      - microservices-network
 
   departments-service:
     build:
@@ -164,6 +215,10 @@ services:
       RABBITMQ_PORT: ${RABBITMQ_PORT:-5672}
       RABBITMQ_USER: ${RABBITMQ_USER:-admin}
       RABBITMQ_PASSWORD: ${RABBITMQ_PASSWORD:-admin}
+      # Scheduler del Reto 5: cada minuto por defecto, para poder demostrar el
+      # flujo sin esperar un día. Limitación de instancia única en el README.
+      VACACIONES_CRON: ${VACACIONES_CRON:-* * * * *}
+      VACACIONES_SCHEDULER_ENABLED: ${VACACIONES_SCHEDULER_ENABLED:-true}
     expose:
       - "${VACACIONES_PORT:-8084}"
     restart: unless-stopped

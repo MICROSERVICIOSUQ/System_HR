@@ -11,6 +11,12 @@ spring:
         # Allows the employee client's four attempts and exponential backoff.
         response-timeout: 45s
       routes:
+        # Proveedor de identidad (Reto 5). /auth/login, /recover-password y
+        # /reset-password son públicos; /change-password exige JWT.
+        - id: auth-route
+          uri: ${AUTH_URL:http://auth-service:8085}
+          predicates:
+            - Path=/auth,/auth/**
         - id: empleados-route
           uri: ${EMPLEADOS_URL:http://employees-service:8080}
           predicates:
@@ -23,14 +29,70 @@ spring:
           uri: ${NOTIFICACIONES_URL:http://notifications-service:8082}
           predicates:
             - Path=/notifications,/notifications/**
+        # El alias /perfiles lo sirve el propio profiles-service, igual que
+        # vacations-service ya servía /vacaciones. No hace falta reescribir la ruta.
         - id: perfiles-route
           uri: ${PERFILES_URL:http://profiles-service:8083}
           predicates:
-            - Path=/profiles,/profiles/**
+            - Path=/profiles,/profiles/**,/perfiles,/perfiles/**
         - id: vacaciones-route
           uri: ${VACACIONES_URL:http://vacations-service:8084}
           predicates:
             - Path=/vacations,/vacations/**,/vacaciones,/vacaciones/**
+
+        # ── Contratos OpenAPI de cada servicio, para la Swagger UI agregada ──
+        # Se exponen bajo /v3/api-docs/<servicio> y se reescriben a la ruta real
+        # que publica cada microservicio.
+        - id: api-docs-auth
+          uri: ${AUTH_URL:http://auth-service:8085}
+          predicates:
+            - Path=/v3/api-docs/auth
+          filters:
+            - SetPath=/v3/api-docs
+        - id: api-docs-empleados
+          uri: ${EMPLEADOS_URL:http://employees-service:8080}
+          predicates:
+            - Path=/v3/api-docs/empleados
+          filters:
+            - SetPath=/v3/api-docs
+        - id: api-docs-departamentos
+          uri: ${DEPARTAMENTOS_URL:http://departments-service:8081}
+          predicates:
+            - Path=/v3/api-docs/departamentos
+          filters:
+            - SetPath=/docs/openapi.json
+
+jwt:
+  # Mismo secreto simétrico con el que auth-service firma. Se inyecta por
+  # variable de entorno desde docker-compose; nunca va quemado en el código.
+  secret: ${JWT_SECRET:cambie-este-secreto-de-desarrollo-por-uno-de-32-bytes-o-mas}
+  issuer: ${JWT_ISSUER:system-hr-auth}
+
+gateway:
+  security:
+    # Rutas sin token: las necesarias para obtener uno, salud y documentación.
+    public-paths:
+      - /auth/login
+      - /auth/recover-password
+      - /auth/reset-password
+      - /health
+      - /actuator/**
+      - /swagger-ui.html
+      - /swagger-ui/**
+      - /webjars/**
+      - /v3/api-docs/**
+
+springdoc:
+  swagger-ui:
+    path: /swagger-ui.html
+    # Una sola interfaz en el borde con un desplegable por microservicio.
+    urls:
+      - name: 1. auth-service
+        url: /v3/api-docs/auth
+      - name: 2. employees-service
+        url: /v3/api-docs/empleados
+      - name: 3. departments-service
+        url: /v3/api-docs/departamentos
 
 management:
   endpoints:

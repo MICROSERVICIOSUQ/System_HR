@@ -196,7 +196,8 @@ Notifications     Profiles      Vacations
 | departments-service | Node + Prisma | 8081 | PostgreSQL | Catálogo de departamentos |
 | notifications-service | Node + Prisma | 8082 | PostgreSQL | Consumidor asíncrono (notificaciones) |
 | profiles-service | Node + Prisma | 8083 | PostgreSQL | Consumidor asíncrono (Read Model CQRS) |
-| vacations-service | Node + Prisma | 8084 | PostgreSQL | Consumidor asíncrono (saldo vacaciones) |
+| vacations-service | Node + Prisma | 8084 | PostgreSQL | Consumidor asíncrono (saldo vacaciones) + scheduler (Reto 5) |
+| **auth-service** | **Spring Boot** | **8085** | **PostgreSQL** | **Proveedor de identidad: JWT y ciclo de vida de cuentas (Reto 5)** |
 | rabbitmq | RabbitMQ Management | 5672 | No | Message Broker AMQP |
 
 > [!NOTE]
@@ -226,7 +227,18 @@ Notifications     Profiles      Vacations
 |---|---|---|---|
 | empleado.creado | employees-service | notifications, profiles, vacations | Alta de nuevo empleado |
 | empleado.actualizado | employees-service | notifications, profiles, vacations | Modificación de datos del empleado |
-| empleado.retirado | employees-service | notifications, profiles, vacations | Retiro lógico del empleado |
+| empleado.retirado | employees-service | notifications, profiles, vacations, **auth** | Retiro lógico del empleado |
+| vacaciones.programadas | vacations-service | notifications | Período de vacaciones registrado |
+| **vacaciones.iniciadas** | **vacations-service** (scheduler) | **auth**, notifications | Llegó la `fechaInicio` del período |
+| **vacaciones.finalizadas** | **vacations-service** (scheduler) | **auth**, notifications | Pasó la `fechaFin` del período |
+| **usuario.creado** | **auth-service** | notifications | Cuenta creada; lleva el token de activación |
+| **usuario.recuperacion** | **auth-service** | notifications | Recuperación solicitada; lleva el token |
+| **cuenta.activada** | **auth-service** | notifications | Contraseña inicial establecida, o fin de vacaciones |
+| **cuenta.desactivada** | **auth-service** | notifications | Suspensión por vacaciones, o baja por retiro |
+
+Los eventos en negrita se añadieron en el Reto 5. Las cargas útiles de
+`usuario.*` y `cuenta.*` están detalladas en el
+[README del auth-service](services/auth-service/README.md#ciclo-de-vida-de-la-cuenta).
 
 ### Estructura del Event Envelope
 
@@ -392,3 +404,550 @@ El historial formal de decisiones técnicas se documenta en [`docs/decisions/`](
 | RabbitMQ Fanout (`hr.events`) | Completado |
 | Idempotencia en consumidores | Completado |
 | Database-per-Service (PostgreSQL independientes) | Completado |
+
+---
+
+# Reto 5 — Seguridad y Control de Acceso con JWT
+
+> [!TIP]
+> Para **probar y demostrar** el reto paso a paso, con el orden exacto de
+> ejecución y el nombre de cada carpeta y request de Postman, siga la
+> [**Guía de pruebas del Reto 5**](docs/GUIA-PRUEBAS-RETO5.md).
+
+## 11. Qué cambió
+
+Hasta el Reto 4 todos los endpoints estaban abiertos: cualquiera que conociera la
+IP y el puerto podía crear o eliminar empleados. El Reto 5 cierra el sistema:
+
+- Un **`auth-service`** nuevo (puerto interno 8085) verifica credenciales, emite
+  Access JWT y gestiona el ciclo de vida de las cuentas por eventos.
+- El **api-gateway** valida la firma del JWT y aplica las reglas de autorización
+  antes de enrutar.
+- El **`vacations-service`** completa su scheduler: al llegar la fecha dispara
+  `vacaciones.iniciadas` y `vacaciones.finalizadas`.
+- El **`notifications-service`** simula los correos de seguridad y de cuenta.
+
+## 12. Cómo obtener un token y hacer peticiones autenticadas
+
+### Paso 1 — Login
+
+El sistema crea un **administrador semilla** al arrancar (configurable con
+`AUTH_SEED_ADMIN_*` en `.env`). Sin él no habría forma de empezar: las cuentas de
+empleado nacen con rol `USER` desde el evento `empleado.creado`.
+
+```bash
+curl -s -X POST http://localhost:8080/auth/login \
+  -H "Content-Type: application/json" \
+  -d '{"usuario":"admin@empresa.com","password":"Admin12345"}'
+```
+
+```json
+{
+  "token": "eyJhbGciOiJIUzI1NiJ9...",
+  "tipo": "Bearer",
+  "expiraEnSegundos": 3600,
+  "empleadoId": "admin",
+  "rol": "ADMIN"
+}
+```
+
+### Paso 2 — Usar el token
+
+```bash
+TOKEN="<pegue aquí el token>"
+
+curl -s http://localhost:8080/empleados \
+  -H "Authorization: Bearer $TOKEN"
+```
+
+En PowerShell:
+
+```powershell
+$token = (Invoke-RestMethod -Uri http://localhost:8080/auth/login -Method POST `
+  -ContentType "application/json" `
+  -Body '{"usuario":"admin@empresa.com","password":"Admin12345"}').token
+
+Invoke-RestMethod -Uri http://localhost:8080/empleados -Headers @{ Authorization = "Bearer $token" }
+```
+
+### Paso 3 — El alta de un empleado real
+
+El empleado **no recibe contraseña**: recibe un token de activación por evento.
+
+```
+ADMIN crea el empleado              POST /empleados
+   └─► employees-service publica    empleado.creado
+         └─► auth-service crea la cuenta (PENDIENTE_ACTIVACION, rol USER)
+               y publica             usuario.creado  ← lleva el token
+                     └─► notifications simula el correo con el enlace
+```
+
+El token aparece en el log de notificaciones:
+
+```bash
+docker compose logs notifications-service | grep "NOTIFICACIÓN"
+```
+
+```
+[NOTIFICACIÓN] Tipo: SEGURIDAD | Para: juan.perez@empresa.com | Mensaje: "Para establecer
+su contraseña use el siguiente enlace: https://app.empresa.com/reset?token=eyJhbGciOi..."
+```
+
+Con ese token el empleado establece su contraseña y ya puede autenticarse:
+
+```bash
+curl -s -X POST http://localhost:8080/auth/reset-password \
+  -H "Content-Type: application/json" \
+  -d '{"token":"<token del log>","nuevaPassword":"Secreta123"}'
+```
+
+### Los dos tipos de token
+
+| | Access JWT | Reset JWT |
+|---|---|---|
+| Lo emite | `POST /auth/login` | Alta de empleado o `/auth/recover-password` |
+| Claims | `sub`, `role`, `iat`, `exp` | `sub`, `type: "RESET_PASSWORD"`, `iat`, `exp` |
+| Sirve para | Acceder a cualquier recurso autorizado | Solo establecer una contraseña |
+| Vigencia | `JWT_ACCESS_TTL_SECONDS` (1 h) | `JWT_RESET_TTL_SECONDS` (1 h) |
+
+Ambos se firman con el mismo secreto, así que el claim `type` es lo único que los
+separa. Por eso la validación va en las dos direcciones: un Access JWT **no**
+sirve para cambiar una contraseña, y un Reset JWT **no** abre ningún recurso. Hay
+un test automatizado para cada dirección.
+
+La contraseña nunca entra en el token y en base de datos se guarda como **hash
+BCrypt** con sal propia.
+
+## 13. Estrategia de validación elegida: en el API Gateway
+
+**Decisión: la validación del JWT y las reglas de autorización viven solo en el
+api-gateway.** Registrada en
+[ADR-008](docs/decisions/ADR-008-validacion-jwt-en-el-gateway.md).
+
+```
+Cliente ──Bearer JWT──► api-gateway ──X-Auth-User / X-Auth-Role──► microservicio
+                             │
+                   1. JwtAuthenticationFilter  → firma, emisor, exp, type → 401
+                   2. AuthorizationFilter      → RBAC + propiedad         → 403
+```
+
+**Por qué el gateway y no interceptores por servicio.** El ecosistema tiene siete
+componentes en dos lenguajes. Resolver la validación en cada servicio obligaría a
+implementarla dos veces con librerías distintas (jjwt en Java, jose en Node) y a
+mantener sincronizados el criterio de expiración, el manejo del claim `type` y la
+distinción entre 401 y 403. Cada servicio nuevo añadiría otra copia. Y cuando la
+validación pase a JWKS contra un Identity Provider, ese cambio se haría en un solo
+sitio en lugar de en seis. Es exactamente el problema que el gateway del Reto 3 se
+anticipó a resolver.
+
+**Cómo se propaga la identidad.** Tras validar, el gateway añade `X-Auth-User`
+(claim `sub`) y `X-Auth-Role` (claim `role`). Los servicios confían en esas
+cabeceras, y eso es seguro por dos razones concretas:
+
+1. **El gateway borra esas cabeceras si llegan del cliente**, antes de validar.
+   Sin eso, cualquiera podría enviar `X-Auth-Role: ADMIN`. Hay un request en la
+   colección de Postman que lo comprueba.
+2. **Solo el gateway está publicado al host.** Los demás servicios usan `expose`,
+   no `ports`: no son alcanzables desde fuera de la red de Docker, así que no hay
+   forma de esquivar el borde.
+
+**El secreto compartido.** `JWT_SECRET` se inyecta por variable de entorno a los
+dos contenedores que lo necesitan: `auth-service` para firmar y `api-gateway` para
+verificar. Ambos **abortan el arranque** si tiene menos de 32 bytes, en lugar de
+firmar con una clave débil. Está documentado en `.env.example` con propósitos
+académicos, tal como pide el enunciado; en producción iría en un gestor de
+secretos y con firma asimétrica RS256.
+
+## 14. Reglas de autorización (RBAC + propiedad del recurso)
+
+| Situación | Resultado |
+|---|---|
+| Sin cabecera `Authorization` o con token inválido/expirado/alterado | **401 Unauthorized** |
+| Rol `ADMIN`, cualquier método y ruta | **Permitido** |
+| Rol `USER`, método de lectura (`GET`, `HEAD`, `OPTIONS`) | **Permitido** |
+| Rol `USER`, `POST /auth/change-password` | **Permitido** (su propia contraseña) |
+| Rol `USER`, `PUT`/`PATCH /perfiles/{id}` con `id == sub` | **Permitido** (su propio perfil) |
+| Rol `USER`, cualquier otra escritura | **403 Forbidden** |
+
+Las rutas públicas (no exigen token) son las imprescindibles para conseguir uno,
+más salud y documentación: `/auth/login`, `/auth/recover-password`,
+`/auth/reset-password`, `/health`, `/actuator/**` y las de Swagger.
+
+`/auth/reset-password` es pública **a propósito**: su autorización no viene de una
+sesión previa sino del token de un solo propósito que llega en el cuerpo. Exigir un
+Access JWT ahí haría imposible la activación inicial, que es justo el momento en el
+que el usuario todavía no puede iniciar sesión.
+
+### Autorización por propiedad del recurso
+
+El RBAC por rol no alcanza para el caso del perfil: un `USER` no puede escribir en
+general, pero sí sobre lo suyo. Eso exige una segunda comprobación:
+
+```
+si rol == ADMIN                                 → permitir
+si rol == USER y método es de lectura           → permitir
+si rol == USER y recurso.empleadoId == token.sub → permitir
+en cualquier otro caso                          → 403 Forbidden
+```
+
+El `empleadoId` de la ruta se compara contra el claim `sub`. Por eso el `sub` es
+el identificador del empleado y no el email: el email es la credencial de entrada
+y podría cambiar sin que los permisos ya concedidos se rompan.
+
+```bash
+# Con el JWT de E601
+curl -X PUT http://localhost:8080/perfiles/E601 -H "Authorization: Bearer $TOKEN_E601" ...  # 200 OK
+curl -X PUT http://localhost:8080/perfiles/E602 -H "Authorization: Bearer $TOKEN_E601" ...  # 403 Forbidden
+```
+
+Mismo token, mismo verbo, misma ruta salvo el id. La diferencia es quién es dueño
+del dato: es el paso de RBAC a ABAC, y es lo que permite que cada empleado
+gestione su perfil sin darle permisos de administrador.
+
+## 15. Ciclo de vida de la cuenta
+
+### Diagrama de secuencia
+
+```
+ADMIN   api-gateway  employees   RabbitMQ   auth-service   vacations   notifications
+  │          │           │          │            │             │            │
+  │ POST /empleados      │          │            │             │            │
+  ├─────────►│           │          │            │             │            │
+  │          │ valida JWT (ADMIN)   │            │             │            │
+  │          ├──────────►│          │            │             │            │
+  │          │           │ empleado.creado       │             │            │
+  │          │           ├─────────►├───────────►│             │            │
+  │          │           │          │   crea cuenta            │            │
+  │          │           │          │   PENDIENTE_ACTIVACION   │            │
+  │          │           │          │   rol USER, sin password │            │
+  │          │           │          │◄───────────┤ usuario.creado (+token)  │
+  │          │           │          ├─────────────────────────────────────►│
+  │          │           │          │            │             │   [NOTIFICACIÓN]
+  │          │           │          │            │             │   SEGURIDAD
+  │                                                                         │
+  │ ░░ el empleado toma el token del correo ░░                              │
+  │                                                                         │
+  │ POST /auth/reset-password (token, nuevaPassword)                        │
+  ├─────────►│───────────────────────────────────►│             │            │
+  │          │           │          │    ACTIVA  │             │            │
+  │          │           │          │◄───────────┤ cuenta.activada          │
+  │          │           │          ├─────────────────────────────────────►│
+  │                                                                         │
+  │ POST /auth/login ──► 200 + Access JWT                                   │
+  │                                                                         │
+  │ POST /vacaciones (fechaInicio=hoy, fechaFin=hoy)                        │
+  ├─────────►│───────────────────────────────────────────────►│             │
+  │          │           │          │            │   PROGRAMADA│            │
+  │                                                                         │
+  │ ░░ el scheduler detecta que llegó la fechaInicio ░░                     │
+  │          │           │          │            │   EN_CURSO  │            │
+  │          │           │          │◄───────────────────────┤ vacaciones.iniciadas
+  │          │           │          │  SUSPENDIDA_TEMPORAL    │            │
+  │          │           │          │◄───────────┤ cuenta.desactivada       │
+  │          │           │          │            │  (VACACIONES, perm=false)│
+  │          │           │          ├─────────────────────────────────────►│
+  │                                                                         │
+  │ POST /auth/login ──► 401  ← la cuenta está suspendida                   │
+  │                                                                         │
+  │ ░░ el scheduler detecta que pasó la fechaFin ░░                         │
+  │          │           │          │            │  FINALIZADA │            │
+  │          │           │          │◄───────────────────────┤ vacaciones.finalizadas
+  │          │           │          │    ACTIVA  │             │            │
+  │          │           │          │◄───────────┤ cuenta.activada          │
+  │          │           │          │            │  (FIN_VACACIONES)        │
+  │          │           │          ├─────────────────────────────────────►│
+  │                                                                         │
+  │ POST /auth/login ──► 200  ← vuelve a funcionar                          │
+  │                                                                         │
+  │ DELETE /empleados/{id}                                                  │
+  ├─────────►│──────────►│ empleado.retirado     │             │            │
+  │          │           ├─────────►├───────────►│             │            │
+  │          │           │          │ DESACTIVADA_PERMANENTE   │            │
+  │          │           │          │◄───────────┤ cuenta.desactivada       │
+  │          │           │          │            │  (RETIRO, perm=true)     │
+  │          │           │          ├─────────────────────────────────────►│
+  │                                                                         │
+  │ POST /auth/login ──► 401  ← definitivo                                  │
+```
+
+### Los cuatro estados
+
+| Estado | Cómo se llega | ¿Login? | ¿Reactivable por fin de vacaciones? |
+|---|---|---|---|
+| `PENDIENTE_ACTIVACION` | `empleado.creado` | No | No |
+| `ACTIVA` | `reset-password` o fin de vacaciones | **Sí** | — |
+| `SUSPENDIDA_TEMPORAL` | `vacaciones.iniciadas` | No | **Sí** |
+| `DESACTIVADA_PERMANENTE` | `empleado.retirado` | No | **No** |
+
+El estado es una enumeración y no un booleano precisamente por el caso borde que
+viene a continuación. Registrado en
+[ADR-009](docs/decisions/ADR-009-estados-de-cuenta.md).
+
+### Caso borde: retiro durante las vacaciones
+
+Si un empleado se retira **mientras está de vacaciones**, al llegar la `fechaFin`
+el scheduler publica `vacaciones.finalizadas` sobre una cuenta que ya tiene baja
+permanente. **La cuenta no se reactiva.**
+
+La garantía está en el modelo, no en una condición suelta:
+
+```java
+public boolean esReactivablePorVacaciones() {
+    return this == SUSPENDIDA_TEMPORAL;
+}
+```
+
+`DESACTIVADA_PERMANENTE` devuelve `false`, el manejador no toca la cuenta y el log
+deja constancia:
+
+```
+[AUTH] NO se reactiva: estado 'DESACTIVADA_PERMANENTE' no es reactivable por
+       vacaciones (caso borde retiro durante vacaciones) | empleado='E702'
+```
+
+Con un booleano `activa` esto sería imposible: el manejador no podría distinguir si
+el `false` vino de unas vacaciones o de un retiro. Lo cubre el test
+`retiroDuranteVacacionesImpideLaReactivacionAlFinalizarElPeriodo` y la carpeta 4 de
+la colección `ciclo-vida-cuenta`.
+
+## 16. Scheduler de vacaciones
+
+### Mecanismo y frecuencia
+
+| | |
+|---|---|
+| **Servicio** | `vacations-service` (Node + TypeScript) |
+| **Mecanismo** | `node-cron` |
+| **Frecuencia** | `VACACIONES_CRON`, por defecto `* * * * *` (cada minuto) |
+| **Interruptor** | `VACACIONES_SCHEDULER_ENABLED` (`true` por defecto) |
+
+Cada ciclo hace dos barridos:
+
+1. Períodos `PROGRAMADA` cuya `fechaInicio` ya llegó → `EN_CURSO` + publica
+   `vacaciones.iniciadas`.
+2. Períodos `EN_CURSO` cuya `fechaFin` ya pasó → `FINALIZADA` + publica
+   `vacaciones.finalizadas`.
+
+La `fechaFin` es **inclusiva**: unas vacaciones que terminan hoy siguen vigentes
+hoy, así que un período solo se finaliza cuando su fecha es estrictamente anterior
+al día en curso.
+
+Cada transición se hace con un **compare-and-set** en base de datos
+(`UPDATE ... WHERE id = ? AND estado = ?`): si dos ciclos se solapan, el segundo
+obtiene cero filas afectadas y no vuelve a publicar el evento. Además, un guardia
+en memoria evita que un ciclo arranque si el anterior no terminó.
+
+### Cómo demostrar el flujo sin esperar días
+
+Se combinan dos de las tres estrategias que ofrece el enunciado:
+
+**Estrategia 1 — fechas de hoy.** Programar el período con
+`fechaInicio = fechaFin = hoy` y dejar que el scheduler (cada minuto) dispare el
+inicio. Es lo que ocurre automáticamente.
+
+**Estrategia 3 — endpoints de desarrollo.** Para la sustentación, donde esperar un
+minuto por transición es incómodo y el fin de período exigiría esperar al día
+siguiente:
+
+```bash
+curl -X POST http://localhost:8080/vacaciones/{id}/forzar-inicio \
+  -H "Authorization: Bearer $TOKEN_ADMIN"
+
+curl -X POST http://localhost:8080/vacaciones/{id}/forzar-fin \
+  -H "Authorization: Bearer $TOKEN_ADMIN"
+```
+
+Ambos están **marcados como endpoints de desarrollo** y **protegidos con rol
+ADMIN**. `forzar-inicio` es el que nombra el enunciado; `forzar-fin` es su
+contraparte simétrica, necesaria para demostrar la reactivación y el caso borde en
+segundos.
+
+### Limitación conocida: una sola instancia
+
+> El scheduler se ejecuta **en cada instancia** del `vacations-service`.
+
+Mientras haya una sola instancia, funciona. Si el servicio se escalara a N
+instancias, las N dispararían el mismo evento: N correos, N desactivaciones.
+
+Hay dos defensas, y son complementarias:
+
+1. **Deduplicación en el consumidor** (ya implementada, Reto 4). El `auth-service`
+   descarta el evento repetido por su `eventId`. Mitiga el daño, pero no evita el
+   trabajo duplicado: los N productores ya hicieron la consulta y la publicación.
+2. **Coordinación en el productor** (no implementada). Garantizar que solo una
+   instancia ejecute el job. Es lo que resuelve un lock distribuido en base de
+   datos como **ShedLock**.
+
+El compare-and-set del repositorio protege **dentro de un proceso**, no entre
+procesos: dos instancias distintas pueden leer el mismo período antes de que
+ninguna escriba, y entonces una de las dos gana el `UPDATE` pero la otra ya habrá
+decidido publicar.
+
+**En este reto se acepta la versión de instancia única.** El Reto 11 escala el
+ecosistema horizontalmente y usará esta limitación como caso de estudio.
+
+## 17. Documentación OpenAPI con BearerAuth
+
+Cada servicio declara el esquema de seguridad `BearerAuth`, así que se puede pegar
+el JWT en el botón **Authorize** de Swagger UI y probar la API sin Postman.
+
+El gateway expone además una **Swagger UI agregada** con un desplegable por
+servicio:
+
+| Interfaz | URL |
+|---|---|
+| **Swagger UI agregada (gateway)** | [http://localhost:8080/swagger-ui.html](http://localhost:8080/swagger-ui.html) |
+| Contrato de auth-service | [http://localhost:8080/v3/api-docs/auth](http://localhost:8080/v3/api-docs/auth) |
+| Contrato de employees-service | [http://localhost:8080/v3/api-docs/empleados](http://localhost:8080/v3/api-docs/empleados) |
+| Contrato de departments-service | [http://localhost:8080/v3/api-docs/departamentos](http://localhost:8080/v3/api-docs/departamentos) |
+
+Flujo recomendado: abrir la UI agregada, elegir *auth-service*, ejecutar
+`POST /auth/login`, copiar el `token` de la respuesta, pulsar **Authorize**,
+pegarlo, y a partir de ahí todas las operaciones de los demás servicios van
+autenticadas.
+
+## 18. Colecciones de Postman del Reto 5
+
+En [`postman/`](postman/), todas con el environment
+`system-hr.postman_environment.json` (variable `gatewayBaseUrl`):
+
+| Colección | Qué demuestra |
+|---|---|
+| `auth-service.postman_collection.json` | Los cuatro endpoints, forma del JWT, política de contraseñas y la separación entre los dos tipos de token en ambas direcciones |
+| `seguridad-rbac.postman_collection.json` | **401** sin token, con token alterado y con cabeceras falsificadas; **403** por rol; **propiedad del recurso** (`PUT /perfiles/E601` = 200 vs `/perfiles/E602` = 403 con el mismo token) |
+| `ciclo-vida-cuenta.postman_collection.json` | La cadena completa `login OK → vacaciones inician → login falla → vacaciones terminan → login OK`, y el **caso borde** del retiro durante vacaciones |
+
+```bash
+npx newman run postman/seguridad-rbac.postman_collection.json \
+  -e postman/system-hr.postman_environment.json
+```
+
+> [!IMPORTANT]
+> Las colecciones del ciclo de vida tienen requests marcados **[MANUAL]**: hay que
+> copiar el token de activación desde el log de notificaciones a una variable de
+> colección. No es automatizable sin leer los logs, porque el token viaja por
+> evento y nunca por respuesta HTTP — que es justamente el comportamiento correcto.
+> El request anterior imprime el comando exacto en la consola de Postman.
+
+Si el puerto 8080 está ocupado en su máquina, levante con `GATEWAY_PORT=8090` y
+ajuste `gatewayBaseUrl` en el environment, o pase `--env-var` a Newman.
+
+## 19. Variables de entorno del Reto 5
+
+Todas en `.env.example`; ninguna credencial está quemada en el código.
+
+| Variable | Por defecto | Para qué |
+|---|---|---|
+| `GATEWAY_PORT` | `8080` | Único puerto publicado al host |
+| `JWT_SECRET` | *(obligatorio)* | Secreto HS256 compartido. Mínimo 32 bytes |
+| `JWT_ISSUER` | `system-hr-auth` | Claim `iss`, verificado al validar |
+| `JWT_ACCESS_TTL_SECONDS` | `3600` | Vigencia del Access JWT |
+| `JWT_RESET_TTL_SECONDS` | `3600` | Vigencia del token de activación/recuperación |
+| `AUTH_PORT` | `8085` | Puerto interno del auth-service |
+| `AUTH_DB_*` | `gestion_auth`, `postgres` | Su base de datos propia |
+| `AUTH_SEED_ADMIN_ID` | `admin` | `empleadoId` del administrador semilla |
+| `AUTH_SEED_ADMIN_EMAIL` | `admin@empresa.com` | Su email de login |
+| `AUTH_SEED_ADMIN_PASSWORD` | `Admin12345` | Su contraseña inicial |
+| `VACACIONES_CRON` | `* * * * *` | Frecuencia del scheduler |
+| `VACACIONES_SCHEDULER_ENABLED` | `true` | Interruptor del scheduler |
+
+El compose usa `${JWT_SECRET:?...}`: si la variable no está definida, **el
+levantamiento falla con un mensaje claro** en lugar de arrancar con un secreto por
+defecto conocido.
+
+## 20. Evidencias del Reto 5
+
+Salida real capturada el 2026-10-20 tras `docker compose down -v && docker compose up -d`.
+En esa máquina el 8080 estaba ocupado, así que el gateway se publicó con
+`GATEWAY_PORT=8090`; nada más cambia.
+
+### Arranque ordenado
+
+```console
+$ docker compose ps
+NAME                                  STATUS
+system_hr-api-gateway-1               Up 42 seconds (healthy)
+system_hr-auth-service-1              Up About a minute (healthy)
+system_hr-database-departamentos-1    Up About a minute (healthy)
+system_hr-database-empleados-1        Up About a minute (healthy)
+system_hr-database-notificaciones-1   Up About a minute (healthy)
+system_hr-database-perfiles-1         Up About a minute (healthy)
+system_hr-db-auth-1                   Up About a minute (healthy)
+system_hr-db-vacaciones-1             Up About a minute (healthy)
+system_hr-departments-service-1       Up About a minute (healthy)
+system_hr-employees-service-1         Up 52 seconds (healthy)
+system_hr-notifications-service-1     Up About a minute (healthy)
+system_hr-profiles-service-1          Up About a minute (healthy)
+system_hr-rabbitmq-1                  Up About a minute (healthy)
+system_hr-vacations-service-1         Up About a minute (healthy)
+```
+
+14 de 14 contenedores `healthy`, sin errores de conexión en los logs.
+
+### Forma del Access JWT
+
+```console
+$ header del token devuelto por POST /auth/login
+{"alg":"HS256"}
+
+$ payload
+{"iss":"system-hr-auth","sub":"admin","role":"ADMIN","iat":1792535169,"exp":1792538769}
+```
+
+Firma HMAC-SHA256, los cuatro claims que pide el enunciado y **ninguna
+contraseña**.
+
+### Cadena de eventos del onboarding
+
+```console
+$ docker compose logs auth-service
+[AUTH] [RECIBIDO] empleado.creado | eventId='c43eeb2b-...' | empleado='E701'
+[AUTH] Cuenta creada en PENDIENTE_ACTIVACION con rol USER | empleado='E701'
+[AUTH] [PUBLICADO] usuario.creado | eventId='e75a2ef5-...' | empleado='E701'
+```
+
+### Caso borde: retiro durante vacaciones
+
+```console
+$ docker compose logs auth-service
+[AUTH] NO se reactiva: estado 'DESACTIVADA_PERMANENTE' no es reactivable por
+       vacaciones (caso borde retiro durante vacaciones) | empleado='E702'
+```
+
+Y ningún `cuenta.activada` para E702: el login del empleado retirado sigue
+fallando después de que su período de vacaciones terminara.
+
+### Verificación completa: 37 comprobaciones
+
+| Bloque | Comprobaciones | Resultado |
+|---|---|---|
+| Validación de token (401 sin token, con firma falsa, con cabeceras falsificadas) | 3 | Todas OK |
+| Login del administrador semilla y forma del JWT | 1 | OK |
+| Onboarding dirigido por eventos | 2 | Todas OK |
+| Activación, política de contraseñas y separación de los dos tokens | 6 | Todas OK |
+| RBAC y propiedad del recurso | 7 | Todas OK |
+| Scheduler y ciclo de vacaciones (`login OK → falla → OK`) | 5 | Todas OK |
+| Caso borde del retiro durante vacaciones | 6 | Todas OK |
+| Auditoría y documentación OpenAPI | 7 | Todas OK |
+| **Total** | **37** | **37 OK, 0 fallos** |
+
+Los dos eslabones clave de la cadena, con el mensaje real del servicio:
+
+```console
+$ POST /auth/login (durante las vacaciones)
+HTTP 401 — "La cuenta está suspendida temporalmente porque el empleado se
+            encuentra de vacaciones"
+
+$ POST /auth/login (tras forzar-fin)
+HTTP 200
+```
+
+### Pruebas automatizadas del auth-service
+
+```console
+$ cd services/auth-service && ./mvnw clean test
+Tests run: 7, Failures: 0, Errors: 0, Skipped: 0  -- AccountLifecycleTest
+Tests run: 13, Failures: 0, Errors: 0, Skipped: 0 -- AuthEndpointsTest
+Tests run: 20, Failures: 0, Errors: 0, Skipped: 0
+BUILD SUCCESS
+```

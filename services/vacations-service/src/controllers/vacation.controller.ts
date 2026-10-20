@@ -253,4 +253,47 @@ export class VacationController {
       return next(error);
     }
   };
+
+  /**
+   * ENDPOINT DE DESARROLLO. Dispara el inicio del período sin esperar la fecha,
+   * para poder demostrar el flujo completo en la sustentación. Requiere ADMIN
+   * (lo exige el api-gateway, no este servicio).
+   */
+  forcePeriodStart = async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const id = String(req.params.id);
+      const period = await this.service.forcePeriodStart(id);
+      return res.json({
+        message: 'Inicio de período forzado: se publicó vacaciones.iniciadas',
+        data: period,
+      });
+    } catch (error) {
+      return this.handle(error, res, next);
+    }
+  };
+
+  /** ENDPOINT DE DESARROLLO. Contraparte de forcePeriodStart. Requiere ADMIN. */
+  forcePeriodFinish = async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const id = String(req.params.id);
+      const period = await this.service.forcePeriodFinish(id);
+      return res.json({
+        message: 'Fin de período forzado: se publicó vacaciones.finalizadas',
+        data: period,
+      });
+    } catch (error) {
+      return this.handle(error, res, next);
+    }
+  };
+
+  private handle(error: unknown, res: Response, next: NextFunction) {
+    if (error instanceof ValidationError) {
+      return res.status(error.statusCode).json({
+        status: error.statusCode,
+        error: error.statusCode === 404 ? 'Not Found' : 'Bad Request',
+        message: error.message,
+      });
+    }
+    return next(error);
+  }
 }

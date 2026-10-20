@@ -1,0 +1,791 @@
+{
+  "info": {
+    "name": "auth-service (Reto 5)",
+    "description": "Contrato del proveedor de identidad: emisión de tokens, política de contraseñas y separación entre el Access JWT y el token de restablecimiento.\n\nTodo pasa por el api-gateway ({{gatewayBaseUrl}}), igual que lo haría un cliente real.\n\nPRECONDICIÓN: sistema recién levantado (`docker compose down -v && docker compose up --build`). El administrador semilla se crea al arrancar el auth-service.\n\nRequiere el environment `system-hr.postman_environment.json`.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    {
+      "key": "adminToken",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "empleadoId",
+      "value": "E501",
+      "type": "string"
+    },
+    {
+      "key": "empleadoEmail",
+      "value": "laura.mendez@empresa.com",
+      "type": "string"
+    },
+    {
+      "key": "empleadoPassword",
+      "value": "Secreta123",
+      "type": "string"
+    },
+    {
+      "key": "resetToken",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "userToken",
+      "value": "",
+      "type": "string"
+    }
+  ],
+  "item": [
+    {
+      "name": "1. Login del administrador semilla",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('Status 200', () => pm.response.to.have.status(200));",
+              "",
+              "const b = pm.response.json();",
+              "",
+              "pm.test('Devuelve un Bearer con rol ADMIN', () => {",
+              "    pm.expect(b.tipo).to.eql('Bearer');",
+              "    pm.expect(b.rol).to.eql('ADMIN');",
+              "    pm.expect(b.expiraEnSegundos).to.be.a('number');",
+              "});",
+              "",
+              "pm.test('El JWT tiene tres segmentos y los claims del enunciado', () => {",
+              "    const partes = b.token.split('.');",
+              "    pm.expect(partes).to.have.lengthOf(3);",
+              "    const payload = JSON.parse(atob(partes[1].replace(/-/g, '+').replace(/_/g, '/')));",
+              "    pm.expect(payload.sub).to.eql(b.empleadoId);",
+              "    pm.expect(payload.role).to.eql('ADMIN');",
+              "    pm.expect(payload).to.have.property('iat');",
+              "    pm.expect(payload).to.have.property('exp');",
+              "});",
+              "",
+              "pm.test('El token no contiene la contraseña', () => {",
+              "    const payload = atob(b.token.split('.')[1].replace(/-/g, '+').replace(/_/g, '/'));",
+              "    pm.expect(payload.toLowerCase()).to.not.include('password');",
+              "});",
+              "",
+              "pm.collectionVariables.set('adminToken', b.token);"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"usuario\": \"{{adminUsuario}}\",\n  \"password\": \"{{adminPassword}}\"\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        },
+        "url": {
+          "raw": "{{gatewayBaseUrl}}/auth/login",
+          "host": [
+            "{{gatewayBaseUrl}}"
+          ],
+          "path": [
+            "auth",
+            "login"
+          ]
+        },
+        "description": "Endpoint público. El administrador semilla se crea al arrancar el servicio desde AUTH_SEED_ADMIN_*; sin él no habría forma de ejecutar ninguna operación de escritura."
+      },
+      "response": []
+    },
+    {
+      "name": "2. Login con contraseña incorrecta",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('Status 401', () => pm.response.to.have.status(401));",
+              "pm.test('Mensaje genérico: no revela si el usuario existe', () => {",
+              "    pm.expect(pm.response.json().message).to.eql('Credenciales inválidas');",
+              "});"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"usuario\": \"{{adminUsuario}}\",\n  \"password\": \"ContraseñaEquivocada999\"\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        },
+        "url": {
+          "raw": "{{gatewayBaseUrl}}/auth/login",
+          "host": [
+            "{{gatewayBaseUrl}}"
+          ],
+          "path": [
+            "auth",
+            "login"
+          ]
+        },
+        "description": "El mensaje es idéntico al de un usuario inexistente: distinguirlos permitiría enumerar cuentas válidas."
+      },
+      "response": []
+    },
+    {
+      "name": "2.1 Precondición: departamento IT (ADMIN)",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "// El request 3 registra un empleado en el departamento IT, y",
+              "// employees-service valida por HTTP que ese departamento exista.",
+              "// Sin esta precondición el POST /empleados responde 400.",
+              "pm.test('IT disponible (201 creado, o 400/409 si ya existía)', () => {",
+              "    pm.expect(pm.response.code).to.be.oneOf([201, 400, 409]);",
+              "});"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          },
+          {
+            "key": "Authorization",
+            "value": "Bearer {{adminToken}}"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"id\": \"IT\",\n  \"nombre\": \"Tecnología\",\n  \"descripcion\": \"Departamento de tecnología\"\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        },
+        "url": {
+          "raw": "{{gatewayBaseUrl}}/departamentos",
+          "host": [
+            "{{gatewayBaseUrl}}"
+          ],
+          "path": [
+            "departamentos"
+          ]
+        },
+        "description": "Precondición del request 3, no una prueba de departments-service.\n\nemployees-service valida por HTTP contra departments-service que el departamentoId exista; si no, responde 400. Es idempotente: si IT ya existe se continúa igual."
+      },
+      "response": []
+    },
+    {
+      "name": "3. Crear empleado (ADMIN) para obtener su cuenta",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('Status 201', () => pm.response.to.have.status(201));",
+              "pm.test('El empleado se registró', () => {",
+              "    pm.expect(pm.response.json().id).to.eql(pm.collectionVariables.get('empleadoId'));",
+              "});",
+              "",
+              "console.log('El auth-service debe consumir empleado.creado y publicar usuario.creado.');",
+              "console.log('Obtenga el token de activación con: docker compose logs auth-service | grep usuario.creado');"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          },
+          {
+            "key": "Authorization",
+            "value": "Bearer {{adminToken}}"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"id\": \"{{empleadoId}}\",\n  \"nombre\": \"Laura\",\n  \"apellido\": \"Méndez\",\n  \"email\": \"{{empleadoEmail}}\",\n  \"numeroEmpleado\": \"EMP-2026-501\",\n  \"cargo\": \"Arquitecta de Software\",\n  \"area\": \"Tecnología\",\n  \"departamentoId\": \"IT\",\n  \"fechaIngreso\": \"2026-04-15\",\n  \"estado\": \"ACTIVO\"\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        },
+        "url": {
+          "raw": "{{gatewayBaseUrl}}/empleados",
+          "host": [
+            "{{gatewayBaseUrl}}"
+          ],
+          "path": [
+            "empleados"
+          ]
+        },
+        "description": "REQUIERE que exista el departamento IT (créelo con la colección del ecosistema o de departamentos).\n\nAl registrarse, employees-service publica empleado.creado; el auth-service lo consume, crea la cuenta en PENDIENTE_ACTIVACION con rol USER y publica usuario.creado con el token de activación."
+      },
+      "response": []
+    },
+    {
+      "name": "4. Login antes de activar la cuenta",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('Status 401', () => pm.response.to.have.status(401));",
+              "pm.test('Explica que la cuenta no está activada', () => {",
+              "    pm.expect(pm.response.json().message).to.include('no ha sido activada');",
+              "});"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"usuario\": \"{{empleadoEmail}}\",\n  \"password\": \"{{empleadoPassword}}\"\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        },
+        "url": {
+          "raw": "{{gatewayBaseUrl}}/auth/login",
+          "host": [
+            "{{gatewayBaseUrl}}"
+          ],
+          "path": [
+            "auth",
+            "login"
+          ]
+        },
+        "description": "La cuenta existe pero nació sin contraseña: el login falla hasta que se establezca con el token de activación."
+      },
+      "response": []
+    },
+    {
+      "name": "5. Solicitar recuperación de contraseña",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('Status 202', () => pm.response.to.have.status(202));",
+              "",
+              "console.log('Se publicó usuario.recuperacion. Copie el token del log:');",
+              "console.log('  docker compose logs notifications-service | grep NOTIFICACIÓN');",
+              "console.log('Y péguelo en la variable de colección resetToken antes del request 6.');"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"email\": \"{{empleadoEmail}}\"\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        },
+        "url": {
+          "raw": "{{gatewayBaseUrl}}/auth/recover-password",
+          "host": [
+            "{{gatewayBaseUrl}}"
+          ],
+          "path": [
+            "auth",
+            "recover-password"
+          ]
+        },
+        "description": "Endpoint público. Genera un token nuevo de vida corta y publica usuario.recuperacion; notifications-service simula el correo y el token aparece en su log."
+      },
+      "response": []
+    },
+    {
+      "name": "6. Establecer contraseña con el token",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "if (!pm.collectionVariables.get('resetToken')) {",
+              "    pm.test('SALTADO: pegue el token en la variable resetToken', () => {",
+              "        pm.expect.fail('Copie el token del log de notificaciones a la variable de colección resetToken');",
+              "    });",
+              "} else {",
+              "    pm.test('Status 200', () => pm.response.to.have.status(200));",
+              "    pm.test('Confirma el establecimiento', () => {",
+              "        pm.expect(pm.response.json().mensaje).to.include('Contraseña establecida');",
+              "    });",
+              "}"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"token\": \"{{resetToken}}\",\n  \"nuevaPassword\": \"{{empleadoPassword}}\"\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        },
+        "url": {
+          "raw": "{{gatewayBaseUrl}}/auth/reset-password",
+          "host": [
+            "{{gatewayBaseUrl}}"
+          ],
+          "path": [
+            "auth",
+            "reset-password"
+          ]
+        },
+        "description": "Público a propósito: la autorización viene del token del cuerpo, no de una sesión. Exigir un Access JWT aquí haría imposible la activación inicial.\n\nSi la cuenta estaba PENDIENTE_ACTIVACION queda ACTIVA y se publica cuenta.activada."
+      },
+      "response": []
+    },
+    {
+      "name": "7. Contraseña que no cumple la política",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('Status 400', () => pm.response.to.have.status(400));",
+              "pm.test('Explica la política', () => {",
+              "    pm.expect(pm.response.json().message).to.include('al menos 8 caracteres');",
+              "});"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"token\": \"{{resetToken}}\",\n  \"nuevaPassword\": \"corta\"\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        },
+        "url": {
+          "raw": "{{gatewayBaseUrl}}/auth/reset-password",
+          "host": [
+            "{{gatewayBaseUrl}}"
+          ],
+          "path": [
+            "auth",
+            "reset-password"
+          ]
+        },
+        "description": "La política exige mínimo 8 caracteres con al menos una letra y un dígito, y se valida en el servidor."
+      },
+      "response": []
+    },
+    {
+      "name": "8. Un Access JWT no sirve como token de reset",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('Status 401', () => pm.response.to.have.status(401));",
+              "pm.test('Rechaza por tipo de token', () => {",
+              "    pm.expect(pm.response.json().message).to.include('no es de restablecimiento');",
+              "});"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"token\": \"{{adminToken}}\",\n  \"nuevaPassword\": \"Intruso123\"\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        },
+        "url": {
+          "raw": "{{gatewayBaseUrl}}/auth/reset-password",
+          "host": [
+            "{{gatewayBaseUrl}}"
+          ],
+          "path": [
+            "auth",
+            "reset-password"
+          ]
+        },
+        "description": "Los dos tokens llevan la misma firma; lo que los separa es el claim 'type'. Sin esa comprobación, un Access JWT permitiría cambiar contraseñas ajenas."
+      },
+      "response": []
+    },
+    {
+      "name": "9. Un token de reset no abre recursos",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "if (!pm.collectionVariables.get('resetToken')) {",
+              "    pm.test.skip('SALTADO: requiere resetToken');",
+              "} else {",
+              "    pm.test('Status 401', () => pm.response.to.have.status(401));",
+              "    pm.test('El gateway lo rechaza por ser de restablecimiento', () => {",
+              "        pm.expect(pm.response.json().message).to.include('no es válido como token de acceso');",
+              "    });",
+              "}"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer {{resetToken}}"
+          }
+        ],
+        "url": {
+          "raw": "{{gatewayBaseUrl}}/empleados",
+          "host": [
+            "{{gatewayBaseUrl}}"
+          ],
+          "path": [
+            "empleados"
+          ]
+        },
+        "description": "La comprobación simétrica del request 8, ahora en el gateway: un token de recuperación enviado por correo no debe servir como credencial de acceso."
+      },
+      "response": []
+    },
+    {
+      "name": "10. Login del empleado ya activado",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('Status 200', () => pm.response.to.have.status(200));",
+              "",
+              "const b = pm.response.json();",
+              "pm.test('Rol USER y sub = empleadoId', () => {",
+              "    pm.expect(b.rol).to.eql('USER');",
+              "    pm.expect(b.empleadoId).to.eql(pm.collectionVariables.get('empleadoId'));",
+              "});",
+              "",
+              "pm.collectionVariables.set('userToken', b.token);"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"usuario\": \"{{empleadoEmail}}\",\n  \"password\": \"{{empleadoPassword}}\"\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        },
+        "url": {
+          "raw": "{{gatewayBaseUrl}}/auth/login",
+          "host": [
+            "{{gatewayBaseUrl}}"
+          ],
+          "path": [
+            "auth",
+            "login"
+          ]
+        },
+        "description": "REQUIERE haber completado el request 6. El campo 'usuario' acepta el email o el empleadoId."
+      },
+      "response": []
+    },
+    {
+      "name": "11. Cambiar la propia contraseña (USER)",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('Status 200', () => pm.response.to.have.status(200));",
+              "pm.test('Confirma el cambio', () => {",
+              "    pm.expect(pm.response.json().mensaje).to.include('Contraseña cambiada');",
+              "});",
+              "",
+              "// La contraseña cambió: se actualiza la variable para los siguientes requests.",
+              "pm.collectionVariables.set('empleadoPassword', 'Nueva45678');"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          },
+          {
+            "key": "Authorization",
+            "value": "Bearer {{userToken}}"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"passwordActual\": \"{{empleadoPassword}}\",\n  \"nuevaPassword\": \"Nueva45678\"\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        },
+        "url": {
+          "raw": "{{gatewayBaseUrl}}/auth/change-password",
+          "host": [
+            "{{gatewayBaseUrl}}"
+          ],
+          "path": [
+            "auth",
+            "change-password"
+          ]
+        },
+        "description": "Es una de las dos únicas escrituras permitidas al rol USER. La identidad se toma del claim sub del token, nunca del cuerpo: un USER no puede cambiar la contraseña de otro."
+      },
+      "response": []
+    },
+    {
+      "name": "12. La contraseña antigua ya no sirve",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('Status 401', () => pm.response.to.have.status(401));",
+              "pm.test('Credenciales rechazadas', () => {",
+              "    pm.expect(pm.response.json().message).to.eql('Credenciales inválidas');",
+              "});"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"usuario\": \"{{empleadoEmail}}\",\n  \"password\": \"Secreta123\"\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        },
+        "url": {
+          "raw": "{{gatewayBaseUrl}}/auth/login",
+          "host": [
+            "{{gatewayBaseUrl}}"
+          ],
+          "path": [
+            "auth",
+            "login"
+          ]
+        },
+        "description": "Confirma que el cambio del request 11 surtió efecto."
+      },
+      "response": []
+    },
+    {
+      "name": "13. Login con la contraseña nueva",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('Status 200', () => pm.response.to.have.status(200));",
+              "pm.test('Sigue siendo USER', () => {",
+              "    pm.expect(pm.response.json().rol).to.eql('USER');",
+              "});"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"usuario\": \"{{empleadoEmail}}\",\n  \"password\": \"Nueva45678\"\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        },
+        "url": {
+          "raw": "{{gatewayBaseUrl}}/auth/login",
+          "host": [
+            "{{gatewayBaseUrl}}"
+          ],
+          "path": [
+            "auth",
+            "login"
+          ]
+        }
+      },
+      "response": []
+    },
+    {
+      "name": "14. Recuperación con email desconocido",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('Status 404', () => pm.response.to.have.status(404));",
+              "pm.test('Indica que no hay cuenta', () => {",
+              "    pm.expect(pm.response.json().message).to.include('No existe una cuenta');",
+              "});"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"email\": \"nadie@empresa.com\"\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        },
+        "url": {
+          "raw": "{{gatewayBaseUrl}}/auth/recover-password",
+          "host": [
+            "{{gatewayBaseUrl}}"
+          ],
+          "path": [
+            "auth",
+            "recover-password"
+          ]
+        },
+        "description": "Limitación documentada: responder 404 revela si un email está registrado. Lo correcto frente a enumeración sería un 202 siempre; se mantiene porque el flujo de prueba del enunciado necesita distinguir el caso."
+      },
+      "response": []
+    }
+  ]
+}

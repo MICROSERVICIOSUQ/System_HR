@@ -97,7 +97,7 @@ const openApiSpec = {
                   },
                   fechasIncoherentes: {
                     summary: 'fechaFin menor o igual a fechaInicio',
-                    value: { status: 400, error: 'Bad Request', message: 'fechaFin debe ser posterior a fechaInicio' },
+                    value: { status: 400, error: 'Bad Request', message: 'fechaFin no puede ser anterior a fechaInicio' },
                   },
                   fechaPasada: {
                     summary: 'fechaInicio anterior a hoy',

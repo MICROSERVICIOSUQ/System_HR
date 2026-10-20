@@ -126,10 +126,13 @@ export class VacationService {
     const inicio = this.parseDate(dto.fechaInicio, 'fechaInicio');
     const fin = this.parseDate(dto.fechaFin, 'fechaFin');
 
-    // Validación 1: fechaFin debe ser posterior a fechaInicio
-    if (fin <= inicio) {
+    // Validación 1: la fechaFin no puede ser anterior a la fechaInicio.
+    // Se admite que coincidan: un período de un solo día es legítimo, y es la
+    // estrategia que sugiere el Reto 5 para demostrar el scheduler sin esperar
+    // (fechaInicio = fechaFin = hoy, con el scheduler corriendo cada minuto).
+    if (fin < inicio) {
       throw new ValidationError(
-        `fechaFin (${dto.fechaFin}) debe ser posterior a fechaInicio (${dto.fechaInicio})`
+        `fechaFin (${dto.fechaFin}) no puede ser anterior a fechaInicio (${dto.fechaInicio})`
       );
     }
 
@@ -271,9 +274,10 @@ export class VacationService {
     const inicio = this.parseDate(fechaInicioInput, 'fechaInicio');
     const fin = this.parseDate(fechaFinInput, 'fechaFin');
 
-    if (fin <= inicio) {
+    // Misma regla que en createPeriod: se admite un período de un solo día.
+    if (fin < inicio) {
       throw new ValidationError(
-        `fechaFin (${fechaFinInput}) debe ser posterior a fechaInicio (${fechaInicioInput})`
+        `fechaFin (${fechaFinInput}) no puede ser anterior a fechaInicio (${fechaInicioInput})`
       );
     }
 
@@ -530,6 +534,135 @@ export class VacationService {
       throw new ValidationError(`El campo '${field}' no es una fecha válida: '${dateStr}'`);
     }
     return d;
+  }
+
+  // ── Scheduler: transiciones por paso del tiempo ─────────────────────────────
+
+  /**
+   * Un ciclo completo del scheduler:
+   *   PROGRAMADA cuya fechaInicio llegó  → EN_CURSO    + vacaciones.iniciadas
+   *   EN_CURSO cuya fechaFin ya pasó     → FINALIZADA  + vacaciones.finalizadas
+   *
+   * Cada transición usa compare-and-set en base de datos, así que dos ciclos
+   * solapados no publican el evento dos veces dentro del mismo proceso.
+   */
+  async runSchedulerCycle(): Promise<{ iniciadas: number; finalizadas: number }> {
+    const ahora = new Date();
+    const inicioDelDia = new Date(ahora.getTime());
+    inicioDelDia.setUTCHours(0, 0, 0, 0);
+
+    let iniciadas = 0;
+    for (const period of await this.repository.findPeriodsToStart(ahora)) {
+      if (await this.startPeriod(period)) iniciadas += 1;
+    }
+
+    let finalizadas = 0;
+    for (const period of await this.repository.findPeriodsToFinish(inicioDelDia)) {
+      if (await this.finishPeriod(period)) finalizadas += 1;
+    }
+
+    return { iniciadas, finalizadas };
+  }
+
+  /**
+   * Fuerza el inicio de un período sin esperar a la fecha.
+   *
+   * Endpoint de desarrollo que el enunciado contempla para poder demostrar el
+   * flujo completo en segundos. Protegido con rol ADMIN en el api-gateway.
+   */
+  async forcePeriodStart(id: string): Promise<VacationPeriodResult> {
+    const period = await this.repository.findPeriodById(id);
+    if (!period) {
+      throw new ValidationError(`Período de vacaciones con id '${id}' no encontrado`, 404);
+    }
+    if (period.estado !== 'PROGRAMADA') {
+      throw new ValidationError(
+        `Solo se puede forzar el inicio de un período en estado PROGRAMADA (estado actual: ${period.estado})`
+      );
+    }
+    await this.startPeriod(period);
+    return this.mapPeriod({ ...period, estado: 'EN_CURSO' });
+  }
+
+  /** Contraparte simétrica de forcePeriodStart, para demostrar la reactivación. */
+  async forcePeriodFinish(id: string): Promise<VacationPeriodResult> {
+    const period = await this.repository.findPeriodById(id);
+    if (!period) {
+      throw new ValidationError(`Período de vacaciones con id '${id}' no encontrado`, 404);
+    }
+    if (period.estado !== 'EN_CURSO') {
+      throw new ValidationError(
+        `Solo se puede forzar el fin de un período en estado EN_CURSO (estado actual: ${period.estado})`
+      );
+    }
+    await this.finishPeriod(period);
+    return this.mapPeriod({ ...period, estado: 'FINALIZADA' });
+  }
+
+  private async startPeriod(period: any): Promise<boolean> {
+    const transicionGanada = await this.repository.transitionPeriodState(
+      period.id,
+      'PROGRAMADA',
+      'EN_CURSO'
+    );
+    if (!transicionGanada) {
+      return false;
+    }
+
+    const result = this.mapPeriod({ ...period, estado: 'EN_CURSO' });
+    console.log(
+      `[VACATIONS] [SCHEDULER] Período ${result.id} EN_CURSO | empleado: ${result.empleadoId} | ${result.fechaInicio} → ${result.fechaFin}`
+    );
+
+    try {
+      await this.publisher.publishVacacionesIniciadas({
+        id: result.id,
+        empleadoId: result.empleadoId,
+        fechaInicio: result.fechaInicio,
+        fechaFin: result.fechaFin,
+        estado: result.estado,
+        fechaCreacion: result.fechaCreacion,
+      });
+    } catch (err: any) {
+      console.error(
+        `[VACATIONS] [WARN] No se pudo publicar vacaciones.iniciadas para ${result.id}:`,
+        err.message
+      );
+    }
+    return true;
+  }
+
+  private async finishPeriod(period: any): Promise<boolean> {
+    const transicionGanada = await this.repository.transitionPeriodState(
+      period.id,
+      'EN_CURSO',
+      'FINALIZADA'
+    );
+    if (!transicionGanada) {
+      return false;
+    }
+
+    const result = this.mapPeriod({ ...period, estado: 'FINALIZADA' });
+    console.log(
+      `[VACATIONS] [SCHEDULER] Período ${result.id} FINALIZADA | empleado: ${result.empleadoId} | fechaFin: ${result.fechaFin}`
+    );
+
+    try {
+      await this.publisher.publishVacacionesFinalizadas({
+        id: result.id,
+        empleadoId: result.empleadoId,
+        fechaInicio: result.fechaInicio,
+        fechaFin: result.fechaFin,
+        estado: result.estado,
+        fechaCreacion: result.fechaCreacion,
+      });
+    } catch (err: any) {
+      console.error(
+        `[VACATIONS] [WARN] No se pudo publicar vacaciones.finalizadas para ${result.id}:`,
+        err.message
+      );
+    }
+    return true;
   }
 
   private mapPeriod(p: any): VacationPeriodResult {

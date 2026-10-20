@@ -12,6 +12,9 @@ app.get('/health', controller.getHealth);
 
 // Rutas de perfiles
 app.use('/profiles', profileRoutes);
+// Alias en español, igual que vacations-service sirve /vacaciones.
+// El enunciado del Reto 5 define la regla de propiedad sobre PUT /perfiles/{empleadoId}.
+app.use('/perfiles', profileRoutes);
 
 // Manejador 404
 app.use((_req: Request, res: Response) => {

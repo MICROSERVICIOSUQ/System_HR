@@ -15,6 +15,8 @@ Registro formal de decisiones técnicas (Architecture Decision Records) del sist
 | [ADR-005](ADR-005-event-driven-architecture.md) | Adopción de una Arquitectura Orientada a Eventos | Aceptada |
 | [ADR-006](ADR-006-fanout-exchange.md) | Uso de un Exchange Fanout para Eventos de Recursos Humanos | Aceptada |
 | [ADR-007](ADR-007-idempotent-consumers.md) | Idempotencia en consumidores mediante Event ID | Aceptada |
+| [ADR-008](ADR-008-validacion-jwt-en-el-gateway.md) | Validar el JWT en el API Gateway y no en cada microservicio | Aceptada |
+| [ADR-009](ADR-009-estados-de-cuenta.md) | Estado de cuenta como enumeración, no como booleano | Aceptada |
 
 ---
 

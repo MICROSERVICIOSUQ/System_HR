@@ -244,6 +244,56 @@ export class VacationRepository {
     });
   }
 
+  // ── Scheduler: transiciones por paso del tiempo ────────────────────────────
+
+  /** Períodos PROGRAMADA cuya fechaInicio ya llegó. */
+  async findPeriodsToStart(hasta: Date) {
+    return prisma.vacationPeriod.findMany({
+      where: {
+        estado: 'PROGRAMADA',
+        fechaInicio: { lte: hasta },
+      },
+      orderBy: { fechaInicio: 'asc' },
+    });
+  }
+
+  /**
+   * Períodos EN_CURSO cuya fechaFin ya pasó por completo.
+   *
+   * La fechaFin es inclusiva: unas vacaciones que terminan hoy siguen vigentes
+   * hoy, así que solo se consideran finalizadas cuando la fecha es estrictamente
+   * anterior al día en curso.
+   */
+  async findPeriodsToFinish(inicioDelDia: Date) {
+    return prisma.vacationPeriod.findMany({
+      where: {
+        estado: 'EN_CURSO',
+        fechaFin: { lt: inicioDelDia },
+      },
+      orderBy: { fechaFin: 'asc' },
+    });
+  }
+
+  /**
+   * Cambia el estado de un período solo si sigue en el estado esperado.
+   *
+   * Es un compare-and-set: si dos ejecuciones del scheduler se solapan, la
+   * segunda obtiene {@code count === 0} y no vuelve a publicar el evento. Protege
+   * dentro de un mismo proceso; la coordinación entre varias instancias del
+   * servicio es la limitación documentada que resolverá ShedLock.
+   */
+  async transitionPeriodState(
+    id: string,
+    estadoEsperado: string,
+    estadoNuevo: string
+  ): Promise<boolean> {
+    const { count } = await prisma.vacationPeriod.updateMany({
+      where: { id, estado: estadoEsperado },
+      data: { estado: estadoNuevo },
+    });
+    return count === 1;
+  }
+
   async updatePeriod(id: string, data: { fechaInicio: Date; fechaFin: Date }) {
     return prisma.vacationPeriod.update({
       where: { id },

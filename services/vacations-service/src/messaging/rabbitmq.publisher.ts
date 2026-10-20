@@ -69,6 +69,31 @@ export class RabbitMQPublisher {
     await this.publishEvent('vacaciones.reprogramadas', data, correlationId);
   }
 
+  /**
+   * Publicado por el scheduler cuando llega la fechaInicio de un período.
+   * El auth-service lo consume para suspender temporalmente la cuenta.
+   * Reutiliza el mismo payload que vacaciones.programadas: lleva empleadoId,
+   * que es el campo con el que el consumidor identifica la cuenta.
+   */
+  async publishVacacionesIniciadas(
+    data: VacacionesProgramadasEvent,
+    correlationId?: string
+  ): Promise<void> {
+    await this.publishEvent('vacaciones.iniciadas', data, correlationId);
+  }
+
+  /**
+   * Publicado por el scheduler cuando pasa la fechaFin de un período.
+   * El auth-service lo consume para reactivar la cuenta, salvo que el empleado
+   * haya sido retirado durante el período.
+   */
+  async publishVacacionesFinalizadas(
+    data: VacacionesProgramadasEvent,
+    correlationId?: string
+  ): Promise<void> {
+    await this.publishEvent('vacaciones.finalizadas', data, correlationId);
+  }
+
   private async publishEvent(
     type: string,
     data: VacacionesProgramadasEvent,

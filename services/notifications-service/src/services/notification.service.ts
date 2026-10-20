@@ -16,11 +16,92 @@ export interface EventEnvelope {
     cargo?: string;
     fechaIngreso?: string;
     fechaRetiro?: string | null;
+    // Campos de los eventos del auth-service (Reto 5)
+    token?: string;
+    motivo?: string;
+    permanente?: boolean;
     [key: string]: unknown;
   };
 }
 
 export type ProcessingResult = 'PROCESSED' | 'DUPLICATE' | 'IGNORED' | 'ERROR';
+
+/**
+ * Eventos que este servicio notifica.
+ *
+ * Los cuatro últimos los emite el auth-service (Reto 5) y cierran el ciclo de
+ * vida de la cuenta. Importante: el correo de bienvenida del onboarding se
+ * dispara con `usuario.creado`, no con `empleado.creado`, porque es
+ * `usuario.creado` el que trae el token de activación; sin token el correo sería
+ * inútil.
+ */
+const ALLOWED_EVENTS: readonly string[] = [
+  'empleado.creado',
+  'empleado.actualizado',
+  'empleado.retirado',
+  'usuario.creado',
+  'usuario.recuperacion',
+  'cuenta.activada',
+  'cuenta.desactivada',
+];
+
+/** Clasificación de la notificación simulada, según la familia del evento. */
+type TipoNotificacion = 'SEGURIDAD' | 'CUENTA' | 'EMPLEADO';
+
+/**
+ * Compone el texto del correo que se simula para cada evento.
+ *
+ * En producción estos logs serían el envío real de un correo; para los eventos de
+ * seguridad, con un enlace del estilo
+ * `https://app.empresa.com/reset?token=<token>`.
+ */
+function componerNotificacion(
+  eventType: string,
+  data: EventEnvelope['data']
+): { tipo: TipoNotificacion; mensaje: string } | null {
+  const token = typeof data?.token === 'string' ? data.token : '';
+  const motivo = typeof data?.motivo === 'string' ? data.motivo : '';
+  const permanente = data?.permanente === true;
+
+  switch (eventType) {
+    case 'usuario.creado':
+      return {
+        tipo: 'SEGURIDAD',
+        mensaje:
+          'Para establecer su contraseña use el siguiente enlace: '
+          + `https://app.empresa.com/reset?token=${token}`,
+      };
+
+    case 'usuario.recuperacion':
+      return {
+        tipo: 'SEGURIDAD',
+        mensaje:
+          'Para restablecer su contraseña use el siguiente enlace: '
+          + `https://app.empresa.com/reset?token=${token}`,
+      };
+
+    case 'cuenta.desactivada':
+      return {
+        tipo: 'CUENTA',
+        mensaje: permanente
+          ? `Su cuenta fue desactivada de forma permanente. Motivo: ${motivo}.`
+          : `Su cuenta fue desactivada temporalmente. Motivo: ${motivo}.`,
+      };
+
+    case 'cuenta.activada':
+      return {
+        tipo: 'CUENTA',
+        mensaje: motivo === 'FIN_VACACIONES'
+          ? 'Bienvenido de regreso. Su cuenta fue reactivada al finalizar sus vacaciones.'
+          : `Su cuenta fue activada. Motivo: ${motivo}.`,
+      };
+
+    default:
+      // Los eventos de empleado ya se registraban antes del Reto 5 sin
+      // simular correo; se mantienen tal cual para no alterar ese contrato.
+      return null;
+  }
+}
 
 export class NotificationService {
   constructor(private readonly repository = new NotificationRepository()) {}
@@ -58,8 +139,7 @@ export class NotificationService {
     console.log(`[NOTIFICATIONS] Mensaje recibido | UUID: ${messageId} | Tipo: ${eventType} | Emisor: ${producer}`);
 
     // Filtrar eventos permitidos
-    const allowedEvents = ['empleado.creado', 'empleado.actualizado', 'empleado.retirado'];
-    if (!allowedEvents.includes(eventType)) {
+    if (!ALLOWED_EVENTS.includes(eventType)) {
       console.log(`[NOTIFICATIONS] Evento ignorado | UUID: ${messageId} | Tipo '${eventType}' no es de interés para este servicio`);
       return 'IGNORED';
     }
@@ -98,6 +178,15 @@ export class NotificationService {
       });
 
       console.log(`[NOTIFICATIONS] [ÉXITO] Notificación registrada | UUID: ${messageId} | Tipo: ${eventType} | Empleado: ${employeeId} (${employeeName}) | Email: ${email}`);
+
+      // Simulación del envío del correo, en el formato que pide el enunciado.
+      const notificacion = componerNotificacion(eventType, data);
+      if (notificacion) {
+        console.log(
+          `[NOTIFICACIÓN] Tipo: ${notificacion.tipo} | Para: ${email} | Mensaje: "${notificacion.mensaje}"`
+        );
+      }
+
       return 'PROCESSED';
     } catch (error: any) {
       // Si ocurre condición de carrera en BD y salta el constraint UNIQUE
