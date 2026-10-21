@@ -25,6 +25,14 @@ pnpm-debug.log*
 **/*.sqlite
 **/*.sqlite3
 
+# Reportes de pruebas: se regeneran en cada ejecución y su ruta es parte del
+# contrato con el pipeline, pero el contenido no se versiona.
+**/reports/
+**/surefire-reports/
+**/site/jacoco/
+**/*.lcov
+**/lcov.info
+
 # Logs
 **/*.log
 logs/

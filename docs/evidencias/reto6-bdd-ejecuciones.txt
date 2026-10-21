@@ -1,0 +1,56 @@
+EVIDENCIA RETO 6 — PUNTO 6: TRES EJECUCIONES CONSECUTIVAS CONSISTENTES
+=======================================================================
+
+Objetivo: demostrar que la suite BDD no tiene pruebas intermitentes y que puede
+ejecutarse varias veces seguidas sin limpiar el sistema entre ejecuciones.
+
+Entorno
+-------
+  Ecosistema:  14/14 contenedores running (healthy)
+  Gateway:     http://localhost:8090  (el 8080 lo ocupa Apache en esta máquina)
+  Comando:     cd e2e-tests && BASE_URL=http://localhost:8090 ./mvnw test
+  Fecha:       2026-10-21
+
+No se reinició ningún contenedor, no se vaciaron las bases de datos y no se
+borraron los reportes entre una ejecución y la siguiente.
+
+Resultados
+----------
+  Ejecución 1 | inicio 09:13:27 | exit=0 | Tests run: 41, Failures: 0, Errors: 0, Skipped: 0 | 36,34 s
+  Ejecución 2 | inicio 09:14:13 | exit=0 | Tests run: 41, Failures: 0, Errors: 0, Skipped: 0 | 44,33 s
+  Ejecución 3 | inicio 09:15:09 | exit=0 | Tests run: 41, Failures: 0, Errors: 0, Skipped: 0 | 31,68 s
+
+Contenido de reports/junit.xml en cada ejecución:
+
+  tests="41" skipped="0" failures="0" errors="0"
+  tests="41" skipped="0" failures="0" errors="0"
+  tests="41" skipped="0" failures="0" errors="0"
+
+Por qué es repetible
+--------------------
+1. Identificadores únicos por escenario. ContextoEscenario genera un sufijo
+   (milisegundos + aleatorio) del que derivan el id del empleado, su correo, su
+   número de empleado y el id del departamento. Dos escenarios —o dos
+   ejecuciones de la misma suite— nunca compiten por la misma fila, así que no
+   hace falta limpiar la base de datos.
+
+2. Cada escenario construye sus propias precondiciones invocando los endpoints
+   reales, no leyendo datos precargados. El paso
+   «que existe un empleado activo con credenciales establecidas» registra al
+   empleado, espera la cuenta, la activa y vuelve a autenticarse como ADMIN.
+
+3. Ninguna espera es fija. Los pasos que empiezan por «eventualmente» reintentan
+   hasta que la condición se cumple, de modo que la variación de carga entre
+   ejecuciones —visible en la diferencia entre 31,68 s y 44,33 s— no produce
+   fallos intermitentes, solo ejecuciones algo más lentas.
+
+4. La suite se ejecuta en serie (cucumber.execution.parallel.enabled=false). El
+   aislamiento se logra con identificadores únicos, no con paralelismo.
+
+Variación observada
+-------------------
+La diferencia de duración entre ejecuciones (31,68 s a 44,33 s, un 40 %) proviene
+de la carga de la máquina y del número de reintentos que necesita cada
+verificación asíncrona, no de un comportamiento distinto del sistema: las tres
+ejecuciones recorrieron los mismos 41 escenarios con el mismo resultado en cada
+paso.

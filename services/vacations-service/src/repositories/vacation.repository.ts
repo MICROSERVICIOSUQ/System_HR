@@ -1,4 +1,5 @@
 import prisma from '../config/db.ts';
+import { ESTADOS_ACTIVOS, periodosSolapados } from '../domain/vacation-rules.ts';
 import type { Prisma } from '../generated/prisma/client.ts';
 
 export type VacationPeriodSortField =
@@ -322,22 +323,31 @@ export class VacationRepository {
    * Un solapamiento existe cuando los rangos se cruzan: inicio1 <= fin2 AND fin1 >= inicio2
    * Excluye opcionalmente un ID (para futura edición).
    */
+  /**
+   * Períodos activos del empleado que chocan con el rango propuesto.
+   *
+   * La base de datos filtra lo que depende de ella (el empleado y el estado) y el
+   * predicado de solapamiento se aplica con la regla de dominio
+   * {@link periodosSolapados}. Así esa regla tiene un único dueño y se puede
+   * verificar con una tabla de casos borde sin levantar PostgreSQL.
+   *
+   * El conjunto que se trae a memoria está acotado por la realidad del negocio:
+   * son los períodos PROGRAMADA o EN_CURSO de un solo empleado, un puñado de filas.
+   */
   async findOverlappingPeriods(
     empleadoId: string,
     fechaInicio: Date,
     fechaFin: Date,
     excludePeriodId?: string
   ) {
-    return prisma.vacationPeriod.findMany({
+    const activos = await prisma.vacationPeriod.findMany({
       where: {
         empleadoId,
-        estado: { in: ['PROGRAMADA', 'EN_CURSO'] },
+        estado: { in: [...ESTADOS_ACTIVOS] },
         ...(excludePeriodId && { id: { not: excludePeriodId } }),
-        AND: [
-          { fechaInicio: { lte: fechaFin } },
-          { fechaFin: { gte: fechaInicio } },
-        ],
       },
     });
+
+    return periodosSolapados(fechaInicio, fechaFin, activos);
   }
 }

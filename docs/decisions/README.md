@@ -17,6 +17,8 @@ Registro formal de decisiones técnicas (Architecture Decision Records) del sist
 | [ADR-007](ADR-007-idempotent-consumers.md) | Idempotencia en consumidores mediante Event ID | Aceptada |
 | [ADR-008](ADR-008-validacion-jwt-en-el-gateway.md) | Validar el JWT en el API Gateway y no en cada microservicio | Aceptada |
 | [ADR-009](ADR-009-estados-de-cuenta.md) | Estado de cuenta como enumeración, no como booleano | Aceptada |
+| [ADR-010](ADR-010-piramide-de-pruebas.md) | Pirámide de pruebas con dobles en la base y Docker solo en la cima | Aceptada |
+| [ADR-011](ADR-011-verificacion-de-efectos-asincronos.md) | Verificar efectos asíncronos con polling y disparar el tiempo a mano | Aceptada |
 
 ---
 

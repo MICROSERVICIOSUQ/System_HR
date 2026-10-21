@@ -8,6 +8,7 @@ import {
 import { RabbitMQPublisher } from '../messaging/rabbitmq.publisher.ts';
 import type { Prisma } from '../generated/prisma/client.ts';
 import type { PaginatedResponse } from '../types/pagination.ts';
+import { finEsAnteriorAInicio, inicioEsPasado } from '../domain/vacation-rules.ts';
 
 export interface EventEnvelope {
   id: string;
@@ -130,14 +131,14 @@ export class VacationService {
     // Se admite que coincidan: un período de un solo día es legítimo, y es la
     // estrategia que sugiere el Reto 5 para demostrar el scheduler sin esperar
     // (fechaInicio = fechaFin = hoy, con el scheduler corriendo cada minuto).
-    if (fin < inicio) {
+    if (finEsAnteriorAInicio(inicio, fin)) {
       throw new ValidationError(
         `fechaFin (${dto.fechaFin}) no puede ser anterior a fechaInicio (${dto.fechaInicio})`
       );
     }
 
     // Validación 2: fechaInicio no puede ser en el pasado
-    if (inicio < today) {
+    if (inicioEsPasado(inicio, today)) {
       throw new ValidationError(
         `fechaInicio (${dto.fechaInicio}) no puede ser una fecha pasada`
       );
@@ -275,7 +276,7 @@ export class VacationService {
     const fin = this.parseDate(fechaFinInput, 'fechaFin');
 
     // Misma regla que en createPeriod: se admite un período de un solo día.
-    if (fin < inicio) {
+    if (finEsAnteriorAInicio(inicio, fin)) {
       throw new ValidationError(
         `fechaFin (${fechaFinInput}) no puede ser anterior a fechaInicio (${fechaInicioInput})`
       );

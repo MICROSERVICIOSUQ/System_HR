@@ -1,0 +1,93 @@
+EVIDENCIA RETO 6 — PUNTO 1: UNA REGLA DE NEGOCIO ROTA ES DETECTADA
+===================================================================
+
+Una prueba que no falla cuando el código está mal no prueba nada. Para
+comprobarlo se alteraron deliberadamente dos reglas de negocio —una en cada
+lenguaje— y se verificó que las pruebas unitarias las detectan y señalan cuáles.
+Ambas mutaciones se revirtieron después.
+
+Fecha: 2026-10-21
+
+
+MUTACIÓN 1 — SOLAPAMIENTO DE PERÍODOS DE VACACIONES (TypeScript)
+=================================================================
+
+Archivo: services/vacations-service/src/domain/vacation-rules.ts
+Función: rangosSeSolapan
+
+El predicado de intersección de intervalos usa extremos inclusivos: compartir un
+único día ya cuenta como solapamiento, porque un empleado no puede estar en dos
+períodos de vacaciones el mismo día. El error clásico es escribirlo con
+comparaciones estrictas, que deja pasar justo los casos de borde.
+
+  -   return ai <= bf && af >= bi;
+  +   return ai <  bf && af >  bi;
+
+Comando: cd services/vacations-service && npm test
+Código de salida: 1
+
+  ℹ tests 54
+  ℹ pass 47
+  ℹ fail 7
+
+Pruebas que la detectan:
+
+  ✖ termina exactamente el día en que empieza (2026-11-05 → 2026-11-10) → true
+  ✖ empieza exactamente el día en que termina (2026-11-20 → 2026-11-25) → true
+  ✖ un día igual al inicio del existente (2026-11-10 → 2026-11-10) → true
+  ✖ un día igual al fin del existente (2026-11-20 → 2026-11-20) → true
+  ✖ el predicado es simétrico: el orden de los rangos no cambia el resultado
+  ✖ ignora la hora: un rango con hora solapa igual que sin ella
+  ✖ validación 4: rechaza el solapamiento de un solo día compartido
+
+Las seis primeras son de la tabla de casos borde de vacation-rules.test.ts; la
+séptima es del servicio (vacation-service.test.ts), es decir que la mutación se
+detecta tanto en el nivel del dominio como en el del caso de uso.
+
+Observación importante: los casos que NO fallaron son los que no tocan el borde
+—«es idéntico al existente», «un día dentro del existente», «un día justo antes
+del existente»—. Es decir, una suite que solo probara solapamientos evidentes
+habría quedado en verde con el código roto. Esa es la razón de la tabla de 16
+casos con los bordes explícitos.
+
+Estado tras la verificación: revertida. 54/54 en verde, código de salida 0.
+
+
+MUTACIÓN 2 — RETIRO LÓGICO DEL EMPLEADO (Java)
+===============================================
+
+Archivo: services/employees-service/src/main/java/com/microservicios/employees/service/EmployeeService.java
+Método: retire(String id)
+
+  -   existing.setStatus(EmployeeStatus.RETIRED);
+  +   // se omite el cambio de estado
+
+El empleado queda con su fechaRetiro fijada pero con estado ACTIVO: seguiría
+pudiendo iniciar sesión y no aparecería en la consulta de auditoría.
+
+Comando: cd services/employees-service && ./mvnw -Djacoco.skip=true -Dtest=EmployeeServiceUnitTest test
+Código de salida: 1
+
+  [ERROR] Tests run: 5, Failures: 2 -- in EmployeeServiceUnitTest$Retiro
+  [ERROR] EmployeeServiceUnitTest$Retiro.retiroFijaEstadoYFecha         <<< FAILURE!
+          expected: RETIRED
+  [ERROR] EmployeeServiceUnitTest$Retiro.elFalloDelBrokerNoImpideElRetiro <<< FAILURE!
+          expected: RETIRED
+  [ERROR] Tests run: 17, Failures: 2, Errors: 0, Skipped: 0
+  [INFO] BUILD FAILURE
+
+Los otros cuatro grupos del mismo archivo (Registro, Unicidad, Departamento,
+Consultas) siguieron en verde: el fallo queda localizado en la regla alterada y
+no se propaga como ruido.
+
+Estado tras la verificación: revertida. 17/17 en verde y
+«All coverage checks have been met» en ./mvnw verify.
+
+
+CONCLUSIÓN
+==========
+
+Las dos suites detectan el error, lo localizan en la regla concreta, nombran las
+pruebas afectadas y devuelven un código de salida distinto de cero. Las pruebas
+que fallaron son precisamente las de los casos borde, lo que confirma que el
+valor de la suite está en esos casos y no en el camino felizmente evidente.

@@ -1,4 +1,4 @@
-# Sistema de Recursos Humanos — System_HR (Reto 3 y Reto 4)
+# Sistema de Recursos Humanos — System_HR (Retos 3 a 6)
 
 Sistema empresarial de gestión de empleados y departamentos basado en **Arquitectura de Microservicios**, combinando comunicación síncrona protegida mediante **Circuit Breaker** (Reto 3) con comunicación asíncrona desacoplada mediante **RabbitMQ y Arquitectura Orientada a Eventos** (Reto 4).
 
@@ -268,11 +268,13 @@ Todos los mensajes transmitidos en RabbitMQ viajan bajo el sobre estándar canó
 System_HR/
 ├── api-gateway/
 ├── services/
+│   ├── auth-service/
 │   ├── employees-service/
 │   ├── departments-service/
 │   ├── notifications-service/
 │   ├── profiles-service/
 │   └── vacations-service/
+├── e2e-tests/
 ├── infrastructure/
 │   ├── databases/
 │   └── rabbitmq/
@@ -291,7 +293,8 @@ System_HR/
 ```
 
 * **`api-gateway/`**: Gateway de entrada basado en Spring Cloud Gateway.
-* **`services/`**: Código fuente de los microservicios de dominio (Productores y Consumidores).
+* **`services/`**: Código fuente de los microservicios de dominio (Productores y Consumidores) y del `auth-service`.
+* **`e2e-tests/`**: Suite BDD de extremo a extremo (Cucumber + Rest Assured) que verifica el sistema desplegado a través del gateway.
 * **`infrastructure/`**: Definiciones de Docker Compose para bases PostgreSQL y RabbitMQ.
 * **`shared-events/`**: Repositorio de especificaciones, contratos de eventos y JSON Schemas compartidos.
 * **`docs/decisions/`**: Registros formales de decisiones de arquitectura (ADR).
@@ -951,3 +954,183 @@ Tests run: 13, Failures: 0, Errors: 0, Skipped: 0 -- AuthEndpointsTest
 Tests run: 20, Failures: 0, Errors: 0, Skipped: 0
 BUILD SUCCESS
 ```
+
+---
+
+# Reto 6 — Automatización de Pruebas
+
+El Reto 5 dejó el sistema verificado con 37 comprobaciones manuales ejecutadas
+desde Postman. Funciona, pero no se puede repetir en un pipeline: alguien tiene
+que hacer clic, leer la respuesta y decidir si está bien. El Reto 6 convierte esa
+verificación en código que se ejecuta con un comando y que devuelve un código de
+salida que una máquina puede interpretar.
+
+La guía paso a paso con el orden exacto de ejecución y el resultado esperado de
+cada comando está en **[docs/GUIA-PRUEBAS-RETO6.md](docs/GUIA-PRUEBAS-RETO6.md)**.
+
+## 21. Qué se añadió
+
+| Elemento | Ubicación | Contenido |
+|---|---|---|
+| Pruebas unitarias TypeScript | `services/vacations-service/src/tests/` | 54 pruebas con `node:test` y dobles escritos a mano |
+| Módulo de dominio puro | `services/vacations-service/src/domain/vacation-rules.ts` | Las reglas de fechas y solapamiento, extraídas de la consulta de Prisma |
+| Pruebas unitarias Java | `services/employees-service/src/test/.../EmployeeServiceUnitTest.java` | 17 pruebas con Mockito, sin contexto de Spring |
+| Prueba de integración | `services/employees-service/src/test/.../EmployeeRepositoryIntegrationTest.java` | 7 pruebas contra PostgreSQL 16 real vía Testcontainers |
+| Cobertura con umbral | `services/employees-service/pom.xml` | JaCoCo con mínimo del 70 % de líneas que rompe el build |
+| Suite BDD | `e2e-tests/` | 41 escenarios en Gherkin español con Cucumber y Rest Assured |
+| Decisiones | `docs/decisions/ADR-010`, `ADR-011` | Pirámide de pruebas; verificación de efectos asíncronos |
+| Evidencias | `docs/evidencias/reto6-*.txt` | Mutaciones detectadas, fallo deliberado y tres ejecuciones consecutivas |
+
+## 22. La pirámide de pruebas
+
+Los tres niveles verifican cosas distintas y fallan por razones distintas. Esa
+separación es lo que permite que un fallo señale su propia causa.
+
+```text
+                    ┌─────────────────────────┐
+                    │   BDD / E2E  (41)       │  Flujos de negocio completos
+                    │   e2e-tests/            │  Necesita el ecosistema arriba
+                    ├─────────────────────────┤
+                 ┌──┤  Integración  (7)       │  Que el esquema exista de verdad
+                 │  │  Testcontainers         │  Necesita Docker
+              ┌──┴──┴─────────────────────────┤
+              │     Unitarias  (71)           │  Reglas de negocio
+              │     Mockito / node:test       │  Solo el runtime del lenguaje
+              └───────────────────────────────┘
+```
+
+- **Unitario (71 pruebas, dos lenguajes).** Verifica reglas de negocio con todas
+  las dependencias sustituidas por dobles. **Ninguna prueba unitaria abre un
+  socket ni necesita Docker ni base de datos.** Corren en segundos.
+- **Integración (7 pruebas).** Verifica lo único que el nivel inferior no puede:
+  que Flyway aplicó las migraciones y que las restricciones `UNIQUE` y `NOT NULL`
+  están **en el esquema de PostgreSQL** y no solo en el código Java. Se omiten
+  limpiamente donde no hay Docker, en lugar de fallar en rojo.
+- **BDD / extremo a extremo (41 escenarios).** Verifica flujos completos a través
+  del API Gateway, incluidos los que atraviesan RabbitMQ y varios servicios.
+
+Dos consecuencias de diseño que merecen mención:
+
+1. **El predicado de solapamiento se extrajo a un módulo puro.** Vivía dentro de
+   una consulta de Prisma, donde solo se podía verificar con una base de datos
+   real. Ahora la consulta filtra por empleado y estado —conjunto acotado— y el
+   predicado se aplica en memoria, de modo que la prueba unitaria cubre el código
+   que de verdad corre en producción y no una copia de la regla.
+2. **El doble no puede contradecir a producción.** `RepositorioFake` resuelve los
+   solapamientos reutilizando `periodosSolapados`, la misma función que usa el
+   repositorio real. Un doble con su propia copia de la regla puede quedar en
+   verde mientras producción está roto.
+
+El razonamiento completo está en
+[ADR-010](docs/decisions/ADR-010-piramide-de-pruebas.md).
+
+## 23. BDD: por qué los escenarios están en español
+
+Un escenario escrito en Gherkin lo puede leer y corregir alguien que no programa.
+Eso es lo que hace posible la conversación de los *Three Amigos* —negocio,
+desarrollo y pruebas acordando el comportamiento **antes** de escribir el
+código— y lo que convierte la suite en documentación que no se queda obsoleta:
+si el `.feature` miente, la suite se pone roja.
+
+```gherkin
+# language: es
+Característica: Offboarding de empleados
+  Como administrador del sistema
+  Quiero desvincular empleados
+  Para que pierdan el acceso de forma inmediata y definitiva
+  Pero su historial se conserve para auditoría
+
+  Antecedentes:
+    Dado que estoy autenticado como "ADMIN"
+    Y que existe un departamento para las pruebas
+    Y que existe un empleado activo con credenciales establecidas
+
+  Escenario: El empleado retirado no puede iniciar sesión
+    Dado que el empleado puede iniciar sesión
+    Y que retiro al empleado
+    Entonces eventualmente el empleado no puede iniciar sesión
+    Y el mensaje de error debe contener "permanente"
+```
+
+Los pasos que empiezan por **«eventualmente»** son los que atraviesan el broker:
+no se verifican con una espera fija sino con reintentos, porque una
+`Thread.sleep` paga siempre su peor caso y además falla de forma intermitente el
+día que el evento tarda un poco más. Las transiciones de tiempo —que las
+vacaciones empiecen y terminen— se provocan con los endpoints de disparo manual
+del Reto 5, que ejecutan la misma transición y publican el mismo evento que el
+scheduler, para no acoplar la prueba a su frecuencia.
+
+El detalle de la suite —el «World», las variables de entorno, el catálogo de
+escenarios y cómo añadir uno— está en **[e2e-tests/README.md](e2e-tests/README.md)**,
+y las decisiones sobre las esperas en
+[ADR-011](docs/decisions/ADR-011-verificacion-de-efectos-asincronos.md).
+
+## 24. Comandos y reportes
+
+Un comando por suite. Las tres devuelven código de salida distinto de cero si
+algo falla, y las rutas de los reportes son fijas: son el contrato que consumirá
+el pipeline de Jenkins del Reto 7.
+
+| Suite | Comando | Resultados | Cobertura |
+|---|---|---|---|
+| Unitarias TypeScript | `cd services/vacations-service && npm test` | `reports/junit.xml` | `reports/lcov.info` + tabla en consola |
+| Unitarias + integración Java | `cd services/employees-service && ./mvnw verify` | `target/surefire-reports/*.xml` | `target/site/jacoco/index.html` · `jacoco.xml` · `jacoco.csv` |
+| BDD extremo a extremo | `cd e2e-tests && ./mvnw test` | `reports/junit.xml` · `reports/cucumber.json` · `reports/cucumber.html` | — |
+
+Requisitos por suite:
+
+- Las dos primeras **no necesitan nada levantado**: ni contenedores, ni base de
+  datos, ni variables de entorno. La de Java levanta un PostgreSQL efímero con
+  Testcontainers si hay Docker disponible, y omite esas 7 pruebas si no lo hay.
+- La BDD necesita el ecosistema arriba (`docker compose up -d`, 14 contenedores
+  `healthy`). Si el gateway no está en el 8080 se indica con
+  `BASE_URL=http://localhost:8090`.
+
+Los directorios de reportes están en `.gitignore`: la ruta es parte del contrato,
+el contenido se regenera en cada ejecución.
+
+## 25. Cobertura
+
+| Servicio | Herramienta | Líneas | Umbral que rompe el build |
+|---|---|---|---|
+| `employees-service` | JaCoCo 0.8.12 | **82,66 %** | 70 % (`BUNDLE / LINE / COVEREDRATIO`) |
+| `vacations-service` | `node:test --experimental-test-coverage` | 66,87 % | — |
+
+En los dos lenguajes se excluyen de la medición las mismas categorías —arranque,
+configuración y DTO— y se incluyen servicio, repositorio y dominio. Dos
+aclaraciones sobre los números:
+
+- En `vacations-service` la medición **excluye los propios archivos de prueba**
+  (`--test-coverage-exclude="src/tests/**"`). Incluirlos subía artificialmente el
+  total, porque el código de las pruebas está cubierto por definición. El
+  66,87 % es el número honesto; dentro de él, el módulo de dominio
+  `vacation-rules.ts` está al 94,19 % y lo que queda sin cubrir son el
+  repositorio de Prisma y el publicador de AMQP, que corresponden al nivel de
+  integración.
+- En `employees-service` el umbral no es decorativo: `./mvnw verify` falla si la
+  cobertura baja del 70 %.
+
+## 26. Resultados verificados del Reto 6
+
+| Métrica | Resultado |
+|---|---|
+| Pruebas unitarias TypeScript | 54 / 54 |
+| Pruebas unitarias Java | 17 / 17 |
+| Pruebas de integración con PostgreSQL real | 7 |
+| Escenarios BDD | **41 / 41** |
+| Cobertura `employees-service` | 82,66 % con umbral del 70 % aplicado |
+| Cobertura `vacations-service` | 66,87 % (dominio al 94,19 %) |
+| Ejecuciones consecutivas de la suite BDD sin fallos intermitentes | 3 (36,34 s · 44,33 s · 31,68 s) |
+| Reglas de negocio rotas a propósito y detectadas | 2 de 2 |
+| Código de salida con un escenario fallido | 1 |
+
+```console
+$ cd e2e-tests && BASE_URL=http://localhost:8090 ./mvnw test
+[INFO] Tests run: 41, Failures: 0, Errors: 0, Skipped: 0
+[INFO] BUILD SUCCESS
+```
+
+Las evidencias de los tres últimos puntos están en `docs/evidencias/`:
+[mutaciones](docs/evidencias/reto6-mutaciones.txt),
+[fallo deliberado](docs/evidencias/reto6-bdd-fallo-deliberado.txt) y
+[tres ejecuciones](docs/evidencias/reto6-bdd-ejecuciones.txt).

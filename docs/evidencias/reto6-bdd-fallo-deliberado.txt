@@ -1,0 +1,83 @@
+EVIDENCIA RETO 6 — PUNTO 6: UN ESCENARIO FALLIDO ROMPE EL BUILD
+================================================================
+
+Objetivo: comprobar que la suite BDD no "pasa en verde" cuando el sistema se
+comporta de otra manera, que deja constancia del fallo en los reportes y que
+devuelve un código de salida distinto de cero.
+
+Fecha: 2026-10-21
+
+
+CAMBIO INTRODUCIDO
+------------------
+Archivo: e2e-tests/src/test/resources/features/00-humo.feature (línea 12)
+
+  -     Entonces la respuesta debe tener código 200
+  +     Entonces la respuesta debe tener código 418
+
+Comando: cd e2e-tests && BASE_URL=http://localhost:8090 ./mvnw test
+
+
+1) CÓDIGO DE SALIDA DEL PROCESO
+-------------------------------
+  EXIT CODE = 1
+
+Es el requisito del punto 6: un fallo devuelve un código distinto de cero, que es
+lo que detendrá el pipeline de Jenkins del Reto 7.
+
+
+2) RESUMEN DE SUREFIRE
+----------------------
+  [ERROR] Tests run: 41, Failures: 1, Errors: 0, Skipped: 0, Time elapsed: 42,42 s
+          -- in com.microservicios.e2e.RunCucumberTest
+  [ERROR] Tests run: 41, Failures: 1, Errors: 0, Skipped: 0
+  [INFO] BUILD FAILURE
+
+Un solo escenario en rojo; los otros 40 siguieron ejecutándose y pasaron. El
+fallo queda localizado y no arrastra al resto de la suite.
+
+
+3) SALIDA LEGIBLE DEL ESCENARIO
+-------------------------------
+  Escenario: El sistema responde correctamente
+    Dado que el sistema está desplegado y operativo
+    Entonces la respuesta debe tener código 418
+      org.opentest4j.AssertionFailedError:
+      [cuerpo de la respuesta: {"service":"api-gateway","status":"ok"}]
+      expected: 418
+       but was: 200
+        at ?.la respuesta debe tener código 418(classpath:features/00-humo.feature:12)
+
+El mensaje señala el archivo .feature y la línea exacta, no una clase de Java:
+quien lea el fallo ve el escenario tal como se escribió.
+
+
+4) REGISTRO DEL FALLO EN reports/junit.xml
+------------------------------------------
+  tests="41"  failures="1"  errors="0"  skipped="0"
+
+  <testcase name="El sistema responde correctamente" ...>
+    <failure type="org.opentest4j.AssertionFailedError"
+             message="[cuerpo de la respuesta: {&quot;service&quot;:&quot;api-gateway&quot;,&quot;status&quot;:&quot;ok&quot;}]
+                      expected: 418 but was: 200">
+      <![CDATA[ org.opentest4j.AssertionFailedError: ... ]]>
+    </failure>
+  </testcase>
+
+El XML conserva el valor esperado, el obtenido y el cuerpo real de la respuesta,
+de modo que el reporte por sí solo explica el fallo sin volver a ejecutar nada.
+Es lo que hace que la salida sirva en un pipeline, donde nadie está mirando la
+consola.
+
+
+5) REPORTE HTML
+---------------
+reports/cucumber.html marca ese escenario en rojo y los 40 restantes en verde,
+con el detalle de cada paso.
+
+
+6) ESTADO TRAS LA VERIFICACIÓN
+------------------------------
+El valor se devolvió a 200 y la suite volvió a quedar en 41/41 con código de
+salida 0. Las tres ejecuciones limpias posteriores están documentadas en
+reto6-bdd-ejecuciones.txt.
