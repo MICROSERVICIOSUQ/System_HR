@@ -3,6 +3,7 @@ package com.microservicios.auth.security;
 import com.microservicios.auth.model.Role;
 import com.microservicios.auth.model.UserAccount;
 import io.jsonwebtoken.Claims;
+import io.jsonwebtoken.Jws;
 import io.jsonwebtoken.JwtException;
 import io.jsonwebtoken.Jwts;
 import io.jsonwebtoken.security.Keys;
@@ -37,6 +38,23 @@ public class JwtService {
     public static final String TYPE_RESET_PASSWORD = "RESET_PASSWORD";
     public static final String CLAIM_ROLE = "role";
 
+    /**
+     * Parámetro {@code typ} de la cabecera JOSE.
+     *
+     * <p>Declara el tipo del objeto, no su propósito: el RFC 7519 y la
+     * documentación de seguridad del curso coinciden en que, cuando está
+     * presente, debe valer exactamente {@code JWT}. Sirve para que un receptor
+     * que maneje varios objetos JOSE sepa que esto es un JWT antes de intentar
+     * interpretarlo.
+     *
+     * <p>Que el propósito (acceso o restablecimiento) viaje en el claim
+     * {@code type} y no aquí es deliberado: son dos preguntas distintas —«qué
+     * es esto» y «para qué sirve»— y mezclarlas en {@code typ} rompería la
+     * interoperabilidad con cualquier librería que espere el valor estándar.
+     */
+    public static final String HEADER_TYP = "typ";
+    public static final String TYP_JWT = "JWT";
+
     private final SecretKey key;
     private final long accessTtlSeconds;
     private final long resetTtlSeconds;
@@ -64,6 +82,7 @@ public class JwtService {
     public String generarAccessToken(UserAccount cuenta) {
         Instant ahora = Instant.now();
         return Jwts.builder()
+                .header().add(HEADER_TYP, TYP_JWT).and()
                 .issuer(issuer)
                 .subject(cuenta.getEmpleadoId())
                 .claim(CLAIM_ROLE, cuenta.getRole().name())
@@ -80,6 +99,7 @@ public class JwtService {
     public String generarResetToken(UserAccount cuenta) {
         Instant ahora = Instant.now();
         return Jwts.builder()
+                .header().add(HEADER_TYP, TYP_JWT).and()
                 .issuer(issuer)
                 .subject(cuenta.getEmpleadoId())
                 .claim(CLAIM_TYPE, TYPE_RESET_PASSWORD)
@@ -114,16 +134,25 @@ public class JwtService {
     }
 
     private Claims parsear(String token) {
+        Jws<Claims> jws;
         try {
-            return Jwts.parser()
+            jws = Jwts.parser()
                     .verifyWith(key)
                     .requireIssuer(issuer)
                     .build()
-                    .parseSignedClaims(token)
-                    .getPayload();
+                    .parseSignedClaims(token);
         } catch (JwtException | IllegalArgumentException ex) {
             throw new TokenInvalidoException("El token es inválido o ha expirado");
         }
+
+        // La cabecera entra en el cálculo de la firma, así que no se puede
+        // manipular sin invalidar el token: exigir el typ aquí es una
+        // comprobación barata y fiable de que esto es un JWT nuestro.
+        if (!TYP_JWT.equals(jws.getHeader().getType())) {
+            throw new TokenInvalidoException(
+                    "La cabecera del token no declara typ=JWT");
+        }
+        return jws.getPayload();
     }
 
     /** El token presentado no se puede usar: firma, vigencia o tipo incorrectos. */

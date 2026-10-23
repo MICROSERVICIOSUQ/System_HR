@@ -21,6 +21,11 @@
       "type": "string"
     },
     {
+      "key": "numeroEmpleado",
+      "value": "EMP-2026-501",
+      "description": "Numero de empleado, unico en employees-service. Estaba fijo en el cuerpo del request 3; como variable se puede cambiar para repetir la coleccion sin vaciar la base de datos."
+    },
+    {
       "key": "empleadoPassword",
       "value": "Secreta123",
       "type": "string"
@@ -34,6 +39,11 @@
       "key": "userToken",
       "value": "",
       "type": "string"
+    },
+    {
+      "key": "ajenoId",
+      "value": "E999",
+      "description": "Un id que no es del empleado autenticado. No necesita existir: el gateway responde 403 antes de enrutar al servicio."
     }
   ],
   "item": [
@@ -238,7 +248,7 @@
         ],
         "body": {
           "mode": "raw",
-          "raw": "{\n  \"id\": \"{{empleadoId}}\",\n  \"nombre\": \"Laura\",\n  \"apellido\": \"Méndez\",\n  \"email\": \"{{empleadoEmail}}\",\n  \"numeroEmpleado\": \"EMP-2026-501\",\n  \"cargo\": \"Arquitecta de Software\",\n  \"area\": \"Tecnología\",\n  \"departamentoId\": \"IT\",\n  \"fechaIngreso\": \"2026-04-15\",\n  \"estado\": \"ACTIVO\"\n}",
+          "raw": "{\n  \"id\": \"{{empleadoId}}\",\n  \"nombre\": \"Laura\",\n  \"apellido\": \"Méndez\",\n  \"email\": \"{{empleadoEmail}}\",\n  \"numeroEmpleado\": \"{{numeroEmpleado}}\",\n  \"cargo\": \"Arquitecta de Software\",\n  \"area\": \"Tecnología\",\n  \"departamentoId\": \"IT\",\n  \"fechaIngreso\": \"2026-04-15\",\n  \"estado\": \"ACTIVO\"\n}",
           "options": {
             "raw": {
               "language": "json"
@@ -267,8 +277,13 @@
             "type": "text/javascript",
             "exec": [
               "pm.test('Status 401', () => pm.response.to.have.status(401));",
-              "pm.test('Explica que la cuenta no está activada', () => {",
-              "    pm.expect(pm.response.json().message).to.include('no ha sido activada');",
+              "",
+              "// El mensaje es generico a proposito. La cuenta existe desde el request 3 pero",
+              "// todavia no tiene contrasena, y auth-service verifica las credenciales ANTES de",
+              "// mirar el estado de la cuenta. Responder aqui 'la cuenta no esta activada' le",
+              "// revelaria a un desconocido que ese correo esta registrado en la empresa.",
+              "pm.test('No revela el estado de la cuenta antes de verificar credenciales', () => {",
+              "    pm.expect(pm.response.json().message).to.eql('Credenciales inválidas');",
               "});"
             ]
           }
@@ -354,16 +369,160 @@
       "response": []
     },
     {
-      "name": "6. Establecer contraseña con el token",
+      "name": "5.1 Ver el token de reset en notificaciones (ADMIN)",
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer {{adminToken}}"
+          }
+        ],
+        "url": {
+          "raw": "{{gatewayBaseUrl}}/notifications?limit=20&sortBy=processedAt&order=DESC",
+          "host": [
+            "{{gatewayBaseUrl}}"
+          ],
+          "path": [
+            "notifications"
+          ],
+          "query": [
+            {
+              "key": "limit",
+              "value": "20"
+            },
+            {
+              "key": "sortBy",
+              "value": "processedAt"
+            },
+            {
+              "key": "order",
+              "value": "DESC"
+            }
+          ]
+        },
+        "description": "Hace visible el token de reset. El token NUNCA viaja en una respuesta HTTP: se publica en el evento usuario.recuperacion y notifications-service lo guarda en payload.data.token. Esta peticion lo muestra en la consola (Ctrl+Alt+C) con su header y sus claims decodificados, verifica que el header declara typ=JWT y que el claim type es RESET_PASSWORD, y lo deja en la variable resetToken. Requiere token de ADMIN: ni el atajo de laboratorio es publico."
+      },
       "event": [
         {
           "listen": "test",
           "script": {
             "type": "text/javascript",
             "exec": [
+              "pm.test('Status 200', () => pm.response.to.have.status(200));",
+              "",
+              "const cuerpo = pm.response.json();",
+              "const filas  = Array.isArray(cuerpo) ? cuerpo : (cuerpo.data || []);",
+              "const email  = pm.collectionVariables.get('empleadoEmail');",
+              "",
+              "// Ordenado por processedAt DESC: el primero que coincide es el mas reciente.",
+              "// Sin ordenar se copiaba el token de una ejecucion anterior, ya expirado.",
+              "const n = filas.find(x => x.eventType === 'usuario.recuperacion'",
+              "                       && String(x.email).toLowerCase() === String(email).toLowerCase());",
+              "",
+              "pm.test('Existe la notificacion usuario.recuperacion del empleado', () => {",
+              "    pm.expect(n, 'no llego el evento todavia; reenvie en un segundo').to.not.be.undefined;",
+              "});",
+              "",
+              "if (n) {",
+              "    const token = n.payload.data.token;",
+              "    pm.collectionVariables.set('resetToken', token);",
+              "",
+              "    // El payload de un JWT es Base64url, no va cifrado: se puede leer.",
+              "    const parte = (i) => {",
+              "        const s = token.split('.')[i].replace(/-/g, '+').replace(/_/g, '/');",
+              "        return JSON.parse(atob(s + '==='.slice((s.length + 3) % 4)));",
+              "    };",
+              "    const header = parte(0);",
+              "    const claims = parte(1);",
+              "",
+              "    console.log('-----------------------------------------------------------');",
+              "    console.log('TOKEN DE RESET  (publicado ' + n.processedAt + ')');",
+              "    console.log('  token:  ' + token);",
+              "    console.log('  header: ' + JSON.stringify(header));",
+              "    console.log('  claims: ' + JSON.stringify(claims));",
+              "    console.log('-----------------------------------------------------------');",
+              "",
+              "    pm.test('El header declara typ=JWT y alg=HS256', () => {",
+              "        pm.expect(header.typ).to.eql('JWT');",
+              "        pm.expect(header.alg).to.eql('HS256');",
+              "    });",
+              "    pm.test('El claim type lo marca como RESET_PASSWORD', () => {",
+              "        pm.expect(claims.type).to.eql('RESET_PASSWORD');",
+              "    });",
+              "    pm.test('No trae el claim role: no es un token de acceso', () => {",
+              "        pm.expect(claims.role).to.be.undefined;",
+              "    });",
+              "    pm.test('El sub es el empleadoId', () => {",
+              "        pm.expect(claims.sub).to.eql(pm.collectionVariables.get('empleadoId'));",
+              "    });",
+              "}"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "6. Establecer contraseña con el token (automático)",
+      "event": [
+        {
+          "listen": "prerequest",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "// Trae el token del evento automaticamente: ya no hay que copiar nada a mano.",
+              "// El token NO viaja en ninguna respuesta HTTP; se publica en el evento",
+              "// usuario.recuperacion y notifications-service lo guarda en payload.data.token.",
+              "// Por eso hay que ir a buscarlo aqui: es la prueba de que el sistema no lo expone.",
+              "const base  = pm.environment.get('gatewayBaseUrl') || pm.variables.get('gatewayBaseUrl');",
+              "const admin = pm.collectionVariables.get('adminToken');",
+              "const email = pm.collectionVariables.get('empleadoEmail');",
+              "",
+              "if (!admin) {",
+              "    console.log('Falta adminToken: ejecute antes el login del administrador.');",
+              "} else {",
+              "    pm.sendRequest({",
+              "        url: base + '/notifications?limit=50&sortBy=processedAt&order=DESC',",
+              "        method: 'GET',",
+              "        header: { 'Authorization': 'Bearer ' + admin, 'Accept': 'application/json' }",
+              "    }, (err, res) => {",
+              "        if (err) { console.log('No se pudo consultar /notifications:', err); return; }",
+              "        const cuerpo = res.json();",
+              "        const filas  = Array.isArray(cuerpo) ? cuerpo : (cuerpo.data || []);",
+              "        // Ordenado DESC: el primero que coincide es el mas reciente. Sin ordenar",
+              "        // se copiaba un token viejo y reset-password respondia 401.",
+              "        const n = filas.find(x => x.eventType === 'usuario.recuperacion'",
+              "                               && String(x.email).toLowerCase() === String(email).toLowerCase());",
+              "        if (!n) { console.log('Aun no llego usuario.recuperacion para ' + email + '. Reintente en un segundo.'); return; }",
+              "        const token = n.payload && n.payload.data && n.payload.data.token;",
+              "        if (!token) { console.log('El evento llego sin token en payload.data.token'); return; }",
+              "        pm.collectionVariables.set('resetToken', token);",
+              "        console.log('--------------------------------------------------------');",
+              "        console.log('resetToken obtenido de usuario.recuperacion');",
+              "        console.log('  publicado: ' + n.processedAt);",
+              "        console.log('  token:     ' + token);",
+              "        // El payload de un JWT es Base64url, no va cifrado: se puede leer.",
+              "        // Lo decodifico para que se vea el claim que distingue este token del",
+              "        // de acceso, que es type=RESET_PASSWORD en lugar de role=USER.",
+              "        try {",
+              "            const p = token.split('.')[1].replace(/-/g, '+').replace(/_/g, '/');",
+              "            console.log('  claims:    ' + atob(p + '==='.slice((p.length + 3) % 4)));",
+              "        } catch (e) { console.log('  (no se pudo decodificar el payload)'); }",
+              "        console.log('--------------------------------------------------------');",
+              "    });",
+              "}",
+              ""
+            ]
+          }
+        },
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
               "if (!pm.collectionVariables.get('resetToken')) {",
-              "    pm.test('SALTADO: pegue el token en la variable resetToken', () => {",
-              "        pm.expect.fail('Copie el token del log de notificaciones a la variable de colección resetToken');",
+              "    pm.test('El script previo no pudo obtener el token', () => {",
+              "        pm.expect.fail('Revise la consola: ejecute antes el request 1 (login ADMIN) y el 5 (recover-password)');",
               "    });",
               "} else {",
               "    pm.test('Status 200', () => pm.response.to.have.status(200));",
@@ -786,6 +945,201 @@
         "description": "Limitación documentada: responder 404 revela si un email está registrado. Lo correcto frente a enumeración sería un 202 siempre; se mantiene porque el flujo de prueba del enunciado necesita distinguir el caso."
       },
       "response": []
+    },
+    {
+      "name": "15. Ver el perfil del empleado (USER)",
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer {{userToken}}"
+          }
+        ],
+        "url": {
+          "raw": "{{gatewayBaseUrl}}/perfiles/{{empleadoId}}",
+          "host": [
+            "{{gatewayBaseUrl}}"
+          ],
+          "path": [
+            "perfiles",
+            "{{empleadoId}}"
+          ]
+        },
+        "description": "El perfil vive en profiles-service, un read model CQRS alimentado por eventos, en su propia base de datos. No es lo mismo que GET /empleados/{id}, que es el registro maestro de RRHH en employees-service. Los dos servicios nunca se llaman entre si: se sincronizan con empleado.creado y empleado.actualizado."
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('Status 200', () => pm.response.to.have.status(200));",
+              "pm.test('El perfil existe y es del empleado', () => {",
+              "    pm.expect(pm.response.json().employeeId).to.eql(pm.collectionVariables.get('empleadoId'));",
+              "});",
+              "pm.test('El perfil NO expone credenciales', () => {",
+              "    const texto = JSON.stringify(pm.response.json()).toLowerCase();",
+              "    pm.expect(texto).to.not.include('password');",
+              "    pm.expect(texto).to.not.include('hash');",
+              "});"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "16. Actualizar su propio perfil (USER, 200)",
+      "request": {
+        "method": "PUT",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          },
+          {
+            "key": "Authorization",
+            "value": "Bearer {{userToken}}"
+          }
+        ],
+        "url": {
+          "raw": "{{gatewayBaseUrl}}/perfiles/{{empleadoId}}",
+          "host": [
+            "{{gatewayBaseUrl}}"
+          ],
+          "path": [
+            "perfiles",
+            "{{empleadoId}}"
+          ]
+        },
+        "description": "Autorizacion por propiedad del recurso (ABAC), no RBAC: el gateway compara el claim sub del token con el id de la ruta. Un USER puede escribir aqui porque el perfil es el suyo, sin necesidad de permisos de administrador. Los cinco campos del cuerpo son opcionales; se manda solo lo que cambia.",
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"cargo\": \"Analista Senior\"\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('Status 200', () => pm.response.to.have.status(200));",
+              "pm.test('El cargo quedo actualizado', () => {",
+              "    pm.expect(pm.response.json().cargo).to.eql('Analista Senior');",
+              "});"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "17. Intentar actualizar el perfil de otro (USER, 403)",
+      "request": {
+        "method": "PUT",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          },
+          {
+            "key": "Authorization",
+            "value": "Bearer {{userToken}}"
+          }
+        ],
+        "url": {
+          "raw": "{{gatewayBaseUrl}}/perfiles/{{ajenoId}}",
+          "host": [
+            "{{gatewayBaseUrl}}"
+          ],
+          "path": [
+            "perfiles",
+            "{{ajenoId}}"
+          ]
+        },
+        "description": "La otra mitad de la regla de propiedad. El token es valido y el verbo esta permitido para el dueno, pero el id de la ruta es de otro empleado. Debe ser 403 ('se quien eres y no puedes') y no 401 ('no se quien eres'). El id ajeno no necesita existir: el gateway corta antes de enrutar al servicio.",
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"cargo\": \"Intruso\"\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('Status 403', () => pm.response.to.have.status(403));",
+              "pm.test('El gateway explica que falta el permiso', () => {",
+              "    pm.expect(pm.response.json().message).to.include('no tiene permiso');",
+              "});",
+              "pm.test('403 y no 401: la identidad es valida, el permiso no', () => {",
+              "    pm.expect(pm.response.code).to.not.eql(401);",
+              "});"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "18. El ADMIN puede actualizar cualquier perfil (200)",
+      "request": {
+        "method": "PUT",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          },
+          {
+            "key": "Authorization",
+            "value": "Bearer {{adminToken}}"
+          }
+        ],
+        "url": {
+          "raw": "{{gatewayBaseUrl}}/perfiles/{{empleadoId}}",
+          "host": [
+            "{{gatewayBaseUrl}}"
+          ],
+          "path": [
+            "perfiles",
+            "{{empleadoId}}"
+          ]
+        },
+        "description": "El ADMIN no esta sujeto a la regla de propiedad: puede escribir cualquier perfil.",
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"cargo\": \"Jefe de Area\"\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('Status 200', () => pm.response.to.have.status(200));",
+              "pm.test('El ADMIN si puede escribir el perfil de otro', () => {",
+              "    pm.expect(pm.response.json().cargo).to.eql('Jefe de Area');",
+              "});"
+            ]
+          }
+        }
+      ]
     }
   ]
 }

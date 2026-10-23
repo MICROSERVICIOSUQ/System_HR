@@ -49,12 +49,18 @@ public class JwtTokenValidator {
     public AuthenticatedUser validar(String token) {
         Claims claims;
         try {
-            claims = Jwts.parser()
+            var jws = Jwts.parser()
                     .verifyWith(key)
                     .requireIssuer(issuer)
                     .build()
-                    .parseSignedClaims(token)
-                    .getPayload();
+                    .parseSignedClaims(token);
+
+            // El typ de la cabecera JOSE debe valer JWT (RFC 7519). Va firmado
+            // junto con el resto, así que no se puede alterar sin romper la firma.
+            if (!"JWT".equals(jws.getHeader().getType())) {
+                throw new TokenRechazadoException("La cabecera del token no declara typ=JWT");
+            }
+            claims = jws.getPayload();
         } catch (JwtException | IllegalArgumentException ex) {
             throw new TokenRechazadoException("Token inválido o expirado");
         }

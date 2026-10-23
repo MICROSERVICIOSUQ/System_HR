@@ -5,16 +5,56 @@
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
   },
   "variable": [
-    { "key": "adminToken", "value": "", "type": "string" },
-    { "key": "empleadoId", "value": "E701", "type": "string" },
-    { "key": "empleadoEmail", "value": "sofia.vargas@empresa.com", "type": "string" },
-    { "key": "empleadoPassword", "value": "Secreta123", "type": "string" },
-    { "key": "resetToken", "value": "", "type": "string" },
-    { "key": "periodoId", "value": "", "type": "string" },
-    { "key": "bordeId", "value": "E702", "type": "string" },
-    { "key": "bordeEmail", "value": "diego.luna@empresa.com", "type": "string" },
-    { "key": "bordePeriodoId", "value": "", "type": "string" },
-    { "key": "hoy", "value": "", "type": "string" }
+    {
+      "key": "adminToken",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "empleadoId",
+      "value": "E701",
+      "type": "string"
+    },
+    {
+      "key": "empleadoEmail",
+      "value": "sofia.vargas@empresa.com",
+      "type": "string"
+    },
+    {
+      "key": "empleadoPassword",
+      "value": "Secreta123",
+      "type": "string"
+    },
+    {
+      "key": "resetToken",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "periodoId",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "bordeId",
+      "value": "E702",
+      "type": "string"
+    },
+    {
+      "key": "bordeEmail",
+      "value": "diego.luna@empresa.com",
+      "type": "string"
+    },
+    {
+      "key": "bordePeriodoId",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "hoy",
+      "value": "",
+      "type": "string"
+    }
   ],
   "item": [
     {
@@ -42,16 +82,30 @@
           ],
           "request": {
             "method": "POST",
-            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
             "body": {
               "mode": "raw",
               "raw": "{\n  \"usuario\": \"{{adminUsuario}}\",\n  \"password\": \"{{adminPassword}}\"\n}",
-              "options": { "raw": { "language": "json" } }
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
             },
             "url": {
               "raw": "{{gatewayBaseUrl}}/auth/login",
-              "host": ["{{gatewayBaseUrl}}"],
-              "path": ["auth", "login"]
+              "host": [
+                "{{gatewayBaseUrl}}"
+              ],
+              "path": [
+                "auth",
+                "login"
+              ]
             }
           },
           "response": []
@@ -74,18 +128,32 @@
           "request": {
             "method": "POST",
             "header": [
-              { "key": "Content-Type", "value": "application/json" },
-              { "key": "Authorization", "value": "Bearer {{adminToken}}" }
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{adminToken}}"
+              }
             ],
             "body": {
               "mode": "raw",
               "raw": "{\n  \"id\": \"IT\",\n  \"nombre\": \"Tecnología\",\n  \"descripcion\": \"Departamento de tecnología\"\n}",
-              "options": { "raw": { "language": "json" } }
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
             },
             "url": {
               "raw": "{{gatewayBaseUrl}}/departamentos",
-              "host": ["{{gatewayBaseUrl}}"],
-              "path": ["departamentos"]
+              "host": [
+                "{{gatewayBaseUrl}}"
+              ],
+              "path": [
+                "departamentos"
+              ]
             }
           },
           "response": []
@@ -115,33 +183,97 @@
           "request": {
             "method": "POST",
             "header": [
-              { "key": "Content-Type", "value": "application/json" },
-              { "key": "Authorization", "value": "Bearer {{adminToken}}" }
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{adminToken}}"
+              }
             ],
             "body": {
               "mode": "raw",
               "raw": "{\n  \"id\": \"{{empleadoId}}\",\n  \"nombre\": \"Sofía\",\n  \"apellido\": \"Vargas\",\n  \"email\": \"{{empleadoEmail}}\",\n  \"numeroEmpleado\": \"EMP-2026-701\",\n  \"cargo\": \"Ingeniera de Datos\",\n  \"area\": \"Tecnología\",\n  \"departamentoId\": \"IT\",\n  \"fechaIngreso\": \"2026-06-01\",\n  \"estado\": \"ACTIVO\"\n}",
-              "options": { "raw": { "language": "json" } }
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
             },
             "url": {
               "raw": "{{gatewayBaseUrl}}/empleados",
-              "host": ["{{gatewayBaseUrl}}"],
-              "path": ["empleados"]
+              "host": [
+                "{{gatewayBaseUrl}}"
+              ],
+              "path": [
+                "empleados"
+              ]
             }
           },
           "response": []
         },
         {
-          "name": "1.4 [MANUAL] Activar cuenta de E701",
+          "name": "1.4 Activar cuenta de E701 (automático)",
           "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Trae el token del evento automaticamente: ya no hay que copiar nada a mano.",
+                  "// El token NO viaja en ninguna respuesta HTTP; se publica en el evento",
+                  "// usuario.creado y notifications-service lo guarda en payload.data.token.",
+                  "// Por eso hay que ir a buscarlo aqui: es la prueba de que el sistema no lo expone.",
+                  "const base  = pm.environment.get('gatewayBaseUrl') || pm.variables.get('gatewayBaseUrl');",
+                  "const admin = pm.collectionVariables.get('adminToken');",
+                  "const email = pm.collectionVariables.get('empleadoEmail');",
+                  "",
+                  "if (!admin) {",
+                  "    console.log('Falta adminToken: ejecute antes el login del administrador.');",
+                  "} else {",
+                  "    pm.sendRequest({",
+                  "        url: base + '/notifications?limit=50&sortBy=processedAt&order=DESC',",
+                  "        method: 'GET',",
+                  "        header: { 'Authorization': 'Bearer ' + admin, 'Accept': 'application/json' }",
+                  "    }, (err, res) => {",
+                  "        if (err) { console.log('No se pudo consultar /notifications:', err); return; }",
+                  "        const cuerpo = res.json();",
+                  "        const filas  = Array.isArray(cuerpo) ? cuerpo : (cuerpo.data || []);",
+                  "        // Ordenado DESC: el primero que coincide es el mas reciente. Sin ordenar",
+                  "        // se copiaba un token viejo y reset-password respondia 401.",
+                  "        const n = filas.find(x => x.eventType === 'usuario.creado'",
+                  "                               && String(x.email).toLowerCase() === String(email).toLowerCase());",
+                  "        if (!n) { console.log('Aun no llego usuario.creado para ' + email + '. Reintente en un segundo.'); return; }",
+                  "        const token = n.payload && n.payload.data && n.payload.data.token;",
+                  "        if (!token) { console.log('El evento llego sin token en payload.data.token'); return; }",
+                  "        pm.collectionVariables.set('resetToken', token);",
+                  "        console.log('--------------------------------------------------------');",
+                  "        console.log('resetToken obtenido de usuario.creado');",
+                  "        console.log('  publicado: ' + n.processedAt);",
+                  "        console.log('  token:     ' + token);",
+                  "        // El payload de un JWT es Base64url, no va cifrado: se puede leer.",
+                  "        // Lo decodifico para que se vea el claim que distingue este token del",
+                  "        // de acceso, que es type=RESET_PASSWORD en lugar de role=USER.",
+                  "        try {",
+                  "            const p = token.split('.')[1].replace(/-/g, '+').replace(/_/g, '/');",
+                  "            console.log('  claims:    ' + atob(p + '==='.slice((p.length + 3) % 4)));",
+                  "        } catch (e) { console.log('  (no se pudo decodificar el payload)'); }",
+                  "        console.log('--------------------------------------------------------');",
+                  "    });",
+                  "}",
+                  ""
+                ]
+              }
+            },
             {
               "listen": "test",
               "script": {
                 "type": "text/javascript",
                 "exec": [
                   "if (!pm.collectionVariables.get('resetToken')) {",
-                  "    pm.test('SALTADO: falta pegar resetToken', () => {",
-                  "        pm.expect.fail('Copie el token del log de notificaciones a la variable resetToken');",
+                  "    pm.test('El script previo no pudo obtener el token', () => {",
+                  "        pm.expect.fail('Revise la consola: ejecute antes 1.1 (login ADMIN) y 1.3 (crear E701)');",
                   "    });",
                   "} else {",
                   "    pm.test('Status 200', () => pm.response.to.have.status(200));",
@@ -153,16 +285,30 @@
           ],
           "request": {
             "method": "POST",
-            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
             "body": {
               "mode": "raw",
               "raw": "{\n  \"token\": \"{{resetToken}}\",\n  \"nuevaPassword\": \"{{empleadoPassword}}\"\n}",
-              "options": { "raw": { "language": "json" } }
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
             },
             "url": {
               "raw": "{{gatewayBaseUrl}}/auth/reset-password",
-              "host": ["{{gatewayBaseUrl}}"],
-              "path": ["auth", "reset-password"]
+              "host": [
+                "{{gatewayBaseUrl}}"
+              ],
+              "path": [
+                "auth",
+                "reset-password"
+              ]
             }
           },
           "response": []
@@ -188,16 +334,30 @@
           ],
           "request": {
             "method": "POST",
-            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
             "body": {
               "mode": "raw",
               "raw": "{\n  \"usuario\": \"{{empleadoEmail}}\",\n  \"password\": \"{{empleadoPassword}}\"\n}",
-              "options": { "raw": { "language": "json" } }
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
             },
             "url": {
               "raw": "{{gatewayBaseUrl}}/auth/login",
-              "host": ["{{gatewayBaseUrl}}"],
-              "path": ["auth", "login"]
+              "host": [
+                "{{gatewayBaseUrl}}"
+              ],
+              "path": [
+                "auth",
+                "login"
+              ]
             },
             "description": "Primer eslabón de la cadena que pide el enunciado: login OK."
           },
@@ -230,18 +390,32 @@
           "request": {
             "method": "POST",
             "header": [
-              { "key": "Content-Type", "value": "application/json" },
-              { "key": "Authorization", "value": "Bearer {{adminToken}}" }
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{adminToken}}"
+              }
             ],
             "body": {
               "mode": "raw",
               "raw": "{\n  \"empleadoId\": \"{{empleadoId}}\",\n  \"fechaInicio\": \"{{hoy}}\",\n  \"fechaFin\": \"{{hoy}}\"\n}",
-              "options": { "raw": { "language": "json" } }
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
             },
             "url": {
               "raw": "{{gatewayBaseUrl}}/vacaciones",
-              "host": ["{{gatewayBaseUrl}}"],
-              "path": ["vacaciones"]
+              "host": [
+                "{{gatewayBaseUrl}}"
+              ],
+              "path": [
+                "vacaciones"
+              ]
             },
             "description": "Paso 12 del enunciado. fechaInicio = fechaFin = hoy es la estrategia sugerida para que el scheduler (cada minuto) pueda dispararlo sin esperar."
           },
@@ -272,11 +446,22 @@
           ],
           "request": {
             "method": "POST",
-            "header": [{ "key": "Authorization", "value": "Bearer {{adminToken}}" }],
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{adminToken}}"
+              }
+            ],
             "url": {
               "raw": "{{gatewayBaseUrl}}/vacaciones/{{periodoId}}/forzar-inicio",
-              "host": ["{{gatewayBaseUrl}}"],
-              "path": ["vacaciones", "{{periodoId}}", "forzar-inicio"]
+              "host": [
+                "{{gatewayBaseUrl}}"
+              ],
+              "path": [
+                "vacaciones",
+                "{{periodoId}}",
+                "forzar-inicio"
+              ]
             },
             "description": "ENDPOINT DE DESARROLLO, protegido con rol ADMIN. Hace lo mismo que haría el scheduler al llegar la fecha: transición PROGRAMADA → EN_CURSO y publicación de vacaciones.iniciadas.\n\nSi prefiere esperar al scheduler automático, omita este request: con fechaInicio = hoy lo disparará en el próximo minuto."
           },
@@ -303,16 +488,30 @@
           ],
           "request": {
             "method": "POST",
-            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
             "body": {
               "mode": "raw",
               "raw": "{\n  \"usuario\": \"{{empleadoEmail}}\",\n  \"password\": \"{{empleadoPassword}}\"\n}",
-              "options": { "raw": { "language": "json" } }
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
             },
             "url": {
               "raw": "{{gatewayBaseUrl}}/auth/login",
-              "host": ["{{gatewayBaseUrl}}"],
-              "path": ["auth", "login"]
+              "host": [
+                "{{gatewayBaseUrl}}"
+              ],
+              "path": [
+                "auth",
+                "login"
+              ]
             },
             "description": "Paso 13 del enunciado: la contraseña es correcta, pero el estado de la cuenta no permite el login. Segundo eslabón de la cadena."
           },
@@ -347,11 +546,22 @@
           ],
           "request": {
             "method": "POST",
-            "header": [{ "key": "Authorization", "value": "Bearer {{adminToken}}" }],
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{adminToken}}"
+              }
+            ],
             "url": {
               "raw": "{{gatewayBaseUrl}}/vacaciones/{{periodoId}}/forzar-fin",
-              "host": ["{{gatewayBaseUrl}}"],
-              "path": ["vacaciones", "{{periodoId}}", "forzar-fin"]
+              "host": [
+                "{{gatewayBaseUrl}}"
+              ],
+              "path": [
+                "vacaciones",
+                "{{periodoId}}",
+                "forzar-fin"
+              ]
             },
             "description": "Contraparte simétrica de forzar-inicio. El scheduler automático solo finaliza un período cuando la fechaFin es estrictamente anterior a hoy (la fechaFin es inclusiva: unas vacaciones que terminan hoy siguen vigentes hoy), así que para demostrar la reactivación en la sustentación se usa este endpoint."
           },
@@ -379,16 +589,30 @@
           ],
           "request": {
             "method": "POST",
-            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
             "body": {
               "mode": "raw",
               "raw": "{\n  \"usuario\": \"{{empleadoEmail}}\",\n  \"password\": \"{{empleadoPassword}}\"\n}",
-              "options": { "raw": { "language": "json" } }
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
             },
             "url": {
               "raw": "{{gatewayBaseUrl}}/auth/login",
-              "host": ["{{gatewayBaseUrl}}"],
-              "path": ["auth", "login"]
+              "host": [
+                "{{gatewayBaseUrl}}"
+              ],
+              "path": [
+                "auth",
+                "login"
+              ]
             },
             "description": "Paso 14 del enunciado y cuarto eslabón: la cuenta se reactivó sola, por evento, sin intervención manual sobre el auth-service."
           },
@@ -416,18 +640,32 @@
           "request": {
             "method": "POST",
             "header": [
-              { "key": "Content-Type", "value": "application/json" },
-              { "key": "Authorization", "value": "Bearer {{adminToken}}" }
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{adminToken}}"
+              }
             ],
             "body": {
               "mode": "raw",
               "raw": "{\n  \"id\": \"{{bordeId}}\",\n  \"nombre\": \"Diego\",\n  \"apellido\": \"Luna\",\n  \"email\": \"{{bordeEmail}}\",\n  \"numeroEmpleado\": \"EMP-2026-702\",\n  \"cargo\": \"Soporte\",\n  \"area\": \"Operaciones\",\n  \"departamentoId\": \"IT\",\n  \"fechaIngreso\": \"2026-06-01\",\n  \"estado\": \"ACTIVO\"\n}",
-              "options": { "raw": { "language": "json" } }
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
             },
             "url": {
               "raw": "{{gatewayBaseUrl}}/empleados",
-              "host": ["{{gatewayBaseUrl}}"],
-              "path": ["empleados"]
+              "host": [
+                "{{gatewayBaseUrl}}"
+              ],
+              "path": [
+                "empleados"
+              ]
             }
           },
           "response": []
@@ -450,18 +688,32 @@
           "request": {
             "method": "POST",
             "header": [
-              { "key": "Content-Type", "value": "application/json" },
-              { "key": "Authorization", "value": "Bearer {{adminToken}}" }
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{adminToken}}"
+              }
             ],
             "body": {
               "mode": "raw",
               "raw": "{\n  \"empleadoId\": \"{{bordeId}}\",\n  \"fechaInicio\": \"{{hoy}}\",\n  \"fechaFin\": \"{{hoy}}\"\n}",
-              "options": { "raw": { "language": "json" } }
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
             },
             "url": {
               "raw": "{{gatewayBaseUrl}}/vacaciones",
-              "host": ["{{gatewayBaseUrl}}"],
-              "path": ["vacaciones"]
+              "host": [
+                "{{gatewayBaseUrl}}"
+              ],
+              "path": [
+                "vacaciones"
+              ]
             }
           },
           "response": []
@@ -484,11 +736,22 @@
           ],
           "request": {
             "method": "POST",
-            "header": [{ "key": "Authorization", "value": "Bearer {{adminToken}}" }],
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{adminToken}}"
+              }
+            ],
             "url": {
               "raw": "{{gatewayBaseUrl}}/vacaciones/{{bordePeriodoId}}/forzar-inicio",
-              "host": ["{{gatewayBaseUrl}}"],
-              "path": ["vacaciones", "{{bordePeriodoId}}", "forzar-inicio"]
+              "host": [
+                "{{gatewayBaseUrl}}"
+              ],
+              "path": [
+                "vacaciones",
+                "{{bordePeriodoId}}",
+                "forzar-inicio"
+              ]
             }
           },
           "response": []
@@ -513,11 +776,21 @@
           ],
           "request": {
             "method": "DELETE",
-            "header": [{ "key": "Authorization", "value": "Bearer {{adminToken}}" }],
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{adminToken}}"
+              }
+            ],
             "url": {
               "raw": "{{gatewayBaseUrl}}/empleados/{{bordeId}}",
-              "host": ["{{gatewayBaseUrl}}"],
-              "path": ["empleados", "{{bordeId}}"]
+              "host": [
+                "{{gatewayBaseUrl}}"
+              ],
+              "path": [
+                "empleados",
+                "{{bordeId}}"
+              ]
             },
             "description": "Paso 15 del enunciado: el retiro ocurre mientras el período está EN_CURSO."
           },
@@ -545,11 +818,22 @@
           ],
           "request": {
             "method": "POST",
-            "header": [{ "key": "Authorization", "value": "Bearer {{adminToken}}" }],
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{adminToken}}"
+              }
+            ],
             "url": {
               "raw": "{{gatewayBaseUrl}}/vacaciones/{{bordePeriodoId}}/forzar-fin",
-              "host": ["{{gatewayBaseUrl}}"],
-              "path": ["vacaciones", "{{bordePeriodoId}}", "forzar-fin"]
+              "host": [
+                "{{gatewayBaseUrl}}"
+              ],
+              "path": [
+                "vacaciones",
+                "{{bordePeriodoId}}",
+                "forzar-fin"
+              ]
             },
             "description": "El período de vacaciones sí termina —es un hecho del calendario— pero la cuenta no vuelve. La distinción la hace el estado: solo SUSPENDIDA_TEMPORAL es reactivable."
           },
@@ -579,16 +863,30 @@
           ],
           "request": {
             "method": "POST",
-            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
             "body": {
               "mode": "raw",
               "raw": "{\n  \"usuario\": \"{{bordeEmail}}\",\n  \"password\": \"CualquieraNoImporta1\"\n}",
-              "options": { "raw": { "language": "json" } }
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
             },
             "url": {
               "raw": "{{gatewayBaseUrl}}/auth/login",
-              "host": ["{{gatewayBaseUrl}}"],
-              "path": ["auth", "login"]
+              "host": [
+                "{{gatewayBaseUrl}}"
+              ],
+              "path": [
+                "auth",
+                "login"
+              ]
             },
             "description": "Paso 15, verificación final: el empleado retirado durante sus vacaciones no recupera el acceso al terminar el período.\n\nLa cuenta de E702 nunca llegó a tener contraseña, así que el login falla por credenciales; lo relevante es que NO falla por 'suspendida por vacaciones', lo que confirma que el estado es DESACTIVADA_PERMANENTE y no SUSPENDIDA_TEMPORAL."
           },

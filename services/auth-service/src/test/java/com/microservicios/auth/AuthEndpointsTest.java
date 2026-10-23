@@ -56,6 +56,13 @@ class AuthEndpointsTest {
     @Autowired
     private JwtService jwtService;
 
+    /** El secreto y el emisor del servicio, para forjar tokens de prueba. */
+    @org.springframework.beans.factory.annotation.Value("${jwt.secret}")
+    private String secretoDePruebas;
+
+    @org.springframework.beans.factory.annotation.Value("${jwt.issuer}")
+    private String emisorDePruebas;
+
     @MockBean
     private AuthEventPublisher publisher;
 
@@ -122,6 +129,15 @@ class AuthEndpointsTest {
         String token = mapper.readTree(cuerpo).get("token").asText();
         assertThat(token.split("\\.")).as("un JWT tiene tres segmentos").hasSize(3);
 
+        JsonNode header = mapper.readTree(java.util.Base64.getUrlDecoder()
+                .decode(token.split("\\.")[0]));
+        assertThat(header.get("alg").asText())
+                .as("HS256 explícito, no el que elija la librería por el largo de la clave")
+                .isEqualTo("HS256");
+        assertThat(header.get("typ").asText())
+                .as("el typ de la cabecera JOSE debe valer JWT (RFC 7519)")
+                .isEqualTo("JWT");
+
         JsonNode payload = mapper.readTree(java.util.Base64.getUrlDecoder()
                 .decode(token.split("\\.")[1]));
         assertThat(payload.get("sub").asText()).isEqualTo(EMPLEADO);
@@ -180,6 +196,55 @@ class AuthEndpointsTest {
                 .andExpect(status().isUnauthorized())
                 .andExpect(jsonPath("$.message")
                         .value("El token no es de restablecimiento de contraseña"));
+    }
+
+    /**
+     * El {@code typ} de la cabecera no distingue el propósito del token —para eso
+     * está el claim {@code type}—, pero debe estar presente y valer {@code JWT} en
+     * los dos tipos, como pide el RFC 7519.
+     */
+    @Test
+    void losDosTiposDeTokenDeclaranTypJwtEnLaCabecera() throws Exception {
+        establecerPassword(PASSWORD);
+        var cuenta = cuentas.findById(EMPLEADO).orElseThrow();
+
+        for (String token : java.util.List.of(
+                jwtService.generarAccessToken(cuenta),
+                jwtService.generarResetToken(cuenta))) {
+
+            JsonNode header = mapper.readTree(java.util.Base64.getUrlDecoder()
+                    .decode(token.split("\\.")[0]));
+            assertThat(header.get("typ").asText()).isEqualTo("JWT");
+            assertThat(header.get("alg").asText()).isEqualTo("HS256");
+        }
+    }
+
+    /**
+     * Un token sin {@code typ} en la cabecera se rechaza aunque la firma sea
+     * legítima: la cabecera entra en el cálculo de la firma, así que no se puede
+     * quitar sin invalidar el token, y exigirla cierra la puerta a un JWS que no
+     * sea un JWT.
+     */
+    @Test
+    void unTokenSinTypEnLaCabeceraSeRechaza() throws Exception {
+        String sinTyp = io.jsonwebtoken.Jwts.builder()
+                .issuer(emisorDePruebas)
+                .subject(EMPLEADO)
+                .claim(JwtService.CLAIM_TYPE, JwtService.TYPE_RESET_PASSWORD)
+                .expiration(new java.util.Date(System.currentTimeMillis() + 60_000))
+                .signWith(io.jsonwebtoken.security.Keys.hmacShaKeyFor(
+                        secretoDePruebas.getBytes(java.nio.charset.StandardCharsets.UTF_8)),
+                        io.jsonwebtoken.Jwts.SIG.HS256)
+                .compact();
+
+        mockMvc.perform(post("/auth/reset-password")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(mapper.writeValueAsString(Map.of(
+                                "token", sinTyp,
+                                "nuevaPassword", "Nueva456"))))
+                .andExpect(status().isUnauthorized())
+                .andExpect(jsonPath("$.message")
+                        .value("La cabecera del token no declara typ=JWT"));
     }
 
     @Test
