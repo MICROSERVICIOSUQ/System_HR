@@ -11,6 +11,7 @@ import io.restassured.response.Response;
 
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.TimeoutException;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -61,6 +62,7 @@ public class PasosOnboarding {
 
     @Dado("que registro un empleado nuevo")
     @Cuando("registro un empleado nuevo")
+    @Cuando("registro un empleado con datos válidos e ID único")
     public void registroUnEmpleadoNuevo() {
         String id = contexto.nuevoIdEmpleado();
         String email = contexto.nuevoEmail();
@@ -140,7 +142,8 @@ public class PasosOnboarding {
     // ── Verificación asíncrona: la cuenta y la notificación ─────────────────
 
     @Entonces("eventualmente el servicio de autenticación debe haber creado un usuario para el empleado")
-    public void eventualmenteSeCreoElUsuario() {
+    @Entonces("eventualmente el servicio de autenticación debe haber creado un usuario para ese correo")
+    public void eventualmenteSeCreoElUsuario() throws TimeoutException {
         String email = contexto.leer(EMPLEADO_EMAIL);
 
         String token = Espera.obtener(
@@ -163,7 +166,7 @@ public class PasosOnboarding {
     }
 
     @Entonces("eventualmente debe existir una notificación {string} para el empleado")
-    public void eventualmenteExisteLaNotificacion(String tipoEvento) {
+    public void eventualmenteExisteLaNotificacion(String tipoEvento) throws TimeoutException {
         String email = contexto.leer(EMPLEADO_EMAIL);
 
         Espera.hasta(
@@ -172,27 +175,43 @@ public class PasosOnboarding {
     }
 
     @Dado("que obtengo su token de activación")
-    public void queObtengoSuTokenDeActivacion() {
+    @Dado("que se generó un token de activación para el nuevo empleado")
+    public void queObtengoSuTokenDeActivacion() throws TimeoutException {
         eventualmenteSeCreoElUsuario();
+    }
+
+    @Entonces("eventualmente el servicio de notificaciones debe registrar el correo de bienvenida con su token de activación")
+    public void eventualmenteSeRegistroCorreoDeBienvenidaConToken() throws TimeoutException {
+        String email = contexto.leer(EMPLEADO_EMAIL);
+        String token = Espera.obtener(
+                "notificaciones debía registrar el correo de activación con token para " + email,
+                () -> api.tokenDeEvento("usuario.creado", email));
+        assertThat(token).isNotBlank();
+        contexto.guardar(TOKEN_ACTIVACION, token);
     }
 
     // ── Activación y login del empleado ─────────────────────────────────────
 
     @Cuando("el empleado establece su contraseña con el token de activación")
+    @Cuando("el empleado establece su nueva contraseña utilizando el token de activación")
     public void elEmpleadoEstableceSuPassword() {
         api.resetPassword(contexto.leer(TOKEN_ACTIVACION), Configuracion.PASSWORD_EMPLEADO);
         contexto.guardar(PASSWORD_ACTUAL, Configuracion.PASSWORD_EMPLEADO);
     }
 
     @Entonces("el empleado puede iniciar sesión")
+    @Entonces("eventualmente el empleado puede iniciar sesión exitosamente con su nueva contraseña")
     @Dado("que el empleado puede iniciar sesión")
-    public void elEmpleadoPuedeIniciarSesion() {
-        Response r = api.login(
-                contexto.leer(EMPLEADO_EMAIL),
-                contexto.tiene(PASSWORD_ACTUAL)
-                        ? contexto.leer(PASSWORD_ACTUAL)
-                        : Configuracion.PASSWORD_EMPLEADO);
+    public void elEmpleadoPuedeIniciarSesion() throws TimeoutException {
+        String email = contexto.leer(EMPLEADO_EMAIL);
+        String password = contexto.tiene(PASSWORD_ACTUAL)
+                ? contexto.leer(PASSWORD_ACTUAL)
+                : Configuracion.PASSWORD_EMPLEADO;
+        Espera.hasta(
+                "el empleado " + email + " debía poder iniciar sesión",
+                () -> api.login(email, password).statusCode() == 200);
 
+        Response r = contexto.getUltimaRespuesta();
         assertThat(r.statusCode())
                 .as("el empleado debía poder autenticarse: %s", r.asString())
                 .isEqualTo(200);
@@ -212,7 +231,7 @@ public class PasosOnboarding {
      * misma quede verificada.
      */
     @Dado("que existe un empleado activo con credenciales establecidas")
-    public void queExisteUnEmpleadoActivoConCredenciales() {
+    public void queExisteUnEmpleadoActivoConCredenciales() throws TimeoutException {
         registroUnEmpleadoNuevo();
         assertThat(contexto.getUltimaRespuesta().statusCode())
                 .as("la precondición requiere registrar al empleado: %s",
@@ -230,12 +249,12 @@ public class PasosOnboarding {
 
         // El ADMIN vuelve a ser la identidad activa: los escenarios programan
         // vacaciones y retiran empleados, que son operaciones de administrador.
-        api.autenticar(Configuracion.ADMIN_USUARIO, Configuracion.ADMIN_PASSWORD);
+        api.autenticar(Configuracion.ADMIN_USER, Configuracion.ADMIN_PASSWORD);
     }
 
     /** Igual que el anterior, pero deja autenticado al propio empleado (rol USER). */
     @Dado("que el empleado activa su cuenta y queda autenticado")
-    public void elEmpleadoActivaSuCuentaYQuedaAutenticado() {
+    public void elEmpleadoActivaSuCuentaYQuedaAutenticado() throws TimeoutException {
         eventualmenteSeCreoElUsuario();
 
         Response reset = api.resetPassword(

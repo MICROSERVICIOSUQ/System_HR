@@ -12,6 +12,7 @@ import io.restassured.response.Response;
 import java.time.LocalDate;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.TimeoutException;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -139,6 +140,11 @@ public class PasosCicloDeVida {
         guardarPeriodoSiSeCreo(r);
     }
 
+    @Cuando("programo un período de vacaciones que inicia de inmediato")
+    public void cuandoProgramoUnPeriodoQueIniciaDeInmediato() {
+        programoUnPeriodoQueIniciaDeInmediato();
+    }
+
     @Entonces("el período debe quedar en estado {string}")
     public void elPeriodoDebeQuedarEnEstado(String estadoEsperado) {
         assertThat(estadoDelPeriodo(contexto.getUltimaRespuesta()))
@@ -148,6 +154,7 @@ public class PasosCicloDeVida {
     // ── Transiciones del período ───────────────────────────────────────────
 
     @Cuando("el período de vacaciones inicia")
+    @Cuando("fuerzo la ejecución del scheduler para iniciar el período")
     public void elPeriodoDeVacacionesInicia() {
         Response r = api.forzarInicioVacaciones(contexto.leer(PERIODO_ID));
         assertThat(r.statusCode())
@@ -162,6 +169,7 @@ public class PasosCicloDeVida {
     }
 
     @Cuando("el período de vacaciones finaliza")
+    @Cuando("fuerzo la finalización del período de vacaciones")
     public void elPeriodoDeVacacionesFinaliza() {
         Response r = api.forzarFinVacaciones(contexto.leer(PERIODO_ID));
         assertThat(r.statusCode())
@@ -182,7 +190,7 @@ public class PasosCicloDeVida {
      * un estado transitorio no se confunda con el definitivo.
      */
     @Entonces("eventualmente el empleado no puede iniciar sesión")
-    public void eventualmenteElEmpleadoNoPuedeIniciarSesion() {
+    public void eventualmenteElEmpleadoNoPuedeIniciarSesion() throws TimeoutException {
         Espera.establemente(
                 "el login de " + email() + " debía quedar bloqueado tras el evento",
                 () -> api.login(email(), password()).statusCode() == 401,
@@ -190,19 +198,19 @@ public class PasosCicloDeVida {
     }
 
     @Dado("que eventualmente el empleado no puede iniciar sesión")
-    public void queEventualmenteElEmpleadoNoPuedeIniciarSesion() {
+    public void queEventualmenteElEmpleadoNoPuedeIniciarSesion() throws TimeoutException {
         eventualmenteElEmpleadoNoPuedeIniciarSesion();
     }
 
     @Entonces("eventualmente el empleado puede iniciar sesión de nuevo")
-    public void eventualmenteElEmpleadoPuedeIniciarSesionDeNuevo() {
+    public void eventualmenteElEmpleadoPuedeIniciarSesionDeNuevo() throws TimeoutException {
         Espera.hasta(
                 "la cuenta de " + email() + " debía reactivarse al finalizar las vacaciones",
                 () -> api.login(email(), password()).statusCode() == 200);
     }
 
     @Entonces("el motivo de la desactivación debe ser {string}")
-    public void elMotivoDeLaDesactivacionDebeSer(String motivoEsperado) {
+    public void elMotivoDeLaDesactivacionDebeSer(String motivoEsperado) throws TimeoutException {
         String motivo = Espera.obtener(
                 "cuenta.desactivada debía traer el motivo " + motivoEsperado,
                 () -> api.motivoDeEvento("cuenta.desactivada", email()));
@@ -217,7 +225,7 @@ public class PasosCicloDeVida {
         // El retiro es una operación de administrador: si el escenario dejó
         // autenticado al propio empleado, se recupera la identidad de ADMIN.
         if (!"ADMIN".equals(contexto.getRol())) {
-            api.autenticar(Configuracion.ADMIN_USUARIO, Configuracion.ADMIN_PASSWORD);
+            api.autenticar(Configuracion.ADMIN_USER, Configuracion.ADMIN_PASSWORD);
         }
         Response r = api.retirarEmpleado(empleado());
         assertThat(r.statusCode())
@@ -232,7 +240,7 @@ public class PasosCicloDeVida {
     }
 
     @Cuando("eventualmente el empleado solicita recuperar su contraseña y es rechazado")
-    public void eventualmenteLaRecuperacionEsRechazada() {
+    public void eventualmenteLaRecuperacionEsRechazada() throws TimeoutException {
         // El rechazo depende de que auth-service ya haya procesado
         // empleado.retirado: hasta entonces la recuperación podría aceptarse.
         Espera.hasta(

@@ -8,6 +8,8 @@ negocio espera.
 
 ```
 e2e-tests/
+├── .dockerignore                 Archivos excluidos de la imagen de pruebas
+├── Dockerfile                    Imagen efímera para la suite en Compose
 ├── pom.xml                      Dependencias y configuración de Surefire
 ├── mvnw / mvnw.cmd / .mvn/      Maven Wrapper: no hace falta Maven instalado
 └── src/test/
@@ -39,10 +41,11 @@ e2e-tests/
 
    ```bash
    docker compose up -d
+
    docker compose ps
    ```
 
-   Los 14 contenedores deben aparecer `healthy`. El escenario de humo falla
+   Los servicios requeridos deben aparecer `healthy`. El escenario de humo falla
    rápido si no lo están, para no interpretar un sistema caído como una
    regresión funcional.
 
@@ -63,6 +66,28 @@ BASE_URL=http://localhost:8090 ./mvnw test
 Un escenario fallido devuelve código de salida distinto de cero, que es lo que
 detendrá el pipeline del Reto 7.
 
+### Ejecución en Docker Compose
+
+Desde la raíz del repositorio, el perfil `testing` ejecuta la suite como un
+contenedor efímero y conserva los tres reportes en `e2e-tests/reports/`:
+
+```powershell
+docker compose --profile testing run --build --rm bdd-tests
+```
+
+`bdd-tests` espera a que API Gateway, auth, empleados, departamentos, vacaciones
+y notificaciones estén saludables. Dentro de la red de Compose usa
+`BASE_URL=http://api-gateway:8080`; el `JWT_SECRET` debe estar configurado en el
+`.env` de la raíz para que auth y gateway puedan arrancar. El perfil evita
+ejecutar la suite automáticamente durante un `docker compose up` normal.
+
+Para arrancar el ecosistema, correr BDD y propagar el código de salida de las
+pruebas:
+
+```powershell
+docker compose --profile testing up --build --abort-on-container-exit --exit-code-from bdd-tests
+```
+
 ### Variables de entorno
 
 Todas tienen un valor por defecto de desarrollo, de modo que `./mvnw test`
@@ -72,11 +97,16 @@ sistema (`-DBASE_URL=...`).
 | Variable | Valor por defecto | Para qué |
 |---|---|---|
 | `BASE_URL` | `http://localhost:8080` | URL del API Gateway |
-| `ADMIN_USUARIO` | `admin@empresa.com` | Administrador semilla |
+| `ADMIN_USER` | `admin@empresa.com` | Administrador semilla (`ADMIN_USUARIO` se acepta como alias legado) |
 | `ADMIN_PASSWORD` | `Admin12345` | Contraseña del administrador |
-| `PASSWORD_EMPLEADO` | `Secreta123` | Contraseña que la suite fija a los empleados que crea |
+| `REGULAR_USER` | `e2e` | Prefijo de correo para cuentas únicas por escenario; acepta una dirección base |
+| `REGULAR_PASSWORD` | `Secreta123` | Contraseña que la suite fija a los empleados que crea (`PASSWORD_EMPLEADO` se acepta como alias legado) |
 | `POLL_MAX_INTENTOS` | `15` | Reintentos al verificar un efecto asíncrono |
 | `POLL_INTERVALO_MS` | `1000` | Espera entre reintentos |
+
+Al ejecutar `bdd-tests` con Compose, `ADMIN_USER` y `ADMIN_PASSWORD` se toman de
+`AUTH_SEED_ADMIN_EMAIL` y `AUTH_SEED_ADMIN_PASSWORD`, respectivamente. Para la
+ejecución desde el host, las credenciales deben apuntar a la misma cuenta semilla.
 
 ---
 
@@ -99,17 +129,17 @@ contenido no se versiona.
 
 ## Las características
 
-41 escenarios en cinco archivos. Se ejecutan en el orden alfabético de sus
+39 escenarios en cinco archivos. Se ejecutan en el orden alfabético de sus
 nombres, aunque **ningún escenario depende de otro**: cada uno construye sus
 propios datos desde los endpoints reales.
 
 | Archivo | Escenarios | Qué cubre |
 |---|---|---|
 | `00-humo.feature` | 2 | El sistema responde y el administrador semilla se autentica |
-| `01-seguridad.feature` | 13 | Token ausente, malformado, con firma falsificada, cabeceras de identidad falsificadas, token de restablecimiento usado como token de acceso, y las dos reglas de RBAC |
-| `02-onboarding.feature` | 13 | Alta del empleado, creación de la cuenta por evento, notificación, activación, login, y seis casos de rechazo |
-| `03-vacaciones.feature` | 7 | Programación, fechas incoherentes, fecha pasada, solapamiento, período de un día, y el ciclo completo de suspensión y reactivación |
-| `04-offboarding.feature` | 6 | Retiro, notificación, login bloqueado, recuperación rechazada, auditoría, y el caso borde del retiro durante las vacaciones |
+| `01-seguridad.feature` | 14 | Token ausente, malformado, con firma falsificada, cabeceras de identidad falsificadas, token de restablecimiento usado como token de acceso, lectura permitida para USER y ADMIN, y denegaciones RBAC |
+| `02-onboarding.feature` | 12 | Alta del empleado, aprovisionamiento y notificación por evento, activación, login, y seis casos de rechazo |
+| `03-vacaciones.feature` | 7 | Programación, fechas incoherentes, fecha pasada, solapamiento, período de un día, notificación al iniciar, y el ciclo completo de suspensión y reactivación |
+| `04-offboarding.feature` | 4 | Desvinculación y bloqueo de cuenta, auditoría, conservación de datos y retiro durante las vacaciones |
 
 ### Los dos escenarios que concentran la dificultad
 
@@ -121,13 +151,13 @@ período arranca.
 ```gherkin
 Escenario: La cuenta se suspende al iniciar las vacaciones y se reactiva al terminar
   Dado que el empleado puede iniciar sesión
-  Y que programo un período de vacaciones que inicia de inmediato
-  Cuando el período de vacaciones inicia
+  Cuando programo un período de vacaciones que inicia de inmediato
+  Y fuerzo la ejecución del scheduler para iniciar el período
   Entonces eventualmente el empleado no puede iniciar sesión
   Y el mensaje de error debe contener "vacaciones"
   Y eventualmente debe existir una notificación "cuenta.desactivada" para el empleado
   Y el motivo de la desactivación debe ser "VACACIONES"
-  Cuando el período de vacaciones finaliza
+  Cuando fuerzo la finalización del período de vacaciones
   Entonces eventualmente el empleado puede iniciar sesión de nuevo
   Y eventualmente debe existir una notificación "cuenta.activada" para el empleado
 ```
@@ -163,7 +193,7 @@ token ni la respuesta del anterior.
 
 Lo que el contexto no resuelve es el estado del sistema desplegado: un empleado
 creado por un escenario sigue en PostgreSQL cuando empieza el siguiente. Para eso
-el contexto genera un sufijo único (milisegundos + aleatorio) del que derivan
+el contexto genera un sufijo UUID del que derivan
 todos los identificadores, así que dos escenarios —o dos ejecuciones de la misma
 suite— nunca compiten por la misma fila. Esa es la razón por la que la suite se
 puede ejecutar tres veces seguidas sin limpiar nada.
@@ -202,7 +232,7 @@ expone.
    reconoce.
 3. Implementar el paso en la clase de `steps/` por tema, reutilizando
    `ApiCliente` y `Espera`. Los efectos asíncronos van siempre con `Espera`,
-   nunca con `Thread.sleep`.
+   sin esperas fijas.
 
 > Cucumber ignora la palabra clave (`Dado`, `Cuando`, `Entonces`, `Y`) al
 > emparejar un paso: registrar el mismo texto con dos anotaciones distintas es

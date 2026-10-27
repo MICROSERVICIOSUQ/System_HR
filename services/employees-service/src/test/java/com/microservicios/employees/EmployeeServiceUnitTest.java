@@ -3,6 +3,7 @@ package com.microservicios.employees;
 import com.microservicios.employees.client.DepartmentClient;
 import com.microservicios.employees.exception.DepartmentNotFoundException;
 import com.microservicios.employees.exception.EmailAlreadyRegisteredException;
+import com.microservicios.employees.exception.EmployeeAlreadyRetiredException;
 import com.microservicios.employees.exception.EmployeeNotFoundException;
 import com.microservicios.employees.exception.EmployeeNumberAlreadyRegisteredException;
 import com.microservicios.employees.exception.IdAlreadyRegisteredException;
@@ -246,18 +247,22 @@ class EmployeeServiceUnitTest {
         }
 
         @Test
-        @DisplayName("si ya tenía fechaRetiro, no se sobrescribe")
-        void noSobrescribeLaFechaDeRetiroPrevia() {
+        @DisplayName("un empleado ya retirado no se puede retirar de nuevo")
+        void empleadoYaRetirado() {
             LocalDate original = LocalDate.of(2026, 3, 15);
             Employee yaRetirado = empleado("E001", "juan.perez@empresa.com", "EMP-2026-001", "IT");
             yaRetirado.setStatus(EmployeeStatus.RETIRED);
             yaRetirado.setFechaRetiro(original);
             when(repository.findById("E001")).thenReturn(Optional.of(yaRetirado));
-            when(repository.save(any(Employee.class))).thenAnswer(inv -> inv.getArgument(0));
 
-            Employee resultado = service.retire("E001");
+            assertThatThrownBy(() -> service.retire("E001"))
+                    .isInstanceOf(EmployeeAlreadyRetiredException.class)
+                    .hasMessageContaining("E001")
+                    .hasMessageContaining("ya está retirado");
 
-            assertThat(resultado.getFechaRetiro()).isEqualTo(original);
+            assertThat(yaRetirado.getFechaRetiro()).isEqualTo(original);
+            verify(repository, never()).save(any());
+            verifyNoInteractions(eventPublisher);
         }
 
         @Test

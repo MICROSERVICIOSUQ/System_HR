@@ -231,6 +231,36 @@ services:
     networks:
       - microservices-network
 
+  bdd-tests:
+    build:
+      context: ./e2e-tests
+      dockerfile: Dockerfile
+    profiles:
+      - testing
+    environment:
+      BASE_URL: http://api-gateway:8080
+      ADMIN_USER: ${AUTH_SEED_ADMIN_EMAIL:-admin@empresa.com}
+      ADMIN_PASSWORD: ${AUTH_SEED_ADMIN_PASSWORD:-Admin12345}
+      REGULAR_USER: ${REGULAR_USER:-e2e}
+      REGULAR_PASSWORD: ${REGULAR_PASSWORD:-Secreta123}
+    volumes:
+      - ./e2e-tests/reports:/app/reports
+    depends_on:
+      api-gateway:
+        condition: service_healthy
+      auth-service:
+        condition: service_healthy
+      employees-service:
+        condition: service_healthy
+      departments-service:
+        condition: service_healthy
+      vacations-service:
+        condition: service_healthy
+      notifications-service:
+        condition: service_healthy
+    networks:
+      - microservices-network
+
 networks:
   microservices-network:
     name: sistema_rrhh_network

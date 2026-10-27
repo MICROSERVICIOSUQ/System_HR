@@ -7,6 +7,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.testcontainers.service.connection.ServiceConnection;
 import org.springframework.dao.DataIntegrityViolationException;
@@ -76,6 +77,9 @@ class EmployeeRepositoryIntegrationTest {
 
     @Autowired
     private EmployeeRepository repository;
+
+    @Autowired
+    private JdbcTemplate jdbcTemplate;
 
     @BeforeEach
     void limpiar() {
@@ -176,14 +180,9 @@ class EmployeeRepositoryIntegrationTest {
     @Test
     @DisplayName("Un empleado sin campos obligatorios es rechazado por el NOT NULL del esquema")
     void elEsquemaExigeLosCamposObligatorios() {
-        Employee incompleto = new Employee();
-        incompleto.setId("E003");
-        incompleto.setEmail("incompleto@empresa.com");
-        incompleto.setEmployeeNumber("EMP-2026-003");
-        incompleto.setStatus(EmployeeStatus.ACTIVE);
-        // nombre, apellido, cargo, area, departamentoId y fechaIngreso quedan nulos
-
-        assertThatThrownBy(() -> repository.saveAndFlush(incompleto))
+        assertThatThrownBy(() -> jdbcTemplate.update(
+                "INSERT INTO employees (id, email, employee_number) VALUES (?, ?, ?)",
+                "E003", "incompleto@empresa.com", "EMP-2026-003"))
                 .isInstanceOf(DataIntegrityViolationException.class);
     }
 }

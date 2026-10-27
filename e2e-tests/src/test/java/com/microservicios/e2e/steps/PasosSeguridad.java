@@ -80,7 +80,7 @@ public class PasosSeguridad {
         contexto.setUltimaRespuesta(
                 RestAssured.given()
                         .accept(ContentType.JSON)
-                        .header("Authorization", "Bearer " + contexto.getToken())
+                        .header("Authorization", contexto.getAuthorizationHeader())
                         .when().get("/departamentos"));
     }
 

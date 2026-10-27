@@ -19,17 +19,10 @@ Característica: Offboarding de empleados
     Entonces la respuesta debe tener código 200
     Y eventualmente debe existir una notificación "cuenta.desactivada" para el empleado
     Y el motivo de la desactivación debe ser "RETIRO"
-
-  Escenario: El empleado retirado no puede iniciar sesión
-    Dado que el empleado puede iniciar sesión
-    Y que retiro al empleado
-    Entonces eventualmente el empleado no puede iniciar sesión
+    Y eventualmente el empleado no puede iniciar sesión
     Y el mensaje de error debe contener "permanente"
-
-  Escenario: La recuperación de contraseña falla para un empleado retirado
-    Dado que retiro al empleado
-    Cuando eventualmente el empleado solicita recuperar su contraseña y es rechazado
-    Entonces el mensaje de error debe contener "permanente"
+    Y eventualmente el empleado solicita recuperar su contraseña y es rechazado
+    Entonces la respuesta debe tener código 401
 
   Escenario: El empleado retirado aparece en la consulta de auditoría
     Dado que retiro al empleado

@@ -20,21 +20,19 @@ Característica: Onboarding de empleados
     Y el cuerpo debe contener los diez campos del modelo canónico
     Y el estado del empleado debe ser "ACTIVO"
 
-  Escenario: El registro genera la cuenta de acceso por evento
-    Cuando registro un empleado nuevo
-    Entonces eventualmente el servicio de autenticación debe haber creado un usuario para el empleado
+  Escenario: El registro aprovisiona una cuenta y notifica el token de activación
+    Cuando registro un empleado con datos válidos e ID único
+    Entonces la respuesta debe tener código 201
+    Y eventualmente el servicio de autenticación debe haber creado un usuario para ese correo
+    Y eventualmente el servicio de notificaciones debe registrar el correo de bienvenida con su token de activación
     Y el token de activación recibido no debe ser una contraseña en claro
 
-  Escenario: El registro genera una notificación de bienvenida
-    Cuando registro un empleado nuevo
-    Entonces eventualmente debe existir una notificación "usuario.creado" para el empleado
-
-  Escenario: El empleado establece su contraseña y puede iniciar sesión
+  Escenario: El empleado establece su contraseña y realiza su primer login
     Dado que registro un empleado nuevo
-    Y que obtengo su token de activación
-    Cuando el empleado establece su contraseña con el token de activación
+    Y que se generó un token de activación para el nuevo empleado
+    Cuando el empleado establece su nueva contraseña utilizando el token de activación
     Entonces la respuesta debe tener código 200
-    Y el empleado puede iniciar sesión
+    Y eventualmente el empleado puede iniciar sesión exitosamente con su nueva contraseña
     Y el token recibido debe tener el rol "USER"
 
   # El mensaje es genérico a propósito: la cuenta existe pero todavía no tiene

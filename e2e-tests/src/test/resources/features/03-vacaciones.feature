@@ -55,12 +55,12 @@ Característica: Gestión de vacaciones y suspensión de la cuenta
 
   Escenario: La cuenta se suspende al iniciar las vacaciones y se reactiva al terminar
     Dado que el empleado puede iniciar sesión
-    Y que programo un período de vacaciones que inicia de inmediato
-    Cuando el período de vacaciones inicia
+    Cuando programo un período de vacaciones que inicia de inmediato
+    Y fuerzo la ejecución del scheduler para iniciar el período
     Entonces eventualmente el empleado no puede iniciar sesión
     Y el mensaje de error debe contener "vacaciones"
     Y eventualmente debe existir una notificación "cuenta.desactivada" para el empleado
     Y el motivo de la desactivación debe ser "VACACIONES"
-    Cuando el período de vacaciones finaliza
+    Cuando fuerzo la finalización del período de vacaciones
     Entonces eventualmente el empleado puede iniciar sesión de nuevo
     Y eventualmente debe existir una notificación "cuenta.activada" para el empleado

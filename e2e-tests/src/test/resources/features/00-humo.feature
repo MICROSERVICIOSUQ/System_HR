@@ -7,8 +7,9 @@ Característica: Verificación del sistema
   Si este escenario falla, no tiene sentido ejecutar los demás: el problema está
   en el despliegue, no en el comportamiento del sistema.
 
-  Escenario: El sistema responde correctamente
+  Escenario: El sistema está operativo
     Dado que el sistema está desplegado y operativo
+    Cuando consulto el estado del sistema
     Entonces la respuesta debe tener código 200
 
   Escenario: El administrador semilla puede autenticarse

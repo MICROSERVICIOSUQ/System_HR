@@ -245,7 +245,7 @@ equivaldría a una sesión completa.
 ### Bloque B — Colección `Seguridad y RBAC (Reto 5)`
 
 Demuestra los **criterios 2** (validación de token) y **3** (control de acceso).
-20 requests en 6 carpetas.
+21 requests en 6 carpetas.
 
 #### Carpeta `0. Peticiones sin token (401)`
 
@@ -311,6 +311,7 @@ El `1.3` imprime en la consola de Postman el comando para obtener el token.
 | `5.1 PUT /perfiles/E602 con token ADMIN (200)` | `PUT /perfiles/E602` | **200** |
 | `5.2 DELETE /empleados/E602 con token ADMIN` | `DELETE /empleados/E602` | **200** o **204** |
 | `5.3 Auditoría: el retirado aparece con su fechaRetiro` | `GET /empleados?estado=RETIRADO` | **200** · E602 con `fechaRetiro` |
+| `5.4 GET /empleados con token ADMIN (200)` | `GET /empleados` | **200** |
 
 ### Lo que conviene destacar del bloque B
 
@@ -331,6 +332,9 @@ perfil sin darle permisos de administrador.
 
 **La comparación `4.3` contra `5.1`.** El mismo request exacto, con un token de
 rol distinto: **403** con `USER`, **200** con `ADMIN`.
+
+**Lectura permitida para ambos roles.** `3.1` y `5.4` consultan `GET /empleados`
+con tokens de `USER` y `ADMIN`, respectivamente; ambos deben recibir **200**.
 
 **Por qué 403 y no 401.** El `401` significa "no sé quién eres" y lo emite el
 filtro de autenticación. El `403` significa "sé quién eres y no puedes" y lo emite

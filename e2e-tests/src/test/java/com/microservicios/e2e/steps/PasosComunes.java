@@ -34,7 +34,7 @@ public class PasosComunes {
 
     @Cuando("me autentico como administrador")
     public void meAutenticoComoAdministrador() {
-        api.login(Configuracion.ADMIN_USUARIO, Configuracion.ADMIN_PASSWORD);
+        api.login(Configuracion.ADMIN_USER, Configuracion.ADMIN_PASSWORD);
         if (contexto.getUltimaRespuesta().statusCode() == 200) {
             contexto.autenticado(
                     contexto.getUltimaRespuesta().path("token"),
@@ -49,8 +49,13 @@ public class PasosComunes {
                     "Solo el rol ADMIN tiene credenciales fijas. Para un USER, use "
                             + "el paso que registra y activa un empleado.");
         }
-        api.autenticar(Configuracion.ADMIN_USUARIO, Configuracion.ADMIN_PASSWORD);
+        api.autenticar(Configuracion.ADMIN_USER, Configuracion.ADMIN_PASSWORD);
         assertThat(contexto.getRol()).isEqualTo("ADMIN");
+    }
+
+    @Cuando("consulto el estado del sistema")
+    public void consultoElEstadoDelSistema() {
+        api.salud();
     }
 
     // ── Aserciones sobre la última respuesta ────────────────────────────────
