@@ -129,9 +129,18 @@ services:
     healthcheck:
       test: ["CMD", "rabbitmq-diagnostics", "check_port_connectivity"]
       interval: 10s
-      timeout: 5s
+      # rabbitmq-diagnostics es un escript de Erlang: arrancar la máquina
+      # virtual para responder una pregunta tarda varios segundos, más en
+      # Windows sobre WSL2. Con 5s el sondeo moría antes de contestar.
+      timeout: 15s
       retries: 10
-      start_period: 30s
+      # El nodo no acepta este diagnóstico hasta que la app 'rabbit' está
+      # levantada, y arrancarla en frío —reconstruyendo índices e importando
+      # definitions.json— ha llegado a tardar 80s en esta máquina. Con 30s el
+      # sondeo empezaba a contar fallos mientras el nodo seguía arrancando
+      # legítimamente, y Compose tumbaba el stack justo antes de que estuviera
+      # listo. Los fallos dentro del start_period no cuentan como caída.
+      start_period: 120s
     networks:
       - microservices-network
 

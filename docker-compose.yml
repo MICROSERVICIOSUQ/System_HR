@@ -12,10 +12,11 @@ services:
       - "${GATEWAY_PORT:-8080}:8080"
     healthcheck:
       test: ["CMD", "curl", "-f", "--silent", "http://localhost:8080/health"]
-      interval: 30s
-      timeout: 5s
-      start_period: 20s
-      retries: 3
+      # Es el último en arrancar, cuando los demás JVM ya tienen la CPU ocupada.
+      interval: 10s
+      timeout: 10s
+      start_period: 120s
+      retries: 10
     environment:
       - EMPLEADOS_URL=http://employees-service:${EMPLEADOS_PORT:-8080}
       - DEPARTAMENTOS_URL=http://departments-service:${DEPARTAMENTOS_PORT:-8081}
@@ -71,10 +72,12 @@ services:
     restart: unless-stopped
     healthcheck:
       test: ["CMD-SHELL", "curl -f --silent http://localhost:$${SERVER_PORT:-8085}/auth/health"]
-      interval: 30s
-      timeout: 5s
-      start_period: 40s
-      retries: 3
+      # Mismo motivo que en employees-service: el arranque en frío de un JVM
+      # con JPA, Flyway y RabbitMQ no cabe en el margen anterior.
+      interval: 10s
+      timeout: 10s
+      start_period: 120s
+      retries: 10
     networks:
       - microservices-network
 
@@ -133,10 +136,16 @@ services:
     restart: unless-stopped
     healthcheck:
       test: ["CMD-SHELL", "curl -f --silent http://localhost:$${SERVER_PORT:-8080}/empleados/health"]
-      interval: 30s
-      timeout: 5s
-      start_period: 20s
-      retries: 3
+      # Arranque en frío medido: 37s este servicio solo, y más cuando los tres
+      # JVM del stack arrancan a la vez y se pelean por la CPU. Con el
+      # start_period anterior de 20s el margen total era de 110s y Compose lo
+      # declaraba unhealthy mientras seguía arrancando. Los fallos dentro del
+      # start_period no cuentan como caída; pasado ese plazo, 10 fallos
+      # seguidos cada 10s siguen detectando una caída real en ~100s.
+      interval: 10s
+      timeout: 10s
+      start_period: 120s
+      retries: 10
     networks:
       - microservices-network
 
