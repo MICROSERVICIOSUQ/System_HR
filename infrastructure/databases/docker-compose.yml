@@ -11,9 +11,9 @@ services:
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${DEPARTAMENTOS_DB_USER:-postgres} -d ${DEPARTAMENTOS_DB_NAME:-gestion_departamentos}"]
       interval: 5s
-      timeout: 3s
+      timeout: 15s
       retries: 10
-      start_period: 10s
+      start_period: 120s
     networks:
       - microservices-network
 

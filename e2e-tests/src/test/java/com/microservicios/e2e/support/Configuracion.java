@@ -16,14 +16,23 @@ public final class Configuracion {
     public static final String BASE_URL = env("BASE_URL", "http://localhost:8080");
 
     /** Administrador semilla que crea el auth-service al arrancar. */
-    public static final String ADMIN_USUARIO = env("ADMIN_USUARIO", "admin@empresa.com");
+    public static final String ADMIN_USER = env(
+            "ADMIN_USER", env("ADMIN_USUARIO", "admin@empresa.com"));
     public static final String ADMIN_PASSWORD = env("ADMIN_PASSWORD", "Admin12345");
+
+    /**
+     * Usuario regular usado como prefijo de correo para cuentas únicas creadas
+     * durante cada escenario. También admite una dirección de correo como base.
+     */
+    public static final String REGULAR_USER = env("REGULAR_USER", "e2e");
+    public static final String REGULAR_PASSWORD = env(
+            "REGULAR_PASSWORD", env("PASSWORD_EMPLEADO", "Secreta123"));
 
     /**
      * Contraseña que la suite establece para los empleados que crea.
      * Cumple la política del auth-service: 8+ caracteres con letra y dígito.
      */
-    public static final String PASSWORD_EMPLEADO = env("PASSWORD_EMPLEADO", "Secreta123");
+    public static final String PASSWORD_EMPLEADO = REGULAR_PASSWORD;
 
     // ── Parámetros de polling ────────────────────────────────────────────────
     // Justificación de los valores, medida sobre este sistema:
@@ -38,7 +47,7 @@ public final class Configuracion {
     // cargado, sin que un fallo real tarde más de 15 s en delatarse.
     //
     // El polling termina en cuanto la condición se cumple, así que el caso normal
-    // cuesta un solo intento. Un Thread.sleep(15000) pagaría los 15 s siempre.
+    // cuesta un solo intento. Una espera fija de 15 s pagaría todo ese tiempo siempre.
 
     public static final int POLL_MAX_INTENTOS =
             Integer.parseInt(env("POLL_MAX_INTENTOS", "15"));

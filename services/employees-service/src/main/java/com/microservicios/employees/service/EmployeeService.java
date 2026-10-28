@@ -3,6 +3,7 @@ package com.microservicios.employees.service;
 import com.microservicios.employees.client.DepartmentClient;
 import com.microservicios.employees.exception.DepartmentNotFoundException;
 import com.microservicios.employees.exception.EmailAlreadyRegisteredException;
+import com.microservicios.employees.exception.EmployeeAlreadyRetiredException;
 import com.microservicios.employees.exception.EmployeeNotFoundException;
 import com.microservicios.employees.exception.EmployeeNumberAlreadyRegisteredException;
 import com.microservicios.employees.exception.IdAlreadyRegisteredException;
@@ -176,6 +177,9 @@ public class EmployeeService {
     )
     public Employee retire(String id) {
         Employee existing = findById(id);
+        if (existing.getStatus() == EmployeeStatus.RETIRED) {
+            throw new EmployeeAlreadyRetiredException(id);
+        }
         existing.setStatus(EmployeeStatus.RETIRED);
         if (existing.getFechaRetiro() == null) {
             existing.setFechaRetiro(LocalDate.now());

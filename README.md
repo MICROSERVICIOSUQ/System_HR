@@ -682,6 +682,10 @@ ADMIN   api-gateway  employees   RabbitMQ   auth-service   vacations   notificat
 | `SUSPENDIDA_TEMPORAL` | `vacaciones.iniciadas` | No | **Sí** |
 | `DESACTIVADA_PERMANENTE` | `empleado.retirado` | No | **No** |
 
+El retiro es lógico: el registro y su `fechaRetiro` se conservan para auditoría.
+Intentar retirar de nuevo un empleado que ya está en estado `RETIRADO` devuelve
+**400** y no guarda cambios ni publica otro evento `empleado.retirado`.
+
 El estado es una enumeración y no un booleano precisamente por el caso borde que
 viene a continuación. Registrado en
 [ADR-009](docs/decisions/ADR-009-estados-de-cuenta.md).
@@ -817,7 +821,7 @@ En [`postman/`](postman/), todas con el environment
 | Colección | Qué demuestra |
 |---|---|
 | `auth-service.postman_collection.json` | Los cuatro endpoints, forma del JWT, política de contraseñas y la separación entre los dos tipos de token en ambas direcciones |
-| `seguridad-rbac.postman_collection.json` | **401** sin token, con token alterado y con cabeceras falsificadas; **403** por rol; **propiedad del recurso** (`PUT /perfiles/E601` = 200 vs `/perfiles/E602` = 403 con el mismo token) |
+| `seguridad-rbac.postman_collection.json` | **401** sin token, con token alterado y con cabeceras falsificadas; **403** por rol; lectura de empleados permitida a `USER` y `ADMIN`; **propiedad del recurso** (`PUT /perfiles/E601` = 200 vs `/perfiles/E602` = 403 con el mismo token) |
 | `ciclo-vida-cuenta.postman_collection.json` | La cadena completa `login OK → vacaciones inician → login falla → vacaciones terminan → login OK`, y el **caso borde** del retiro durante vacaciones |
 
 ```bash
@@ -920,7 +924,7 @@ $ docker compose logs auth-service
 Y ningún `cuenta.activada` para E702: el login del empleado retirado sigue
 fallando después de que su período de vacaciones terminara.
 
-### Verificación completa: 37 comprobaciones
+### Verificación capturada el 2026-10-20: 37 comprobaciones
 
 | Bloque | Comprobaciones | Resultado |
 |---|---|---|
@@ -933,6 +937,11 @@ fallando después de que su período de vacaciones terminara.
 | Caso borde del retiro durante vacaciones | 6 | Todas OK |
 | Auditoría y documentación OpenAPI | 7 | Todas OK |
 | **Total** | **37** | **37 OK, 0 fallos** |
+
+La colección `Seguridad y RBAC` actual añade `5.4 GET /empleados con token ADMIN
+(200)`, que no formó parte de esta captura histórica. El Bloque B suma ahora 21
+requests; junto con los demás bloques, las colecciones del Reto 5 documentan 38
+comprobaciones automatizadas.
 
 Los dos eslabones clave de la cadena, con el mensaje real del servicio:
 
@@ -959,11 +968,12 @@ BUILD SUCCESS
 
 # Reto 6 — Automatización de Pruebas
 
-El Reto 5 dejó el sistema verificado con 37 comprobaciones manuales ejecutadas
-desde Postman. Funciona, pero no se puede repetir en un pipeline: alguien tiene
-que hacer clic, leer la respuesta y decidir si está bien. El Reto 6 convierte esa
-verificación en código que se ejecuta con un comando y que devuelve un código de
-salida que una máquina puede interpretar.
+La captura del Reto 5 registra 37 comprobaciones de Postman. La colección actual
+añade la lectura de empleados con rol `ADMIN`, para un total documentado de 38.
+Aunque funciona, esta verificación no se puede repetir en un pipeline: alguien
+tiene que hacer clic, leer la respuesta y decidir si está bien. El Reto 6 la
+convierte en código que se ejecuta con un comando y devuelve un código de salida
+que una máquina puede interpretar.
 
 La guía paso a paso con el orden exacto de ejecución y el resultado esperado de
 cada comando está en **[docs/GUIA-PRUEBAS-RETO6.md](docs/GUIA-PRUEBAS-RETO6.md)**.
@@ -977,7 +987,7 @@ cada comando está en **[docs/GUIA-PRUEBAS-RETO6.md](docs/GUIA-PRUEBAS-RETO6.md)
 | Pruebas unitarias Java | `services/employees-service/src/test/.../EmployeeServiceUnitTest.java` | 17 pruebas con Mockito, sin contexto de Spring |
 | Prueba de integración | `services/employees-service/src/test/.../EmployeeRepositoryIntegrationTest.java` | 7 pruebas contra PostgreSQL 16 real vía Testcontainers |
 | Cobertura con umbral | `services/employees-service/pom.xml` | JaCoCo con mínimo del 70 % de líneas que rompe el build |
-| Suite BDD | `e2e-tests/` | 41 escenarios en Gherkin español con Cucumber y Rest Assured |
+| Suite BDD | `e2e-tests/` | 39 escenarios en Gherkin español con Cucumber y Rest Assured |
 | Decisiones | `docs/decisions/ADR-010`, `ADR-011` | Pirámide de pruebas; verificación de efectos asíncronos |
 | Evidencias | `docs/evidencias/reto6-*.txt` | Mutaciones detectadas, fallo deliberado y tres ejecuciones consecutivas |
 
@@ -988,7 +998,7 @@ separación es lo que permite que un fallo señale su propia causa.
 
 ```text
                     ┌─────────────────────────┐
-                    │   BDD / E2E  (41)       │  Flujos de negocio completos
+                    │   BDD / E2E  (39)       │  Flujos de negocio completos
                     │   e2e-tests/            │  Necesita el ecosistema arriba
                     ├─────────────────────────┤
                  ┌──┤  Integración  (7)       │  Que el esquema exista de verdad
@@ -1006,7 +1016,7 @@ separación es lo que permite que un fallo señale su propia causa.
   que Flyway aplicó las migraciones y que las restricciones `UNIQUE` y `NOT NULL`
   están **en el esquema de PostgreSQL** y no solo en el código Java. Se omiten
   limpiamente donde no hay Docker, en lugar de fallar en rojo.
-- **BDD / extremo a extremo (41 escenarios).** Verifica flujos completos a través
+- **BDD / extremo a extremo (39 escenarios).** Verifica flujos completos a través
   del API Gateway, incluidos los que atraviesan RabbitMQ y varios servicios.
 
 Dos consecuencias de diseño que merecen mención:
@@ -1045,11 +1055,16 @@ Característica: Offboarding de empleados
     Y que existe un departamento para las pruebas
     Y que existe un empleado activo con credenciales establecidas
 
-  Escenario: El empleado retirado no puede iniciar sesión
+  Escenario: Desvinculación completa de un empleado
     Dado que el empleado puede iniciar sesión
-    Y que retiro al empleado
-    Entonces eventualmente el empleado no puede iniciar sesión
+    Cuando retiro al empleado
+    Entonces la respuesta debe tener código 200
+    Y eventualmente debe existir una notificación "cuenta.desactivada" para el empleado
+    Y el motivo de la desactivación debe ser "RETIRO"
+    Y eventualmente el empleado no puede iniciar sesión
     Y el mensaje de error debe contener "permanente"
+    Y eventualmente el empleado solicita recuperar su contraseña y es rechazado
+    Entonces la respuesta debe tener código 401
 ```
 
 Los pasos que empiezan por **«eventualmente»** son los que atraviesan el broker:
@@ -1071,18 +1086,92 @@ Un comando por suite. Las tres devuelven código de salida distinto de cero si
 algo falla, y las rutas de los reportes son fijas: son el contrato que consumirá
 el pipeline de Jenkins del Reto 7.
 
-| Suite | Comando | Resultados | Cobertura |
+| Suite / Microservicio | Comando de ejecución | Reporte de resultados | Reporte de cobertura |
 |---|---|---|---|
-| Unitarias TypeScript | `cd services/vacations-service && npm test` | `reports/junit.xml` | `reports/lcov.info` + tabla en consola |
-| Unitarias + integración Java | `cd services/employees-service && ./mvnw verify` | `target/surefire-reports/*.xml` | `target/site/jacoco/index.html` · `jacoco.xml` · `jacoco.csv` |
-| BDD extremo a extremo | `cd e2e-tests && ./mvnw test` | `reports/junit.xml` · `reports/cucumber.json` · `reports/cucumber.html` | — |
+| `employees-service` (unitarias + integración) | `cd services/employees-service && mvn verify` (o `.\mvnw.cmd verify`) | `target/surefire-reports/TEST-*.xml` | `target/site/jacoco/jacoco.xml` |
+| `vacations-service` (unitarias) | `cd services/vacations-service && npm test` | `reports/junit.xml` | `reports/lcov.info` |
+| `e2e-tests` (BDD) | `cd e2e-tests && .\mvnw.cmd test` / Docker `docker compose --profile testing run --build --rm bdd-tests` | `reports/junit.xml`, `reports/cucumber.json`, `reports/cucumber.html` | N/A |
+
+Todos los comandos fallan con código de salida distinto de cero si falla una
+prueba; `employees-service` también falla cuando JaCoCo detecta menos del 70 %
+de cobertura de líneas. Jenkins puede detener el pipeline ante cualquier salida
+distinta de cero y publicar los archivos de resultados indicados. SonarQube puede
+consumir `jacoco.xml` y `lcov.info` como informes de cobertura. Las rutas de la
+tabla son relativas a la carpeta de cada proyecto; BDD genera sus rutas relativas
+a `e2e-tests/` (y dentro del contenedor, a `/app/`).
+
+### Prerrequisitos y variables
+
+- Java 21 para los dos proyectos Maven; Node.js compatible con el proyecto y
+  `npm` para `vacations-service`; Docker Engine y Docker Compose para integración
+  con PostgreSQL real y BDD en contenedor.
+- Para ejecutar el ecosistema, cree `.env` desde `.env.example` y configure
+  `JWT_SECRET` con al menos 32 caracteres. El mismo secreto se inyecta en
+  `auth-service` y `api-gateway`; no hay valor de fallback y Compose no arranca
+  esos servicios si falta.
+- `BASE_URL` apunta al gateway: `http://localhost:8080` al ejecutar BDD desde el
+  host y `http://api-gateway:8080` dentro de Compose.
+- `ADMIN_USER` / `ADMIN_PASSWORD` deben coincidir con
+  `AUTH_SEED_ADMIN_EMAIL` / `AUTH_SEED_ADMIN_PASSWORD` del administrador semilla.
+  La suite crea sus propios usuarios regulares con `REGULAR_USER` como prefijo
+  de correo y `REGULAR_PASSWORD` como contraseña; cada escenario usa UUIDs para
+  evitar colisiones. `POLL_MAX_INTENTOS` y `POLL_INTERVALO_MS` ajustan las
+  verificaciones de efectos asíncronos.
+
+### Pirámide de pruebas y ejecución manual
+
+- **Unitarias:** la base rápida y amplia. `vacations-service` prueba reglas de
+  dominio con `node:test`; `employees-service` prueba servicios Java con JUnit y
+  Mockito, sin levantar el ecosistema.
+- **Integración:** `employees-service` verifica repositorio, esquema y
+  restricciones contra PostgreSQL real mediante Testcontainers durante `mvn
+  verify`; requiere Docker. Si Docker no está disponible, esas pruebas pueden
+  omitirse según su configuración.
+- **BDD / E2E:** la capa superior prueba flujos completos a través del Gateway,
+  incluyendo propagación RabbitMQ y autorización; requiere los servicios
+  saludables y datos de prueba.
+
+Desde la raíz, ejecute cada suite:
+
+```powershell
+Set-Location services\employees-service
+mvn verify
+
+Set-Location ..\vacations-service
+npm test
+
+Set-Location ..\..\e2e-tests
+.\mvnw.cmd test
+```
+
+Para BDD local, arranque primero el ecosistema con `docker compose up -d` y
+configure `BASE_URL` si el gateway usa otro puerto. Para ejecutarla en contenedor
+y conservar los reportes en `e2e-tests/reports/`:
+
+```powershell
+docker compose --profile testing run --build --rm bdd-tests
+```
+
+El perfil `testing` mantiene la suite fuera del `docker compose up` habitual. El
+servicio BDD espera a que Gateway, autenticación, empleados, departamentos,
+vacaciones y notificaciones estén saludables; el volumen de reportes permanece
+montado aunque el contenedor finalice. Para ejecutar todo el sistema y las
+pruebas desde cero se puede usar:
+
+```powershell
+docker compose --profile testing up --build --abort-on-container-exit --exit-code-from bdd-tests
+```
+
+El comando anterior usa el código de salida de la suite para detener CI y deja
+los reportes en el host. Los servicios de negocio y sus bases de datos permanecen
+administrables con `docker compose down` (sin `-v` para conservar los datos).
 
 Requisitos por suite:
 
 - Las dos primeras **no necesitan nada levantado**: ni contenedores, ni base de
   datos, ni variables de entorno. La de Java levanta un PostgreSQL efímero con
   Testcontainers si hay Docker disponible, y omite esas 7 pruebas si no lo hay.
-- La BDD necesita el ecosistema arriba (`docker compose up -d`, 14 contenedores
+- La BDD necesita el ecosistema arriba (`docker compose up -d`, 14 servicios
   `healthy`). Si el gateway no está en el 8080 se indica con
   `BASE_URL=http://localhost:8090`.
 
@@ -1093,22 +1182,23 @@ el contenido se regenera en cada ejecución.
 
 | Servicio | Herramienta | Líneas | Umbral que rompe el build |
 |---|---|---|---|
-| `employees-service` | JaCoCo 0.8.12 | **82,66 %** | 70 % (`BUNDLE / LINE / COVEREDRATIO`) |
-| `vacations-service` | `node:test --experimental-test-coverage` | 66,87 % | — |
+| `employees-service` | JaCoCo 0.8.12 | **90,25 %** | 70 % (`BUNDLE / LINE / COVEREDRATIO`) |
+| `vacations-service` | `node:test --experimental-test-coverage` | **71,46 %** | 70 % |
 
-En los dos lenguajes se excluyen de la medición las mismas categorías —arranque,
-configuración y DTO— y se incluyen servicio, repositorio y dominio. Dos
-aclaraciones sobre los números:
+Los filtros de cobertura son distintos por lenguaje. En `vacations-service` se
+excluyen pruebas, archivos generados, repositorios y mensajería; se mide la
+configuración, el dominio y el servicio. El script `npm test` aplica un umbral
+del 70 % mediante `--test-coverage-lines=70`. Dos aclaraciones sobre los números:
 
 - En `vacations-service` la medición **excluye los propios archivos de prueba**
-  (`--test-coverage-exclude="src/tests/**"`). Incluirlos subía artificialmente el
-  total, porque el código de las pruebas está cubierto por definición. El
-  66,87 % es el número honesto; dentro de él, el módulo de dominio
-  `vacation-rules.ts` está al 94,19 % y lo que queda sin cubrir son el
-  repositorio de Prisma y el publicador de AMQP, que corresponden al nivel de
-  integración.
+  (`src/tests/**`), los archivos generados (`src/generated/**`), repositorios
+  (`src/repositories/**`) y mensajería (`src/messaging/**`). El 71,46 % es el
+  resultado actual; dentro de él, el módulo de dominio `vacation-rules.ts` está
+  al 95,35 %. Repositorio y mensajería quedan fuera de este reporte unitario.
 - En `employees-service` el umbral no es decorativo: `./mvnw verify` falla si la
   cobertura baja del 70 %.
+- En `vacations-service`, `npm test` también falla si la cobertura de líneas baja
+  del 70 %.
 
 ## 26. Resultados verificados del Reto 6
 
@@ -1117,16 +1207,16 @@ aclaraciones sobre los números:
 | Pruebas unitarias TypeScript | 54 / 54 |
 | Pruebas unitarias Java | 17 / 17 |
 | Pruebas de integración con PostgreSQL real | 7 |
-| Escenarios BDD | **41 / 41** |
-| Cobertura `employees-service` | 82,66 % con umbral del 70 % aplicado |
-| Cobertura `vacations-service` | 66,87 % (dominio al 94,19 %) |
-| Ejecuciones consecutivas de la suite BDD sin fallos intermitentes | 3 (36,34 s · 44,33 s · 31,68 s) |
+| Escenarios BDD | **39 / 39** |
+| Cobertura `employees-service` | 90,25 % con umbral del 70 % aplicado |
+| Cobertura `vacations-service` | 71,46 % (dominio al 95,35 %) |
+| Ejecuciones consecutivas sin fallos intermitentes (evidencia histórica de la versión con 41 escenarios) | 3 (36,34 s · 44,33 s · 31,68 s) |
 | Reglas de negocio rotas a propósito y detectadas | 2 de 2 |
 | Código de salida con un escenario fallido | 1 |
 
 ```console
 $ cd e2e-tests && BASE_URL=http://localhost:8090 ./mvnw test
-[INFO] Tests run: 41, Failures: 0, Errors: 0, Skipped: 0
+[INFO] Tests run: 39, Failures: 0, Errors: 0, Skipped: 0
 [INFO] BUILD SUCCESS
 ```
 
@@ -1134,3 +1224,5 @@ Las evidencias de los tres últimos puntos están en `docs/evidencias/`:
 [mutaciones](docs/evidencias/reto6-mutaciones.txt),
 [fallo deliberado](docs/evidencias/reto6-bdd-fallo-deliberado.txt) y
 [tres ejecuciones](docs/evidencias/reto6-bdd-ejecuciones.txt).
+Los archivos de evidencia de la suite BDD conservan las salidas originales de la
+versión de 41 escenarios; la suite vigente tiene 39.

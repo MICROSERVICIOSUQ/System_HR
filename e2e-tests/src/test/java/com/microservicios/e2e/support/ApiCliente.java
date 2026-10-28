@@ -35,7 +35,7 @@ public class ApiCliente {
                 .accept(ContentType.JSON)
                 .contentType(ContentType.JSON);
         if (contexto.hayToken()) {
-            spec = spec.header("Authorization", "Bearer " + contexto.getToken());
+            spec = spec.header("Authorization", contexto.getAuthorizationHeader());
         }
         return spec;
     }

@@ -87,6 +87,9 @@ que buscarlo ahí no es un rodeo: es la prueba de que el sistema no lo expone.
 
 ### Positivas
 
+Las mediciones siguientes corresponden a la versión de 41 escenarios existente al
+aprobar esta decisión; las evidencias conservan esos resultados históricos.
+
 - La suite completa de 41 escenarios tarda entre 31 s y 44 s, no los minutos que
   costarían las esperas fijas equivalentes.
 - Tres ejecuciones consecutivas dieron 41/41 sin un solo fallo intermitente.

@@ -44,7 +44,8 @@ public class GlobalExceptionHandler {
     @ExceptionHandler({
             IdAlreadyRegisteredException.class,
             EmailAlreadyRegisteredException.class,
-            EmployeeNumberAlreadyRegisteredException.class
+            EmployeeNumberAlreadyRegisteredException.class,
+            EmployeeAlreadyRetiredException.class
     })
     public ResponseEntity<ErrorResponse> datosDuplicados(RuntimeException ex,
                                                          HttpServletRequest request) {

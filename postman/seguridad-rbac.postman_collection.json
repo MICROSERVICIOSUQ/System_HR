@@ -1,7 +1,7 @@
 {
   "info": {
     "name": "Seguridad y RBAC (Reto 5)",
-    "description": "Evidencia automatizable de los criterios de validación de token (401) y control de acceso (403), incluida la autorización por propiedad del recurso.\n\nEl flujo está ENCADENADO: crea un departamento y dos empleados con el token de ADMIN, activa el primero y después comprueba qué puede y qué no puede hacer cada rol.\n\nPRECONDICIÓN: sistema recién levantado (`docker compose down -v && docker compose up --build`).\n\nATENCIÓN: los requests 5 y 6 necesitan que pegue a mano el token de activación que aparece en el log de notificaciones. El request 4 imprime el comando exacto en la consola de Postman.\n\nRequiere el environment `system-hr.postman_environment.json`.",
+    "description": "Evidencia automatizable de los criterios de validación de token (401) y control de acceso (403), incluida la autorización por propiedad del recurso y la lectura permitida para USER y ADMIN.\n\nEl flujo está ENCADENADO: crea un departamento y dos empleados con el token de ADMIN, activa el primero y después comprueba qué puede y qué no puede hacer cada rol.\n\nPRECONDICIÓN: sistema recién levantado (`docker compose down -v && docker compose up --build`).\n\nATENCIÓN: los requests 5 y 6 necesitan que pegue a mano el token de activación que aparece en el log de notificaciones. El request 4 imprime el comando exacto en la consola de Postman.\n\nRequiere el environment `system-hr.postman_environment.json`.",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
   },
   "variable": [
@@ -713,6 +713,31 @@
               "query": [{ "key": "estado", "value": "RETIRADO" }]
             },
             "description": "Paso 18 del enunciado: la baja es lógica, el registro se conserva para auditoría."
+          },
+          "response": []
+        },
+        {
+          "name": "5.4 GET /empleados con token ADMIN (200)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 200', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "******" }],
+            "url": {
+              "raw": "{{gatewayBaseUrl}}/empleados",
+              "host": ["{{gatewayBaseUrl}}"],
+              "path": ["empleados"]
+            },
+            "description": "Confirma que ADMIN también puede consultar la lista de empleados. El acceso de lectura con USER se comprueba en 3.1."
           },
           "response": []
         }

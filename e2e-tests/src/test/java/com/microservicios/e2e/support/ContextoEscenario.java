@@ -4,7 +4,7 @@ import io.restassured.response.Response;
 
 import java.util.HashMap;
 import java.util.Map;
-import java.util.concurrent.ThreadLocalRandom;
+import java.util.UUID;
 
 /**
  * Estado compartido entre los pasos de un escenario (el "World" de Cucumber).
@@ -39,10 +39,7 @@ public class ContextoEscenario {
     private final String sufijo = generarSufijo();
 
     private static String generarSufijo() {
-        // Milisegundos + aleatorio: único entre escenarios de una misma corrida y
-        // entre corridas sucesivas, incluso si dos arrancan el mismo milisegundo.
-        return System.currentTimeMillis() % 100000000L
-                + "" + ThreadLocalRandom.current().nextInt(100, 1000);
+        return UUID.randomUUID().toString().replace("-", "");
     }
 
     public String getToken() {
@@ -60,6 +57,14 @@ public class ContextoEscenario {
 
     public boolean hayToken() {
         return token != null && !token.isBlank();
+    }
+
+    /** Valor Authorization completo para peticiones autenticadas. */
+    public String getAuthorizationHeader() {
+        if (!hayToken()) {
+            throw new IllegalStateException("El escenario no tiene un token de autenticación activo");
+        }
+        return "Bearer " + token;
     }
 
     /** Descarta la identidad: lo usan los escenarios que prueban el acceso sin token. */
@@ -105,7 +110,7 @@ public class ContextoEscenario {
     }
 
     public String nuevoEmail() {
-        return "e2e" + sufijo + "@empresa.com";
+        return correoUnico(Configuracion.REGULAR_USER, sufijo);
     }
 
     public String nuevoNumeroEmpleado() {
@@ -122,10 +127,19 @@ public class ContextoEscenario {
     }
 
     public String emailSecundario() {
-        return "e2e" + sufijo + "b@empresa.com";
+        return correoUnico(Configuracion.REGULAR_USER, sufijo + "b");
     }
 
     public String numeroEmpleadoSecundario() {
         return "EMP-E2E-" + sufijo + "B";
+    }
+
+    private static String correoUnico(String usuarioBase, String sufijo) {
+        int separador = usuarioBase.lastIndexOf('@');
+        if (separador < 0) {
+            return usuarioBase + sufijo + "@empresa.com";
+        }
+        return usuarioBase.substring(0, separador)
+                + "+" + sufijo + usuarioBase.substring(separador);
     }
 }

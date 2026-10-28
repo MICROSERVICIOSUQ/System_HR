@@ -74,6 +74,10 @@ Característica: Seguridad y control de acceso
       Cuando intento crear el departamento "ADMIN-OK"
       Entonces la respuesta debe tener código 201
 
+    Escenario: Un ADMIN puede consultar la lista de empleados
+      Cuando consulto la lista de empleados
+      Entonces la respuesta debe tener código 200
+
     Escenario: Un ADMIN puede registrar y retirar empleados
       Dado que registro un empleado nuevo
       Cuando intento retirar al empleado

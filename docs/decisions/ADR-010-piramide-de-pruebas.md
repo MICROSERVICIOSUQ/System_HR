@@ -66,16 +66,27 @@ Reglas que se derivan de esa separación:
   que las restricciones `UNIQUE` están en el esquema y que el retiro conserva la
   fila. No vuelve a comprobar las reglas de negocio.
 
-La cobertura se mide con exclusiones alineadas en los dos lenguajes: quedan fuera
-el arranque, la configuración y los DTO, y quedan dentro el servicio, el
-repositorio y el dominio. En `employees-service` hay además un umbral que rompe
-el build por debajo del 70 % de líneas.
+La cobertura tiene exclusiones específicas por lenguaje. En `employees-service`
+JaCoCo excluye clases de arranque, configuración y DTO, e incluye servicio,
+repositorio y dominio; un resultado inferior al 70 % rompe el build. En
+`vacations-service`, el reporte unitario excluye pruebas, archivos generados,
+repositorios y mensajería, y el script `npm test` falla si la cobertura de líneas
+baja del 70 %.
+
+### Actualización de cobertura (2026-10-22)
+
+El 66,87 % citado en las consecuencias negativas corresponde a la medición
+inicial, que incluía repositorios y mensajería de `vacations-service`. La
+configuración vigente los excluye del reporte unitario y mide 71,46 % (95,35 %
+para `vacation-rules.ts`). Como cambió el conjunto medido, los porcentajes no son
+comparables directamente; el nivel de integración sigue siendo responsable de
+verificar el comportamiento contra infraestructura real.
 
 ## Consecuencias
 
 ### Positivas
 
-- Un fallo señala su propia causa: 54 pruebas unitarias en 2 s apuntan a una
+- Un fallo señala su propia causa: 54 pruebas unitarias en pocos segundos apuntan a una
   regla; un escenario BDD rojo con las unitarias verdes apunta al despliegue o a
   la integración entre servicios.
 - La suite unitaria corre en cualquier máquina con solo el runtime instalado, lo
@@ -95,10 +106,10 @@ el build por debajo del 70 % de líneas.
   final a memoria. Es admisible porque el conjunto ya viene acotado por empleado
   y estado; con millones de períodos por empleado habría que volver a resolverlo
   en la base de datos y cubrirlo con una prueba de integración.
-- Las pruebas de integración y BDD siguen necesitando Docker, así que el
-  `vacations-service` no alcanza el 70 % con pruebas unitarias: el repositorio y
-  el publicador de AMQP se quedan en la mitad de sus líneas. Se reporta el número
-  real (66,87 %) en lugar de excluir esos archivos para maquillarlo.
+- Las pruebas de integración y BDD siguen necesitando Docker. El repositorio y el
+  publicador de AMQP no se miden en el reporte unitario vigente y requieren
+  validación de integración; la exclusión mantiene explícito el límite de esa
+  medición.
 
 ## Alternativas consideradas
 

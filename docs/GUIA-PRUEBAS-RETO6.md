@@ -45,15 +45,14 @@ Cobertura medida (líneas):
 
 | Archivo | Cobertura |
 |---|---|
-| `src/domain/vacation-rules.ts` | 94,19 % |
-| `src/repositories/vacation.repository.ts` | 68,84 % |
-| `src/services/vacation.service.ts` | 63,94 % |
-| **Total** | **66,87 %** |
+| `src/domain/vacation-rules.ts` | 95,35 % |
+| `src/services/vacation.service.ts` | 67,30 % |
+| **Total** | **71,46 %** |
 
-> El total queda por debajo del 70 % porque el repositorio de Prisma y el
-> publicador de AMQP solo se cubren con pruebas de integración. Se reporta el
-> número real en lugar de excluir esos archivos para maquillarlo; el umbral del
-> enunciado se cumple en `employees-service`, donde además rompe el build.
+El script excluye las pruebas, el código generado, los repositorios y la
+mensajería (`src/tests/**`, `src/generated/**`, `src/repositories/**` y
+`src/messaging/**`). El umbral del 70 % se aplica mediante
+`--test-coverage-lines=70`, por lo que `npm test` falla si no se alcanza.
 
 **Comprobación de que no hace falta Docker ni base de datos:** el comando
 anterior funciona con los contenedores apagados y sin `DATABASE_URL` definida.
@@ -84,7 +83,8 @@ Lo que verifica cada uno:
 - **Unitario** — unicidad de `id`, `email` y `numeroEmpleado`; validación del
   departamento; que no se gaste una llamada HTTP si la operación ya va a fallar
   localmente (`verifyNoInteractions(departmentClient)`); la transición a
-  `RETIRADO` con su `fechaRetiro`; y que la baja sea **lógica**
+  `RETIRADO` con su `fechaRetiro`; el rechazo de un segundo retiro sin guardar
+  cambios ni publicar otro evento; y que la baja sea **lógica**
   (`verify(repository, never()).delete(...)`).
 - **Integración** — que Flyway aplicó las migraciones, que las restricciones
   `UNIQUE` existen **en el esquema** y no solo en el código, que
@@ -105,7 +105,7 @@ Resultado esperado:
 [INFO] BUILD SUCCESS
 ```
 
-Cobertura de líneas: **82,66 %**, con el umbral de JaCoCo fijado en el 70 % como
+Cobertura de líneas: **90,25 %**, con el umbral de JaCoCo fijado en el 70 % como
 `BUNDLE / LINE / COVEREDRATIO`. Si la cobertura baja de ahí, la fase `verify`
 falla.
 
@@ -143,7 +143,7 @@ GATEWAY_PORT=8090 docker compose up -d
 docker compose ps
 ```
 
-Los 14 contenedores deben aparecer `running (healthy)`. Si alguno no lo está, el
+Los servicios requeridos deben aparecer `running (healthy)`. Si alguno no lo está, el
 escenario de humo lo delatará de inmediato y no tiene sentido seguir: el problema
 está en el despliegue, no en el comportamiento del sistema.
 
@@ -154,10 +154,19 @@ cd e2e-tests
 BASE_URL=http://localhost:8090 ./mvnw test
 ```
 
+También puede ejecutarse en un contenedor efímero desde la raíz del repositorio:
+
+```powershell
+docker compose --profile testing run --build --rm bdd-tests
+```
+
+El perfil `testing` espera a que los servicios requeridos estén saludables y deja
+los reportes en `e2e-tests/reports/`.
+
 Resultado esperado:
 
 ```
-[INFO] Tests run: 41, Failures: 0, Errors: 0, Skipped: 0
+[INFO] Tests run: 39, Failures: 0, Errors: 0, Skipped: 0
 [INFO] BUILD SUCCESS
 ```
 
@@ -166,10 +175,10 @@ Resultado esperado:
 | Punto del enunciado | Archivo | Escenarios |
 |---|---|---|
 | 2 — Proyecto BDD y escenario de humo | `00-humo.feature` | 2 |
-| 3 — Escenarios de seguridad | `01-seguridad.feature` | 13 |
-| 4 — Onboarding con verificación asíncrona | `02-onboarding.feature` | 13 |
+| 3 — Escenarios de seguridad | `01-seguridad.feature` | 14 |
+| 4 — Onboarding con verificación asíncrona | `02-onboarding.feature` | 12 |
 | 5 — Vacaciones | `03-vacaciones.feature` | 7 |
-| 5 — Offboarding | `04-offboarding.feature` | 6 |
+| 5 — Offboarding | `04-offboarding.feature` | 4 |
 
 **Punto 3 (seguridad), más allá del escenario dado por el enunciado:**
 
@@ -183,7 +192,7 @@ Resultado esperado:
 5. Token de restablecimiento usado como token de acceso → 401.
 6. Dos `Regla` con su propio `Antecedentes`: `USER` tiene lectura y su propio
    perfil (403 al retirar, al crear departamento y al tocar el perfil de otro);
-   `ADMIN` tiene acceso total.
+   `ADMIN` tiene acceso total, incluida la consulta de la lista de empleados.
 
 **Punto 4 (onboarding), la cadena asíncrona:**
 
@@ -219,8 +228,8 @@ start reports/cucumber.html      # Windows
 
 | Archivo | Contenido |
 |---|---|
-| `reports/cucumber.html` | Los 41 escenarios en lenguaje de negocio, con cada paso |
-| `reports/junit.xml` | `tests="41" failures="0" errors="0"` |
+| `reports/cucumber.html` | Los 39 escenarios en lenguaje de negocio, con cada paso |
+| `reports/junit.xml` | `tests="39" failures="0" errors="0"` |
 | `reports/cucumber.json` | Reporte estructurado para el plugin de Jenkins |
 
 ---
@@ -229,22 +238,26 @@ start reports/cucumber.html      # Windows
 
 ### C.1 — Un fallo rompe el build
 
-Evidencia completa en
-[`evidencias/reto6-bdd-fallo-deliberado.txt`](evidencias/reto6-bdd-fallo-deliberado.txt).
+La evidencia completa está en
+[`evidencias/reto6-bdd-fallo-deliberado.txt`](evidencias/reto6-bdd-fallo-deliberado.txt)
+y corresponde a la versión anterior de 41 escenarios. En la suite vigente, la
+misma mutación debe dejar 1 fallo de 39 pruebas.
 
 Se cambió en `00-humo.feature` el código esperado de 200 a 418 y se volvió a
 ejecutar la suite:
 
 - Código de salida del proceso: **1**.
-- Surefire: `Tests run: 41, Failures: 1`.
+- Surefire esperado en la suite vigente: `Tests run: 39, Failures: 1`.
 - `reports/junit.xml`: `failures="1"`, con el valor esperado, el obtenido y el
   cuerpo real de la respuesta dentro del `<failure>`.
-- `reports/cucumber.html`: ese escenario en rojo, los otros 40 en verde.
+- `reports/cucumber.html`: ese escenario en rojo, los otros 38 en verde.
 
 ### C.2 — Tres ejecuciones consecutivas consistentes
 
-Evidencia completa en
-[`evidencias/reto6-bdd-ejecuciones.txt`](evidencias/reto6-bdd-ejecuciones.txt).
+La evidencia completa está en
+[`evidencias/reto6-bdd-ejecuciones.txt`](evidencias/reto6-bdd-ejecuciones.txt)
+y conserva las tres ejecuciones de la versión de 41 escenarios. Esos resultados
+son históricos; la suite vigente contiene 39 escenarios.
 
 | Ejecución | Resultado | Código de salida | Duración |
 |---|---|---|---|
@@ -275,8 +288,8 @@ exactamente las tres etapas que invocará el pipeline del Reto 7.
 | Pruebas unitarias TypeScript | 54 / 54 |
 | Pruebas unitarias Java | 17 / 17 |
 | Pruebas de integración con PostgreSQL real | 7 |
-| Escenarios BDD | 41 / 41 |
-| Cobertura `employees-service` | 82,66 % (umbral 70 % aplicado) |
-| Cobertura `vacations-service` | 66,87 % (dominio 94,19 %) |
+| Escenarios BDD vigentes | 39 / 39 |
+| Cobertura `employees-service` | 90,25 % (umbral 70 % aplicado) |
+| Cobertura `vacations-service` | 71,46 % (dominio 95,35 %, umbral 70 % aplicado) |
 | Ejecuciones consecutivas sin fallos intermitentes | 3 |
 | Mutaciones deliberadas detectadas | 2 de 2 |
