@@ -270,6 +270,98 @@ services:
     networks:
       - microservices-network
 
+  jenkins:
+    build: ./jenkins
+    ports:
+      - "127.0.0.1:${JENKINS_PORT:-9090}:8080"
+    environment:
+      JAVA_OPTS: -Djenkins.install.runSetupWizard=false
+      CASC_JENKINS_CONFIG: /usr/share/jenkins/ref/casc.yaml
+      SECRETS: /run/sonar
+      JENKINS_ADMIN_USER: ${JENKINS_ADMIN_USER:-admin}
+      JENKINS_ADMIN_PASSWORD: ${JENKINS_ADMIN_PASSWORD:?Ejecute python3 ci/preparar-entorno.py}
+      JENKINS_URL: ${JENKINS_URL:-http://localhost:9090/}
+      JENKINS_RESOURCE_URL: ${JENKINS_RESOURCE_URL:-http://127.0.0.1:9090/}
+      CI_NETWORK: ${CI_NETWORK:-system_hr_ci}
+      CI_REPOSITORY_URL: ${CI_REPOSITORY_URL:-https://github.com/MICROSERVICIOSUQ/System_HR.git}
+      CI_REPOSITORY_BRANCH: ${CI_REPOSITORY_BRANCH:-valentina}
+    volumes:
+      - jenkins_data:/var/jenkins_home
+      - sonar_credentials:/run/sonar:ro
+      - /var/run/docker.sock:/var/run/docker.sock
+    depends_on:
+      sonar-setup:
+        condition: service_completed_successfully
+    networks:
+      - ci-network
+      - microservices-network
+    restart: unless-stopped
+
+  sonarqube:
+    image: sonarqube:lts-community
+    ports:
+      - "127.0.0.1:${SONAR_PORT:-9000}:9000"
+    environment:
+      SONAR_JDBC_URL: jdbc:postgresql://sonar-db:5432/sonar
+      SONAR_JDBC_USERNAME: sonar
+      SONAR_JDBC_PASSWORD: ${SONAR_DB_PASSWORD:?Ejecute python3 ci/preparar-entorno.py}
+    volumes:
+      - sonarqube_data:/opt/sonarqube/data
+      - sonarqube_logs:/opt/sonarqube/logs
+      - sonarqube_extensions:/opt/sonarqube/extensions
+    ulimits:
+      nofile:
+        soft: 131072
+        hard: 131072
+      nproc: 8192
+    depends_on:
+      sonar-db:
+        condition: service_healthy
+    networks:
+      - ci-network
+    restart: unless-stopped
+
+  sonar-db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: sonar
+      POSTGRES_USER: sonar
+      POSTGRES_PASSWORD: ${SONAR_DB_PASSWORD:?Ejecute python3 ci/preparar-entorno.py}
+    volumes:
+      - sonar_db_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -U sonar -d sonar"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    networks:
+      - ci-network
+    restart: unless-stopped
+
+  sonar-setup:
+    build:
+      context: .
+      dockerfile: ci/Dockerfile.sonar-setup
+    environment:
+      SONAR_ADMIN_PASSWORD: ${SONAR_ADMIN_PASSWORD:?Ejecute python3 ci/preparar-entorno.py}
+    volumes:
+      - sonar_credentials:/run/sonar
+    depends_on:
+      sonarqube:
+        condition: service_started
+    networks:
+      - ci-network
+
 networks:
   microservices-network:
     name: sistema_rrhh_network
+  ci-network:
+    name: ${CI_NETWORK:-system_hr_ci}
+
+volumes:
+  jenkins_data:
+  sonar_credentials:
+  sonarqube_data:
+  sonarqube_logs:
+  sonarqube_extensions:
+  sonar_db_data:

@@ -1,0 +1,878 @@
+{
+  "info": {
+    "name": "Reto 7 — Sustentación System_HR",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
+    "description": "Ejecutar manualmente en orden. Complementa la sustentación de Jenkins y SonarQube; no sustituye los reportes CI. El login 1.1 genera datos nuevos para cada recorrido. Esperar 1–2 segundos tras operaciones que publican eventos antes de comprobar sus efectos."
+  },
+  "variable": [
+    {
+      "key": "gatewayBaseUrl",
+      "value": "http://localhost:8080",
+      "type": "string"
+    },
+    {
+      "key": "empleadoPassword",
+      "value": "Demostracion123!",
+      "type": "string"
+    },
+    {
+      "key": "adminToken",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "userToken",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "departamentoId",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "empleadoId",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "empleadoNumero",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "empleadoEmail",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "hoy",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "fechaInicio",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "fechaFin",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "periodoId",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "resetToken",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "runId",
+      "value": "",
+      "type": "string"
+    }
+  ],
+  "item": [
+    {
+      "name": "0. Salud y seguridad",
+      "item": [
+        {
+          "name": "0.1 Salud del gateway",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{gatewayBaseUrl}}/health"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "0.2 Sin token no se leen empleados",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{gatewayBaseUrl}}/empleados"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 401', () => pm.response.to.have.status(401));"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "1. Onboarding y eventos",
+      "item": [
+        {
+          "name": "1.1 Login ADMIN y preparar datos únicos",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const id = Date.now().toString();",
+                  "pm.collectionVariables.set('runId', id);",
+                  "for (const key of ['departamentoId', 'empleadoId', 'empleadoNumero']) pm.collectionVariables.set(key, 'SUS-' + id);",
+                  "pm.collectionVariables.set('empleadoEmail', 'sustentacion.' + id + '@example.com');",
+                  "const hoy = new Date();",
+                  "const inicio = new Date(hoy); inicio.setUTCDate(inicio.getUTCDate() + 1);",
+                  "const fin = new Date(hoy); fin.setUTCDate(fin.getUTCDate() + 2);",
+                  "pm.collectionVariables.set('hoy', hoy.toISOString().slice(0, 10));",
+                  "pm.collectionVariables.set('fechaInicio', inicio.toISOString().slice(0, 10));",
+                  "pm.collectionVariables.set('fechaFin', fin.toISOString().slice(0, 10));",
+                  "for (const key of ['adminToken', 'userToken', 'resetToken', 'periodoId']) pm.collectionVariables.set(key, '');"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));",
+                  "pm.collectionVariables.set('adminToken', pm.response.json().token);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"usuario\": \"{{adminUsuario}}\",\n  \"password\": \"{{adminPassword}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{gatewayBaseUrl}}/auth/login",
+              "host": [
+                "{{gatewayBaseUrl}}"
+              ],
+              "path": [
+                "auth",
+                "login"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "1.2 Crear departamento",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 201', () => pm.response.to.have.status(201));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{adminToken}}"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"id\": \"{{departamentoId}}\",\n  \"nombre\": \"Sustentación {{runId}}\",\n  \"descripcion\": \"Departamento de tecnología\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{gatewayBaseUrl}}/departamentos",
+              "host": [
+                "{{gatewayBaseUrl}}"
+              ],
+              "path": [
+                "departamentos"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "1.3 Crear empleado",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 201', () => pm.response.to.have.status(201));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{adminToken}}"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"id\": \"{{empleadoId}}\",\n  \"nombre\": \"Sofía\",\n  \"apellido\": \"Vargas\",\n  \"email\": \"{{empleadoEmail}}\",\n  \"numeroEmpleado\": \"{{empleadoNumero}}\",\n  \"cargo\": \"Ingeniera de Datos\",\n  \"area\": \"Tecnología\",\n  \"departamentoId\": \"{{departamentoId}}\",\n  \"fechaIngreso\": \"{{hoy}}\",\n  \"estado\": \"ACTIVO\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{gatewayBaseUrl}}/empleados",
+              "host": [
+                "{{gatewayBaseUrl}}"
+              ],
+              "path": [
+                "empleados"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "1.4 Consultar empleado",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{adminToken}}"
+              }
+            ],
+            "url": "{{gatewayBaseUrl}}/empleados/{{empleadoId}}"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "1.5 Comprobar perfil replicado",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{adminToken}}"
+              }
+            ],
+            "url": "{{gatewayBaseUrl}}/perfiles/{{empleadoId}}"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "1.6 Consultar eventos",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{adminToken}}"
+              }
+            ],
+            "url": "{{gatewayBaseUrl}}/notifications?limit=50&sortBy=processedAt&order=DESC"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "1.7 Activar cuenta mediante el evento usuario.creado",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const base = pm.environment.get('gatewayBaseUrl') || pm.collectionVariables.get('gatewayBaseUrl');",
+                  "const email = pm.collectionVariables.get('empleadoEmail');",
+                  "pm.collectionVariables.set('resetToken', '');",
+                  "pm.sendRequest({url: base + '/notifications?limit=50&sortBy=processedAt&order=DESC', method:'GET',",
+                  "    header:{Authorization:'Bearer ' + pm.collectionVariables.get('adminToken')}}, (err,res) => {",
+                  "    if (err) { console.log('No fue posible consultar notificaciones.'); return; }",
+                  "    const body = res.json();",
+                  "    const rows = Array.isArray(body) ? body : body.data || [];",
+                  "    const event = rows.find(row => row.eventType === 'usuario.creado' && String(row.email).toLowerCase() === email.toLowerCase());",
+                  "    const token = event && event.payload && event.payload.data && event.payload.data.token;",
+                  "    if (token) pm.collectionVariables.set('resetToken', token);",
+                  "    else console.log('El evento todavía no llegó: espere un segundo y repita esta petición.');",
+                  "});"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200: cuenta activada', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"token\": \"{{resetToken}}\",\n  \"nuevaPassword\": \"{{empleadoPassword}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{gatewayBaseUrl}}/auth/reset-password",
+              "host": [
+                "{{gatewayBaseUrl}}"
+              ],
+              "path": [
+                "auth",
+                "reset-password"
+              ]
+            }
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "2. Autenticación y permisos",
+      "item": [
+        {
+          "name": "2.1 Login USER: cuenta activa",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 200: la cuenta está ACTIVA', () => pm.response.to.have.status(200));",
+                  "pm.test('Rol USER', () => pm.expect(pm.response.json().rol).to.eql('USER'));"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.collectionVariables.set('userToken', pm.response.json().token);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"usuario\": \"{{empleadoEmail}}\",\n  \"password\": \"{{empleadoPassword}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{gatewayBaseUrl}}/auth/login",
+              "host": [
+                "{{gatewayBaseUrl}}"
+              ],
+              "path": [
+                "auth",
+                "login"
+              ]
+            },
+            "description": "Primer eslabón de la cadena que pide el enunciado: login OK."
+          },
+          "response": []
+        },
+        {
+          "name": "2.2 USER no puede crear departamentos",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{userToken}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{gatewayBaseUrl}}/departamentos",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"id\": \"NO-PERMITIDO-{{runId}}\",\n  \"nombre\": \"No debe crearse\",\n  \"descripcion\": \"Prueba RBAC\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 403', () => pm.response.to.have.status(403));"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "3. Vacaciones",
+      "item": [
+        {
+          "name": "3.1 Programar vacaciones futuras",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 201', () => pm.response.to.have.status(201));",
+                  "const period = pm.response.json().data || pm.response.json();",
+                  "pm.test('PROGRAMADA', () => pm.expect(period.estado).to.eql('PROGRAMADA'));",
+                  "pm.collectionVariables.set('periodoId', period.id);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{adminToken}}"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"empleadoId\": \"{{empleadoId}}\",\n  \"fechaInicio\": \"{{fechaInicio}}\",\n  \"fechaFin\": \"{{fechaFin}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{gatewayBaseUrl}}/vacaciones",
+              "host": [
+                "{{gatewayBaseUrl}}"
+              ],
+              "path": [
+                "vacaciones"
+              ]
+            },
+            "description": "Paso 12 del enunciado. fechaInicio = fechaFin = hoy es la estrategia sugerida para que el scheduler (cada minuto) pueda dispararlo sin esperar."
+          },
+          "response": []
+        },
+        {
+          "name": "3.2 Consultar período",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{adminToken}}"
+              }
+            ],
+            "url": "{{gatewayBaseUrl}}/vacaciones/{{periodoId}}"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "3.3 Forzar inicio",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));",
+                  "pm.test('EN_CURSO', () => pm.expect(pm.response.json().data.estado).to.eql('EN_CURSO'));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{adminToken}}"
+              }
+            ],
+            "url": {
+              "raw": "{{gatewayBaseUrl}}/vacaciones/{{periodoId}}/forzar-inicio",
+              "host": [
+                "{{gatewayBaseUrl}}"
+              ],
+              "path": [
+                "vacaciones",
+                "{{periodoId}}",
+                "forzar-inicio"
+              ]
+            },
+            "description": "ENDPOINT DE DESARROLLO, protegido con rol ADMIN. Hace lo mismo que haría el scheduler al llegar la fecha: transición PROGRAMADA → EN_CURSO y publicación de vacaciones.iniciadas.\n\nSi prefiere esperar al scheduler automático, omita este request: con fechaInicio = hoy lo disparará en el próximo minuto."
+          },
+          "response": []
+        },
+        {
+          "name": "3.4 Login rechazado durante vacaciones",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 401: la cuenta quedó suspendida', () => {",
+                  "    pm.response.to.have.status(401);",
+                  "});",
+                  "",
+                  "pm.test('El motivo es la suspensión por vacaciones', () => {",
+                  "    pm.expect(pm.response.json().message).to.include('vacaciones');",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"usuario\": \"{{empleadoEmail}}\",\n  \"password\": \"{{empleadoPassword}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{gatewayBaseUrl}}/auth/login",
+              "host": [
+                "{{gatewayBaseUrl}}"
+              ],
+              "path": [
+                "auth",
+                "login"
+              ]
+            },
+            "description": "Paso 13 del enunciado: la contraseña es correcta, pero el estado de la cuenta no permite el login. Segundo eslabón de la cadena."
+          },
+          "response": []
+        },
+        {
+          "name": "3.5 Forzar fin",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));",
+                  "pm.test('FINALIZADA', () => pm.expect(pm.response.json().data.estado).to.eql('FINALIZADA'));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{adminToken}}"
+              }
+            ],
+            "url": {
+              "raw": "{{gatewayBaseUrl}}/vacaciones/{{periodoId}}/forzar-fin",
+              "host": [
+                "{{gatewayBaseUrl}}"
+              ],
+              "path": [
+                "vacaciones",
+                "{{periodoId}}",
+                "forzar-fin"
+              ]
+            },
+            "description": "Contraparte simétrica de forzar-inicio. El scheduler automático solo finaliza un período cuando la fechaFin es estrictamente anterior a hoy (la fechaFin es inclusiva: unas vacaciones que terminan hoy siguen vigentes hoy), así que para demostrar la reactivación en la sustentación se usa este endpoint."
+          },
+          "response": []
+        },
+        {
+          "name": "3.6 Login vuelve a funcionar",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 200: la cuenta se reactivó', () => pm.response.to.have.status(200));",
+                  "pm.test('Mismo empleado, mismo rol', () => {",
+                  "    const b = pm.response.json();",
+                  "    pm.expect(b.empleadoId).to.eql(pm.collectionVariables.get('empleadoId'));",
+                  "    pm.expect(b.rol).to.eql('USER');",
+                  "});",
+                  "",
+                  "console.log('CADENA COMPLETA DEMOSTRADA: login OK → vacaciones inician → login falla → vacaciones terminan → login OK');"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"usuario\": \"{{empleadoEmail}}\",\n  \"password\": \"{{empleadoPassword}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{gatewayBaseUrl}}/auth/login",
+              "host": [
+                "{{gatewayBaseUrl}}"
+              ],
+              "path": [
+                "auth",
+                "login"
+              ]
+            },
+            "description": "Paso 14 del enunciado y cuarto eslabón: la cuenta se reactivó sola, por evento, sin intervención manual sobre el auth-service."
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "4. Offboarding y auditoría",
+      "item": [
+        {
+          "name": "4.1 Retirar empleado",
+          "request": {
+            "method": "DELETE",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{adminToken}}"
+              }
+            ],
+            "url": "{{gatewayBaseUrl}}/empleados/{{empleadoId}}"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Retiro aceptado', () => pm.expect(pm.response.code).to.be.oneOf([200,204]));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "4.2 Login rechazado tras retiro",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 401', () => pm.response.to.have.status(401));",
+                  "pm.test('Baja permanente', () => pm.expect(pm.response.json().message).to.include('permanente'));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"usuario\": \"{{empleadoEmail}}\",\n  \"password\": \"{{empleadoPassword}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{gatewayBaseUrl}}/auth/login",
+              "host": [
+                "{{gatewayBaseUrl}}"
+              ],
+              "path": [
+                "auth",
+                "login"
+              ]
+            },
+            "description": "Primer eslabón de la cadena que pide el enunciado: login OK."
+          },
+          "response": []
+        },
+        {
+          "name": "4.3 Consultar retirados",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{adminToken}}"
+              }
+            ],
+            "url": "{{gatewayBaseUrl}}/empleados?estado=RETIRADO"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const body = pm.response.json(); const rows = Array.isArray(body) ? body : body.data || [];",
+                  "pm.test('Se conserva la fecha de retiro', () => pm.expect(rows.some(row => row.id === pm.collectionVariables.get('empleadoId') && row.fechaRetiro)).to.eql(true));"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

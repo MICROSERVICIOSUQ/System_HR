@@ -9,7 +9,7 @@ services:
     volumes:
       - departamentos_data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${DEPARTAMENTOS_DB_USER:-postgres} -d ${DEPARTAMENTOS_DB_NAME:-gestion_departamentos}"]
+      test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -U ${DEPARTAMENTOS_DB_USER:-postgres} -d ${DEPARTAMENTOS_DB_NAME:-gestion_departamentos}"]
       interval: 5s
       timeout: 15s
       retries: 10
@@ -27,7 +27,7 @@ services:
     volumes:
       - empleados_data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${EMPLEADOS_DB_USER:-postgres} -d ${EMPLEADOS_DB_NAME:-gestion_empleados}"]
+      test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -U ${EMPLEADOS_DB_USER:-postgres} -d ${EMPLEADOS_DB_NAME:-gestion_empleados}"]
       interval: 5s
       timeout: 3s
       retries: 10
@@ -45,7 +45,7 @@ services:
     volumes:
       - perfiles_data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${PERFILES_DB_USER:-postgres} -d ${PERFILES_DB_NAME:-gestion_perfiles}"]
+      test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -U ${PERFILES_DB_USER:-postgres} -d ${PERFILES_DB_NAME:-gestion_perfiles}"]
       interval: 5s
       timeout: 3s
       retries: 10
@@ -63,7 +63,7 @@ services:
     volumes:
       - notificaciones_data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${NOTIFICACIONES_DB_USER:-postgres} -d ${NOTIFICACIONES_DB_NAME:-gestion_notificaciones}"]
+      test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -U ${NOTIFICACIONES_DB_USER:-postgres} -d ${NOTIFICACIONES_DB_NAME:-gestion_notificaciones}"]
       interval: 5s
       timeout: 3s
       retries: 10
@@ -83,7 +83,7 @@ services:
     expose:
       - "5432"
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${VACACIONES_DB_USER:-postgres} -d ${VACACIONES_DB_NAME:-gestion_vacaciones}"]
+      test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -U ${VACACIONES_DB_USER:-postgres} -d ${VACACIONES_DB_NAME:-gestion_vacaciones}"]
       interval: 5s
       timeout: 3s
       retries: 10
@@ -103,7 +103,7 @@ services:
     expose:
       - "5432"
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${AUTH_DB_USER:-postgres} -d ${AUTH_DB_NAME:-gestion_auth}"]
+      test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -U ${AUTH_DB_USER:-postgres} -d ${AUTH_DB_NAME:-gestion_auth}"]
       interval: 5s
       timeout: 3s
       retries: 10

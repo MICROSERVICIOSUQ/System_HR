@@ -1,0 +1,2 @@
+FROM rabbitmq:3-management
+COPY infrastructure/rabbitmq/definitions.json /etc/rabbitmq/definitions.json

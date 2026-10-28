@@ -11,7 +11,9 @@
     "db:generate": "prisma generate",
     "db:migrate": "prisma migrate deploy",
     "pretest": "node -e \"require('fs').mkdirSync('reports',{recursive:true})\"",
-    "test": "tsx --import ./src/tests/entorno-pruebas.ts --test --experimental-test-coverage --test-coverage-exclude=\"src/tests/**\" --test-coverage-exclude=\"src/generated/**\" --test-coverage-exclude=\"src/repositories/**\" --test-coverage-exclude=\"src/messaging/**\" --test-coverage-lines=70 --test-reporter=spec --test-reporter-destination=stdout --test-reporter=junit --test-reporter-destination=reports/junit.xml --test-reporter=lcov --test-reporter-destination=reports/lcov.info src/tests/*.test.ts"
+    "test": "tsx --import ./src/tests/entorno-pruebas.ts --test --experimental-test-coverage --test-coverage-include=\"src/domain/**\" --test-coverage-include=\"src/services/**\" --test-coverage-exclude=\"src/tests/**\" --test-coverage-exclude=\"src/generated/**\" --test-coverage-exclude=\"src/repositories/**\" --test-coverage-exclude=\"src/messaging/**\" --test-coverage-lines=70 --test-reporter=spec --test-reporter-destination=stdout --test-reporter=junit --test-reporter-destination=reports/junit.xml --test-reporter=lcov --test-reporter-destination=reports/lcov.info src/tests/*.test.ts",
+    "test:ci": "tsx --import ./src/tests/entorno-pruebas.ts --test --experimental-test-coverage --test-coverage-include=\"src/domain/**\" --test-coverage-include=\"src/services/**\" --test-coverage-exclude=\"src/tests/**\" --test-coverage-exclude=\"src/generated/**\" --test-coverage-exclude=\"src/repositories/**\" --test-coverage-exclude=\"src/messaging/**\" --test-reporter=spec --test-reporter-destination=stdout --test-reporter=junit --test-reporter-destination=reports/junit.xml --test-reporter=lcov --test-reporter-destination=reports/lcov.info src/tests/*.test.ts",
+    "pretest:ci": "node -e \"require('fs').mkdirSync('reports',{recursive:true})\""
   },
   "dependencies": {
     "@prisma/adapter-pg": "^7.10.0",

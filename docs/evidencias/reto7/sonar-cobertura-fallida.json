@@ -1,0 +1,123 @@
+[
+  {
+    "component": {
+      "key": "employees-service",
+      "name": "employees-service",
+      "description": "Employee management microservice",
+      "qualifier": "TRK",
+      "measures": [
+        {
+          "metric": "duplicated_lines_density",
+          "value": "0.0",
+          "bestValue": true
+        },
+        {
+          "metric": "ncloc",
+          "value": "1400"
+        },
+        {
+          "metric": "branch_coverage",
+          "value": "64.0",
+          "bestValue": false
+        },
+        {
+          "metric": "coverage",
+          "value": "82.4",
+          "bestValue": false
+        },
+        {
+          "metric": "line_coverage",
+          "value": "90.3",
+          "bestValue": false
+        },
+        {
+          "metric": "ncloc_language_distribution",
+          "value": "java=1230;xml=170"
+        },
+        {
+          "metric": "vulnerabilities",
+          "value": "0",
+          "bestValue": true
+        },
+        {
+          "metric": "code_smells",
+          "value": "18",
+          "bestValue": false
+        },
+        {
+          "metric": "bugs",
+          "value": "0",
+          "bestValue": true
+        },
+        {
+          "metric": "files",
+          "value": "28"
+        },
+        {
+          "metric": "alert_status",
+          "value": "OK"
+        }
+      ]
+    }
+  },
+  {
+    "component": {
+      "key": "vacations-service",
+      "name": "Vacaciones",
+      "qualifier": "TRK",
+      "measures": [
+        {
+          "metric": "branch_coverage",
+          "value": "83.0",
+          "bestValue": false
+        },
+        {
+          "metric": "files",
+          "value": "17"
+        },
+        {
+          "metric": "alert_status",
+          "value": "ERROR"
+        },
+        {
+          "metric": "coverage",
+          "value": "23.9",
+          "bestValue": false
+        },
+        {
+          "metric": "vulnerabilities",
+          "value": "0",
+          "bestValue": true
+        },
+        {
+          "metric": "ncloc",
+          "value": "3855"
+        },
+        {
+          "metric": "line_coverage",
+          "value": "21.8",
+          "bestValue": false
+        },
+        {
+          "metric": "ncloc_language_distribution",
+          "value": "ts=3855"
+        },
+        {
+          "metric": "duplicated_lines_density",
+          "value": "0.0",
+          "bestValue": true
+        },
+        {
+          "metric": "code_smells",
+          "value": "5",
+          "bestValue": false
+        },
+        {
+          "metric": "bugs",
+          "value": "0",
+          "bestValue": true
+        }
+      ]
+    }
+  }
+]

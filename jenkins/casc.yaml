@@ -1,0 +1,55 @@
+jenkins:
+  systemMessage: "System_HR — Integración continua del Reto 7"
+  numExecutors: 2
+  securityRealm:
+    local:
+      allowsSignup: false
+      users:
+        - id: "${JENKINS_ADMIN_USER}"
+          password: "${JENKINS_ADMIN_PASSWORD}"
+  authorizationStrategy:
+    loggedInUsersCanDoAnything:
+      allowAnonymousRead: false
+  globalNodeProperties:
+    - envVars:
+        env:
+          - key: CI_NETWORK
+            value: "${CI_NETWORK}"
+unclassified:
+  resourceRoot:
+    url: "${JENKINS_RESOURCE_URL}"
+  location:
+    url: "${JENKINS_URL}"
+  sonarGlobalConfiguration:
+    installations:
+      - name: SonarQube
+        serverUrl: http://sonarqube:9000
+        credentialsId: sonar-token
+credentials:
+  system:
+    domainCredentials:
+      - credentials:
+          - string:
+              scope: GLOBAL
+              id: sonar-token
+              description: Token del análisis de System_HR
+              secret: "${SONAR_TOKEN}"
+jobs:
+  - script: |
+      ['employees-service', 'vacations-service'].each { service ->
+          pipelineJob(service) {
+              description('Build, pruebas, calidad, Docker y BDD de ' + service)
+              definition {
+                  cpsScm {
+                      scm {
+                          git {
+                              remote { url('${CI_REPOSITORY_URL}') }
+                              branch('${CI_REPOSITORY_BRANCH}')
+                          }
+                      }
+                      scriptPath('services/' + service + '/Jenkinsfile')
+                      lightweight(true)
+                  }
+              }
+          }
+      }

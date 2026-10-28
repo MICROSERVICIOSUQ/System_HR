@@ -43,3 +43,6 @@ logs/
 .DS_Store
 Thumbs.db
 Desktop.ini
+# Caché de los scripts de CI
+**/__pycache__/
+**/*.pyc

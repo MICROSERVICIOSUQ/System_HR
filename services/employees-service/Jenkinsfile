@@ -1,0 +1,149 @@
+pipeline {
+    agent any
+    options {
+        skipDefaultCheckout(true)
+        disableConcurrentBuilds()
+        timeout(time: 60, unit: 'MINUTES')
+        buildDiscarder(logRotator(numToKeepStr: '15'))
+    }
+    parameters {
+        choice(name: 'FALLO_DEMO', choices: ['ninguno', 'unitaria', 'cobertura', 'docker', 'bdd'],
+            description: 'Fallo controlado del punto 5. Solo modifica este workspace.')
+    }
+    triggers { pollSCM('H/5 * * * *') }
+    stages {
+        stage('Checkout') {
+            steps {
+                deleteDir()
+                checkout scm
+                sh 'docker version >/dev/null && docker compose version && docker ps --format "{{.Names}}: {{.Status}}"'
+                script {
+                    env.CI_SERVICE = 'employees-service'
+                    env.CI_PROJECT = "hr-ci-employees-service-${env.BUILD_NUMBER}"
+                }
+                sh 'python3 ci/simular-fallo.py "$CI_SERVICE" "${FALLO_DEMO:-ninguno}"'
+            }
+        }
+        stage('Build') {
+            steps {
+                script {
+                    docker.image('maven:3.9.9-eclipse-temurin-21').inside('-u root -v hr-ci-maven:/root/.m2') {
+                        dir('services/employees-service') {
+                            sh 'mvn -B clean compile -DskipTests'
+                        }
+                    }
+                }
+            }
+        }
+        stage('Test') {
+            steps {
+                script {
+                    docker.image('maven:3.9.9-eclipse-temurin-21').inside(
+                        '-u root -v hr-ci-maven:/root/.m2 -v /var/run/docker.sock:/var/run/docker.sock --network host'
+                    ) {
+                        withEnv(['TESTCONTAINERS_HOST_OVERRIDE=127.0.0.1']) {
+                            dir('services/employees-service') {
+                                sh 'mvn -B verify -Dmaven.test.failure.ignore=true -Dcoverage.check.skip=true'
+                            }
+                        }
+                    }
+                    sh 'python3 ci/comprobar-integracion.py'
+                }
+            }
+            post {
+                always {
+                    // Publicar en post conserva el diagnóstico aunque el comando falle.
+                    junit testResults: 'services/employees-service/target/surefire-reports/TEST-*.xml', allowEmptyResults: false
+                    recordCoverage tools: [[parser: 'JACOCO', pattern: 'services/employees-service/target/site/jacoco/jacoco.xml']], sourceDirectories: [[path: 'services/employees-service/src/main/java']], sourceCodeRetention: 'EVERY_BUILD', enabledForFailure: true, failOnError: true
+                    archiveArtifacts artifacts: 'services/employees-service/target/site/jacoco/**', allowEmptyArchive: true
+                    script {
+                        if (currentBuild.currentResult == 'UNSTABLE') {
+                            error('Hay pruebas fallidas. Consulta Test Result antes de continuar.')
+                        }
+                    }
+                }
+            }
+        }
+        stage('SonarQube') {
+            steps {
+                script {
+                    withSonarQubeEnv('SonarQube') {
+                        withCredentials([string(credentialsId: 'sonar-token', variable: 'SONAR_TOKEN')]) {
+                            docker.image('maven:3.9.9-eclipse-temurin-21').inside(
+                                "-u root --network ${env.CI_NETWORK} -v hr-ci-maven:/root/.m2"
+                            ) {
+                                dir('services/employees-service') {
+                                    sh 'mvn -B org.sonarsource.scanner.maven:sonar-maven-plugin:5.0.0.4389:sonar -Dsonar.projectKey=employees-service'
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        stage('Quality Gate') {
+            steps {
+                timeout(time: 10, unit: 'MINUTES') {
+                    script {
+                        def gate = waitForQualityGate()
+                        if (gate.status != 'OK') {
+                            error("SonarQube rechazó la calidad del servicio: ${gate.status}")
+                        }
+                    }
+                }
+            }
+        }
+        stage('Package') {
+            steps {
+                sh 'python3 ci/construir-imagen.py employees-service $BUILD_NUMBER'
+            }
+            post {
+                always {
+                    archiveArtifacts artifacts: 'reports/docker/*', allowEmptyArchive: true
+                    publishHTML target: [reportDir: 'reports/docker', reportFiles: 'index.html',
+                        reportName: 'Empaquetado Docker', keepAll: true,
+                        alwaysLinkToLastBuild: false, allowMissing: false]
+                }
+            }
+        }
+        stage('E2E Tests') {
+            steps {
+                sh 'sh ci/e2e.sh run'
+            }
+            post {
+                always {
+                    script {
+                        // La limpieza se ejecuta incluso si la publicación del reporte falla.
+                        try {
+                            load('ci/pipeline.groovy').publicarBDD()
+                        } finally {
+                            try {
+                                sh 'sh ci/e2e.sh clean'
+                            } finally {
+                                archiveArtifacts artifacts: 'reports/e2e/system.log,e2e-tests/reports/*', allowEmptyArchive: true
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+    post {
+        success { echo 'El servicio pasó las pruebas, la revisión de calidad y los escenarios BDD.' }
+        failure { echo 'La ejecución falló. Revisa la etapa marcada y sus reportes.' }
+        always {
+            // Reintento de limpieza si hubo una interrupción en E2E.
+            script {
+                try {
+                    if (env.CI_PROJECT && fileExists('reports/e2e/compose.json')) {
+                        sh 'sh ci/e2e.sh clean'
+                    }
+                } finally {
+                    if (fileExists('ci/ajustar-permisos.sh')) {
+                        sh 'sh ci/ajustar-permisos.sh'
+                    }
+                }
+            }
+        }
+    }
+}
