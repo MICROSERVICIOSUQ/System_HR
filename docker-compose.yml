@@ -376,6 +376,12 @@ services:
       GF_SECURITY_ADMIN_USER: ${GRAFANA_USER:-admin}
       GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_PASSWORD:-admin}
       GF_USERS_ALLOW_SIGN_UP: "false"
+      # Zona horaria del proceso. Sin esto el contenedor corre en UTC y el
+      # mensaje de alerta llega con una hora que no es la de quien lo lee: a las
+      # 16:06 de Colombia avisaba de un incidente "desde las 21:07". Una alerta
+      # con la hora equivocada es peor que inútil, porque hace buscar la causa en
+      # el momento equivocado.
+      TZ: ${TZ:-America/Bogota}
       # URL del webhook de Discord al que se envían las alertas. Se inyecta por
       # entorno y NO se versiona: un webhook es una credencial — quien lo tenga
       # puede publicar en ese canal. El archivo de aprovisionamiento lo lee con

@@ -29,7 +29,7 @@ contactPoints:
             **Servicio:** {{ .Labels.job }}
             **Severidad:** {{ .Labels.severity }}
             **Detalle:** {{ .Annotations.description }}
-            **Desde:** {{ .StartsAt.Format "2006-01-02 15:04:05 MST" }}
+            **Desde:** {{ .StartsAt.Local.Format "2006-01-02 15:04:05 MST" }}
             {{ end }}
           use_discord_username: true
         # Las notificaciones de recuperación también se envían: saber que el
