@@ -1,6 +1,7 @@
 import amqplib, { Channel, ChannelModel, ConsumeMessage } from 'amqplib';
 import { rabbitConfig } from '../config/rabbitmq.ts';
 import { ProfileService } from '../services/profile.service.ts';
+import { conSpanDeConsumo } from '../observability/amqp-tracing.ts';
 
 export class RabbitMQConsumer {
   private connection: ChannelModel | null = null;
@@ -79,7 +80,17 @@ export class RabbitMQConsumer {
         return;
       }
 
-      await this.service.processEvent(envelope);
+      // Igual que en los demas consumidores: se extrae el contexto de las
+      // cabeceras para que el span quede en el mismo arbol que el publicador.
+      await conSpanDeConsumo(
+        envelope?.type ?? 'desconocido',
+        msg.properties?.headers,
+        {
+          'event.id': String(envelope?.id ?? ''),
+          'messaging.destination.name': rabbitConfig.queueName,
+        },
+        () => this.service.processEvent(envelope),
+      );
 
       // ACK siempre: procesado, duplicado o ignorado
       this.channel.ack(msg);

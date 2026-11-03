@@ -1,6 +1,7 @@
 import amqplib, { Channel, ChannelModel, ConsumeMessage } from 'amqplib';
 import { rabbitConfig } from '../config/rabbitmq.ts';
 import { NotificationService } from '../services/notification.service.ts';
+import { conSpanDeConsumo } from '../observability/amqp-tracing.ts';
 
 export class RabbitMQConsumer {
   private connection: ChannelModel | null = null;
@@ -72,7 +73,18 @@ export class RabbitMQConsumer {
         return;
       }
 
-      const result = await this.service.processEvent(envelope);
+      // El span cuelga de la traza que publico el evento: el contexto viene
+      // en las cabeceras del mensaje (traceparent, W3C). Sin esto, este
+      // procesamiento apareceria en Zipkin como una traza suelta.
+      const result = await conSpanDeConsumo(
+        envelope?.type ?? 'desconocido',
+        msg.properties?.headers,
+        {
+          'event.id': String(envelope?.id ?? ''),
+          'messaging.destination.name': rabbitConfig.queueName,
+        },
+        () => this.service.processEvent(envelope),
+      );
 
       // Confirmar ACK en todos los casos procesados, duplicados o ignorados
       this.channel.ack(msg);

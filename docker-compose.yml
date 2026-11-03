@@ -270,6 +270,139 @@ services:
     networks:
       - microservices-network
 
+  # ──────────────────────────────────────────────────────────────────────────
+  # Stack de observabilidad (Reto 8)
+  #
+  # Cinco contenedores en la MISMA red que los microservicios. Esa es la
+  # condición que lo hace funcionar: Prometheus necesita resolver
+  # 'employees-service' por DNS para raspar sus métricas, y los servicios
+  # necesitan resolver 'zipkin' para enviar sus trazas. Si estuvieran en redes
+  # distintas no se verían entre sí.
+  #
+  # Los puertos sí se publican al host, pero solo para que un humano abra las
+  # interfaces desde el navegador. El tráfico entre contenedores nunca sale a
+  # localhost.
+  # ──────────────────────────────────────────────────────────────────────────
+
+  prometheus:
+    image: prom/prometheus:v3.1.0
+    # Recolector de métricas. Modelo PULL: visita el endpoint de cada servicio
+    # cada 15s. Lo que no esté en prometheus.yml, no se vigila.
+    ports:
+      - "${PROMETHEUS_PORT:-9090}:9090"
+    volumes:
+      - ./observability/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus-data:/prometheus
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      # 15 días es de sobra para un trabajo de curso y evita que el volumen
+      # crezca sin control en una máquina de desarrollo.
+      - '--storage.tsdb.retention.time=15d'
+      - '--web.enable-lifecycle'
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:9090/-/healthy"]
+      interval: 15s
+      timeout: 5s
+      start_period: 30s
+      retries: 5
+    networks:
+      - microservices-network
+
+  loki:
+    image: grafana/loki:3.3.2
+    # Almacén de logs. Indexa solo las etiquetas (service, level), no el
+    # contenido, lo que lo hace mucho más liviano que Elasticsearch.
+    ports:
+      - "${LOKI_PORT:-3100}:3100"
+    volumes:
+      - ./observability/loki/loki-config.yml:/etc/loki/local-config.yaml:ro
+      - loki-data:/loki
+    command: -config.file=/etc/loki/local-config.yaml
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "wget --spider -q http://localhost:3100/ready || exit 1"]
+      interval: 15s
+      timeout: 5s
+      start_period: 60s
+      retries: 10
+    networks:
+      - microservices-network
+
+  promtail:
+    image: grafana/promtail:3.3.2
+    # Agente recolector. Descubre los contenedores por el socket de Docker y
+    # empuja sus logs a Loki (modelo PUSH). Por eso necesita el socket montado.
+    volumes:
+      - ./observability/promtail/promtail-config.yml:/etc/promtail/config.yml:ro
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - promtail-data:/tmp
+    command: -config.file=/etc/promtail/config.yml
+    restart: unless-stopped
+    depends_on:
+      loki:
+        condition: service_healthy
+    networks:
+      - microservices-network
+
+  zipkin:
+    image: openzipkin/zipkin:3.4
+    # Servidor de trazas distribuidas. Recibe los spans por PUSH desde cada
+    # servicio y los reconstruye en una cascada por traceId.
+    ports:
+      - "${ZIPKIN_PORT:-9411}:9411"
+    environment:
+      # Almacenamiento en memoria: suficiente para el reto y no necesita otra
+      # base de datos. Las trazas se pierden al reiniciar, lo que está
+      # documentado como limitación en el README.
+      STORAGE_TYPE: mem
+      JAVA_OPTS: -Xms256m -Xmx512m
+    restart: unless-stopped
+    networks:
+      - microservices-network
+
+  grafana:
+    image: grafana/grafana:11.5.1
+    # Visualización y alertas. Lee sus fuentes de datos, su dashboard y sus
+    # reglas de alerta de los archivos de ./observability/grafana/provisioning,
+    # así que no hay que configurar nada a mano tras un docker compose up.
+    ports:
+      - "${GRAFANA_PORT:-3000}:3000"
+    volumes:
+      - grafana-data:/var/lib/grafana
+      - ./observability/grafana/provisioning:/etc/grafana/provisioning:ro
+    environment:
+      GF_SECURITY_ADMIN_USER: ${GRAFANA_USER:-admin}
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_PASSWORD:-admin}
+      GF_USERS_ALLOW_SIGN_UP: "false"
+      # URL del webhook de Discord al que se envían las alertas. Se inyecta por
+      # entorno y NO se versiona: un webhook es una credencial — quien lo tenga
+      # puede publicar en ese canal. El archivo de aprovisionamiento lo lee con
+      # ${DISCORD_WEBHOOK_URL}.
+      DISCORD_WEBHOOK_URL: ${DISCORD_WEBHOOK_URL:-}
+      # Enlace desde una alerta hacia el panel correspondiente.
+      GF_SERVER_ROOT_URL: http://localhost:${GRAFANA_PORT:-3000}
+    restart: unless-stopped
+    depends_on:
+      prometheus:
+        condition: service_healthy
+    networks:
+      - microservices-network
+
 networks:
   microservices-network:
     name: sistema_rrhh_network
+
+volumes:
+  # Los dashboards y las alertas se aprovisionan desde archivos versionados,
+  # pero Grafana guarda aquí su base interna (usuarios, preferencias, estado de
+  # las alertas). Sin el volumen se perdería el historial en cada reinicio.
+  grafana-data:
+    name: system-hr_grafana_data
+  prometheus-data:
+    name: system-hr_prometheus_data
+  loki-data:
+    name: system-hr_loki_data
+  promtail-data:
+    name: system-hr_promtail_data

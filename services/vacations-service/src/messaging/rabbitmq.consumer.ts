@@ -1,6 +1,7 @@
 import amqplib, { Channel, ChannelModel, ConsumeMessage } from 'amqplib';
 import { rabbitConfig } from '../config/rabbitmq.ts';
 import { VacationService } from '../services/vacation.service.ts';
+import { conSpanDeConsumo } from '../observability/amqp-tracing.ts';
 
 export class RabbitMQConsumer {
   private connection: ChannelModel | null = null;
@@ -78,7 +79,18 @@ export class RabbitMQConsumer {
         return;
       }
 
-      const result = await this.service.processEvent(envelope);
+      // Este servicio es a la vez productor y consumidor: aqui consume los
+      // eventos de empleado para mantener su replica local. El span se ancla a
+      // la traza del publicador con el contexto de las cabeceras.
+      const result = await conSpanDeConsumo(
+        envelope?.type ?? 'desconocido',
+        msg.properties?.headers,
+        {
+          'event.id': String(envelope?.id ?? ''),
+          'messaging.destination.name': rabbitConfig.queueName,
+        },
+        () => this.service.processEvent(envelope),
+      );
 
       if (result === 'DUPLICATE') {
         console.log(`Evento duplicado omitido: ${envelope.id}`);

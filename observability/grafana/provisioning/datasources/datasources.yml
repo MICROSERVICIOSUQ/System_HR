@@ -1,0 +1,53 @@
+# Fuentes de datos de Grafana, aprovisionadas como código.
+#
+# Grafana lee este archivo al arrancar, así que las fuentes quedan configuradas
+# sin que nadie entre a la interfaz a crearlas. Es un requisito del reto y
+# también la diferencia entre "funciona en mi máquina" y un entorno
+# reproducible: quien clone el repositorio y haga docker compose up tiene el
+# mismo Grafana que nosotros.
+#
+# Las URLs usan nombres de servicio de Docker (prometheus, loki), no localhost:
+# dentro de la red sistema_rrhh_network localhost sería el propio contenedor de
+# Grafana.
+
+apiVersion: 1
+
+datasources:
+  - name: Prometheus
+    type: prometheus
+    uid: prometheus
+    access: proxy
+    url: http://prometheus:9090
+    isDefault: true
+    editable: false
+    jsonData:
+      # Debe ser >= al scrape_interval de prometheus.yml. Si fuera menor,
+      # Grafana pediría más resolución de la que existe y las gráficas
+      # aparecerían con huecos entre puntos.
+      timeInterval: 15s
+      httpMethod: POST
+
+  - name: Loki
+    type: loki
+    uid: loki
+    access: proxy
+    url: http://loki:3100
+    editable: false
+    jsonData:
+      maxLines: 1000
+      # Esto es lo que une los pilares: Loki detecta el campo traceId en el log
+      # JSON y lo convierte en un enlace a la traza en Zipkin. Permite pasar de
+      # "este log dice que algo falló" a "esta es la petición completa que
+      # falló" con un clic, que es el objetivo de correlacionar logs y trazas.
+      derivedFields:
+        - name: traceId
+          matcherRegex: '"traceId":"(\w+)"'
+          url: 'http://localhost:9411/zipkin/traces/${__value.raw}'
+          datasourceUid: zipkin
+
+  - name: Zipkin
+    type: zipkin
+    uid: zipkin
+    access: proxy
+    url: http://zipkin:9411
+    editable: false

@@ -20,6 +20,11 @@
 
     <properties>
         <java.version>21</java.version>
+        <!-- No lo gestiona el BOM de Spring Boot, así que la versión va fija.
+             La 7.4 es compatible con Logback 1.4 y 1.5, de modo que los tres
+             servicios Java pueden usar la misma aunque estén en versiones
+             distintas de Spring Boot. -->
+        <logstash-logback-encoder.version>7.4</logstash-logback-encoder.version>
     </properties>
 
     <dependencies>
@@ -119,6 +124,43 @@
         <dependency>
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-actuator</artifactId>
+        </dependency>
+
+        <!-- ── Observabilidad (Reto 8) ──────────────────────────────────── -->
+
+        <!-- Métricas en formato Prometheus. Añadir este registro es lo único
+             que hace falta para que Actuator publique /actuator/prometheus:
+             Micrometer ya venía instrumentando las peticiones HTTP, el pool de
+             Hikari y la JVM, pero sin un registro concreto no las exponía. -->
+        <dependency>
+            <groupId>io.micrometer</groupId>
+            <artifactId>micrometer-registry-prometheus</artifactId>
+        </dependency>
+
+        <!-- Trazabilidad distribuida. El puente de Micrometer usa el SDK de
+             OpenTelemetry por debajo, así que la instrumentación es OTel y la
+             propagación es W3C Trace Context (el valor por omisión en Spring
+             Boot 3). Se eligió el puente en lugar del opentelemetry-spring-
+             boot-starter porque se integra con Actuator y, sobre todo, mete
+             traceId y spanId en el MDC de logging: eso es lo que permite que
+             el log JSON lleve el traceId sin escribir una línea de código. -->
+        <dependency>
+            <groupId>io.micrometer</groupId>
+            <artifactId>micrometer-tracing-bridge-otel</artifactId>
+        </dependency>
+
+        <!-- Exportador que envía los spans a Zipkin (modelo push). -->
+        <dependency>
+            <groupId>io.opentelemetry</groupId>
+            <artifactId>opentelemetry-exporter-zipkin</artifactId>
+        </dependency>
+
+        <!-- Logs estructurados en JSON para que Promtail y Loki puedan
+             filtrarlos por campo en lugar de tratarlos como texto plano. -->
+        <dependency>
+            <groupId>net.logstash.logback</groupId>
+            <artifactId>logstash-logback-encoder</artifactId>
+            <version>${logstash-logback-encoder.version}</version>
         </dependency>
     </dependencies>
 

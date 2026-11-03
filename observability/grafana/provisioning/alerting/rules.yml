@@ -1,0 +1,170 @@
+# Reglas de alerta (Reto 8), aprovisionadas como código.
+#
+# Van en Git para que un `docker compose up` deje las alertas activas sin que
+# nadie las cree a mano en la interfaz. Lo contrario —configurarlas clicando— es
+# el camino a que se pierdan al recrear el contenedor y a que nadie sepa cuáles
+# había.
+#
+# Cada umbral se deriva de un objetivo de servicio y no de un número elegido al
+# azar. Los SLO están en el README; el resumen:
+#
+#   SLI: disponibilidad del servicio       SLO: 99.9%        → alerta: up == 0 durante 1m
+#   SLI: tasa de error 5xx en el gateway   SLO: < 1%         → alerta: > 10% durante 2m
+#   SLI: latencia media en el gateway      SLO: < 300 ms     → alerta: > 2s durante 2m
+#
+# El margen entre SLO y umbral de alerta es deliberado: la alerta avisa de una
+# degradación grave que consume presupuesto de error rápido, no de cada
+# desviación del objetivo. Alertar exactamente en el SLO genera tanto ruido que
+# el equipo deja de mirar.
+
+apiVersion: 1
+
+groups:
+  - orgId: 1
+    name: system-hr-disponibilidad
+    folder: System_HR
+    # Cada cuánto se evalúan las reglas del grupo. Alineado con el
+    # scrape_interval de Prometheus (15s): evaluar más a menudo no daría datos
+    # nuevos.
+    interval: 30s
+    rules:
+
+      # ── Regla 1 del enunciado: servicio caído ──────────────────────────────
+      - uid: system-hr-servicio-caido
+        title: Servicio caído
+        condition: UMBRAL
+        # 1 minuto de tolerancia: un reinicio normal del contenedor tarda menos
+        # y no debe despertar a nadie. Pasado ese minuto, el servicio no está
+        # arrancando, está caído.
+        for: 1m
+        noDataState: NoData
+        execErrState: Error
+        labels:
+          severity: critical
+          reto: '8'
+        annotations:
+          summary: 'El servicio {{ $labels.job }} no responde al scraping'
+          description: >-
+            Prometheus no obtiene métricas de {{ $labels.job }} desde hace más de
+            un minuto. El servicio está caído, bloqueado o aislado de la red de
+            Docker. Comprobar con: docker compose ps {{ $labels.job }}
+        data:
+          - refId: CONSULTA
+            relativeTimeRange:
+              from: 300
+              to: 0
+            datasourceUid: prometheus
+            model:
+              # Se excluye el propio Prometheus: si él se cae, no hay quien
+              # evalúe la regla, así que vigilarse a sí mismo no sirve de nada.
+              expr: up{job!="prometheus"}
+              instant: true
+              refId: CONSULTA
+          - refId: UMBRAL
+            datasourceUid: __expr__
+            model:
+              type: threshold
+              expression: CONSULTA
+              refId: UMBRAL
+              conditions:
+                - evaluator:
+                    # up vale 1 si responde y 0 si no. Se compara por debajo de
+                    # 1 en lugar de usar `up == 0` en la consulta porque así la
+                    # serie siempre existe y Grafana puede distinguir "caído" de
+                    # "sin datos", que son problemas distintos.
+                    type: lt
+                    params: [1]
+
+  - orgId: 1
+    name: system-hr-comportamiento
+    folder: System_HR
+    interval: 30s
+    rules:
+
+      # ── Regla 2 del enunciado: alta tasa de errores ────────────────────────
+      - uid: system-hr-tasa-errores
+        title: Alta tasa de errores 5xx en el API Gateway
+        condition: UMBRAL
+        for: 2m
+        # Sin tráfico la división no tiene resultado, y eso NO es una alerta:
+        # un sistema sin peticiones no está fallando. De ahí NoData -> OK.
+        noDataState: OK
+        execErrState: Error
+        labels:
+          severity: critical
+          reto: '8'
+        annotations:
+          summary: 'Más del 10% de las respuestas del gateway son 5xx'
+          description: >-
+            El API Gateway lleva dos minutos devolviendo errores de servidor de
+            forma sostenida. Al ser el único punto de entrada, esto es lo más
+            parecido a lo que está viendo el cliente. Revisar las trazas con
+            error en Zipkin para localizar qué servicio de aguas abajo falla.
+        data:
+          - refId: CONSULTA
+            relativeTimeRange:
+              from: 300
+              to: 0
+            datasourceUid: prometheus
+            model:
+              # Se mide en el gateway y no en cada servicio a propósito: es la
+              # perspectiva del cliente. Un 500 interno que el gateway resuelve
+              # con un fallback no es un error para quien llama.
+              expr: >-
+                100 * sum(rate(http_server_requests_seconds_count{job="api-gateway", status=~"5.."}[2m]))
+                / sum(rate(http_server_requests_seconds_count{job="api-gateway"}[2m]))
+              instant: true
+              refId: CONSULTA
+          - refId: UMBRAL
+            datasourceUid: __expr__
+            model:
+              type: threshold
+              expression: CONSULTA
+              refId: UMBRAL
+              conditions:
+                - evaluator:
+                    type: gt
+                    params: [10]
+
+      # ── Regla 3 del enunciado: alta latencia ───────────────────────────────
+      - uid: system-hr-alta-latencia
+        title: Alta latencia en el API Gateway
+        condition: UMBRAL
+        for: 2m
+        noDataState: OK
+        execErrState: Error
+        labels:
+          severity: warning
+          reto: '8'
+        annotations:
+          summary: 'La latencia media del gateway supera los 2 segundos'
+          description: >-
+            El gateway tarda más de 2 s de media en responder. Suele ser una
+            dependencia lenta, no el gateway: buscar en Zipkin la traza más
+            larga y mirar qué span ocupa la mayor parte del tiempo.
+        data:
+          - refId: CONSULTA
+            relativeTimeRange:
+              from: 300
+              to: 0
+            datasourceUid: prometheus
+            model:
+              # Media = suma de duraciones / número de peticiones. Es lo que
+              # pide el enunciado. El p95 sería mejor señal (la media esconde
+              # las colas), y el dashboard sí lo muestra con histogram_quantile
+              # gracias a los baldes que publica Micrometer.
+              expr: >-
+                sum(rate(http_server_requests_seconds_sum{job="api-gateway"}[2m]))
+                / sum(rate(http_server_requests_seconds_count{job="api-gateway"}[2m]))
+              instant: true
+              refId: CONSULTA
+          - refId: UMBRAL
+            datasourceUid: __expr__
+            model:
+              type: threshold
+              expression: CONSULTA
+              refId: UMBRAL
+              conditions:
+                - evaluator:
+                    type: gt
+                    params: [2]

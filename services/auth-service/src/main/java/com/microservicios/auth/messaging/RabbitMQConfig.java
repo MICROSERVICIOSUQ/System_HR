@@ -54,6 +54,13 @@ public class RabbitMQConfig {
                                          MessageConverter jsonMessageConverter) {
         RabbitTemplate template = new RabbitTemplate(connectionFactory);
         template.setMessageConverter(jsonMessageConverter);
+        // Igual que en employees-service: la propiedad
+        // spring.rabbitmq.template.observation-enabled solo alcanza al template
+        // auto-configurado, no a este. Sin esta línea, los eventos que publica
+        // auth-service (usuario.creado, cuenta.desactivada) salen sin contexto
+        // y notifications-service abre una traza nueva en lugar de continuar la
+        // que viene del alta del empleado.
+        template.setObservationEnabled(true);
         return template;
     }
 }

@@ -35,6 +35,15 @@ public class RabbitMQConfig {
     public RabbitTemplate rabbitTemplate(ConnectionFactory connectionFactory, MessageConverter jsonMessageConverter) {
         RabbitTemplate template = new RabbitTemplate(connectionFactory);
         template.setMessageConverter(jsonMessageConverter);
+        // Propagación del contexto de traza por el broker (Reto 8).
+        //
+        // La propiedad spring.rabbitmq.template.observation-enabled solo afecta
+        // al RabbitTemplate que auto-configura Spring Boot. Este bean se
+        // construye a mano, así que hay que activarlo aquí: sin esta línea el
+        // evento sale sin cabecera traceparent y la traza se corta en el
+        // broker, con el agravante de que no aparece ningún error — la mitad
+        // asíncrona del sistema simplemente deja de verse en Zipkin.
+        template.setObservationEnabled(true);
         return template;
     }
 }

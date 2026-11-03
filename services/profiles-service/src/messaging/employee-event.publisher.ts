@@ -1,6 +1,7 @@
 import amqplib, { Channel, ChannelModel } from 'amqplib';
 import { randomUUID } from 'node:crypto';
 import { rabbitConfig } from '../config/rabbitmq.ts';
+import { cabecerasConContexto } from '../observability/amqp-tracing.ts';
 
 export interface RetiredEmployeeEvent {
   id: string;
@@ -58,7 +59,14 @@ export class EmployeeEventPublisher {
         rabbitConfig.exchangeName,
         '',
         Buffer.from(JSON.stringify(event)),
-        { contentType: 'application/json', persistent: true },
+        {
+          contentType: 'application/json',
+          persistent: true,
+          // Contexto de traza en las cabeceras (Reto 8): sin esto el consumidor
+          // de este evento abriría una traza nueva en lugar de continuar la que
+          // viene de la petición HTTP que provocó el retiro.
+          headers: cabecerasConContexto(),
+        },
       );
       return event.id;
     } finally {

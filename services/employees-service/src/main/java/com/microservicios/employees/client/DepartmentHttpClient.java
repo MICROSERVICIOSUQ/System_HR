@@ -15,12 +15,28 @@ public class DepartmentHttpClient {
 
     private final RestClient restClient;
 
-    public DepartmentHttpClient(@Value("${departments.service.url}") String departmentsServiceUrl) {
+    /**
+     * El {@code RestClient.Builder} llega inyectado, y eso importa para la
+     * trazabilidad distribuida (Reto 8).
+     *
+     * <p>Antes se usaba el estático {@code RestClient.builder()}, que crea un
+     * cliente limpio sin los interceptores que registra Spring Boot. Uno de
+     * ellos es el de observación: el que abre un span de cliente y, sobre todo,
+     * el que añade la cabecera {@code traceparent} a la petición saliente. Sin
+     * él, la llamada a departments-service salía sin contexto de traza y ese
+     * servicio aparecía en Zipkin como una traza suelta, desconectada de la
+     * petición que la originó.
+     *
+     * <p>El builder que publica Spring Boot es de ámbito prototipo, así que
+     * configurarlo aquí no afecta a nadie más.
+     */
+    public DepartmentHttpClient(@Value("${departments.service.url}") String departmentsServiceUrl,
+                                RestClient.Builder restClientBuilder) {
         SimpleClientHttpRequestFactory requestFactory = new SimpleClientHttpRequestFactory();
         requestFactory.setConnectTimeout(3_000);
         requestFactory.setReadTimeout(5_000);
 
-        this.restClient = RestClient.builder()
+        this.restClient = restClientBuilder
                 .baseUrl(departmentsServiceUrl)
                 .requestFactory(requestFactory)
                 .build();

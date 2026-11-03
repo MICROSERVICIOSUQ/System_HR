@@ -94,8 +94,37 @@ springdoc:
       - name: 3. departments-service
         url: /v3/api-docs/departamentos
 
+# ── Observabilidad (Reto 8) ──────────────────────────────────────────────────
+# El gateway es el primer objetivo de Prometheus y el más valioso: al ser el
+# único punto de entrada, su latencia y su tasa de error son lo más parecido a
+# lo que percibe el cliente. Un servicio interno lento se nota aquí antes que
+# en ningún otro sitio.
+#
+# /actuator/** ya está en gateway.security.public-paths, así que Prometheus
+# puede raspar sin token. Si no lo estuviera, el propio filtro de JWT del
+# gateway respondería 401 al recolector y el target aparecería caído.
 management:
   endpoints:
     web:
       exposure:
-        include: health
+        include: health,info,prometheus,metrics
+  endpoint:
+    health:
+      show-details: always
+      probes:
+        enabled: true
+  metrics:
+    distribution:
+      percentiles-histogram:
+        http.server.requests: true
+      slo:
+        http.server.requests: 50ms,100ms,300ms,500ms,1s,2s
+  tracing:
+    sampling:
+      # 100% en desarrollo y QA. En producción sería 10-20% head-based, o
+      # tail-based en un OTel Collector para no perder las trazas con error.
+      probability: ${OTEL_TRACES_SAMPLER_ARG:1.0}
+  zipkin:
+    tracing:
+      # Nombre de red de Docker, no localhost.
+      endpoint: ${ZIPKIN_ENDPOINT:http://zipkin:9411/api/v2/spans}

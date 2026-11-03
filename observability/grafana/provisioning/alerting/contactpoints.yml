@@ -1,0 +1,38 @@
+# Canal de notificación de las alertas (Reto 8).
+#
+# Grafana soporta Discord de forma nativa, así que no hace falta un webhook
+# genérico: formatea el mensaje con el nombre de la regla, su severidad, las
+# etiquetas y un enlace al panel correspondiente.
+#
+# La URL llega por entorno (${DISCORD_WEBHOOK_URL}, definida en .env) y NO está
+# escrita aquí a propósito: este archivo se versiona en Git y un webhook es una
+# credencial — cualquiera que la tenga puede publicar en el canal.
+
+apiVersion: 1
+
+contactPoints:
+  - orgId: 1
+    name: discord-system-hr
+    receivers:
+      - uid: discord-system-hr
+        type: discord
+        settings:
+          url: ${DISCORD_WEBHOOK_URL}
+          title: '{{ .CommonLabels.alertname }}'
+          # Un mensaje que se entienda sin abrir Grafana: qué pasó, en qué
+          # servicio y desde cuándo. Una alerta que obliga a ir al dashboard
+          # para saber de qué va no sirve a las tres de la mañana.
+          message: |
+            **{{ .Status | toUpper }}** · {{ .CommonLabels.alertname }}
+
+            {{ range .Alerts }}
+            **Servicio:** {{ .Labels.job }}
+            **Severidad:** {{ .Labels.severity }}
+            **Detalle:** {{ .Annotations.description }}
+            **Desde:** {{ .StartsAt.Format "2006-01-02 15:04:05 MST" }}
+            {{ end }}
+          use_discord_username: true
+        # Las notificaciones de recuperación también se envían: saber que el
+        # servicio volvió es tan importante como saber que se cayó, y evita que
+        # alguien siga investigando un problema ya resuelto.
+        disableResolveMessage: false
