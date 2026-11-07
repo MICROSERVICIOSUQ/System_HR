@@ -21,6 +21,9 @@
     <properties>
         <java.version>21</java.version>
         <jjwt.version>0.12.6</jjwt.version>
+        <!-- Misma versión que en api-gateway y employees-service: la 7.4 vale
+             para el Logback de Spring Boot 3.2 y para el de 3.4. -->
+        <logstash-logback-encoder.version>7.4</logstash-logback-encoder.version>
     </properties>
 
     <dependencies>
@@ -95,6 +98,35 @@
         <dependency>
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-actuator</artifactId>
+        </dependency>
+
+        <!-- ── Observabilidad (Reto 8) ──────────────────────────────────── -->
+
+        <!-- Métricas en formato Prometheus (/actuator/prometheus). -->
+        <dependency>
+            <groupId>io.micrometer</groupId>
+            <artifactId>micrometer-registry-prometheus</artifactId>
+        </dependency>
+
+        <!-- Trazas sobre el SDK de OpenTelemetry, con propagación W3C. En este
+             servicio importa especialmente la mitad asíncrona: consume
+             empleado.creado y vacaciones.iniciadas, y para que esos spans
+             cuelguen de la traza que los originó hay que extraer el contexto de
+             las cabeceras del mensaje (ver HrEventListener). -->
+        <dependency>
+            <groupId>io.micrometer</groupId>
+            <artifactId>micrometer-tracing-bridge-otel</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>io.opentelemetry</groupId>
+            <artifactId>opentelemetry-exporter-zipkin</artifactId>
+        </dependency>
+
+        <!-- Logs JSON con traceId. -->
+        <dependency>
+            <groupId>net.logstash.logback</groupId>
+            <artifactId>logstash-logback-encoder</artifactId>
+            <version>${logstash-logback-encoder.version}</version>
         </dependency>
 
         <dependency>

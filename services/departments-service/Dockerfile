@@ -33,4 +33,8 @@ COPY --from=deps /app/src ./src
 
 EXPOSE 8081
 
-CMD ["sh", "-c", "npx prisma migrate deploy && exec npx tsx src/server.ts"]
+# --import carga el SDK de OpenTelemetry ANTES del código de la aplicación.
+# La instrumentación automática parchea http, express y pg al cargarlos, así que
+# si el SDK arrancara después (por ejemplo con un import dentro de app.ts) el
+# parche llegaría tarde y no se generaría ni un span.
+CMD ["sh", "-c", "npx prisma migrate deploy && exec npx tsx --import ./src/observability/tracing.ts src/server.ts"]

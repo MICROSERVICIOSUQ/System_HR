@@ -1,0 +1,89 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Logs estructurados en JSON (Reto 8).
+
+  Un log de texto plano solo sirve para que un humano lo lea. En JSON cada campo
+  es consultable: en Loki se puede pedir "los ERROR del employees-service de esta
+  petición concreta" filtrando por campo, sin expresiones regulares frágiles.
+
+  El campo decisivo es traceId. Micrometer Tracing lo pone en el MDC de SLF4J en
+  cuanto hay una traza activa, y aquí solo hay que volcarlo al JSON. Con eso, un
+  log encontrado en Grafana enlaza con su cascada completa en Zipkin: se pasa de
+  "algo falló" a "esta petición falló, y aquí está todo lo que hizo".
+
+  Se mantienen dos appenders:
+    - CONSOLA_JSON  → es el que recoge Promtail (stdout del contenedor).
+    - CONSOLA_LEGIBLE → para desarrollo local, donde leer JSON a mano estorba.
+  El perfil activo decide cuál se usa.
+-->
+<configuration>
+
+    <!-- Toma el nombre del servicio de spring.application.name, de modo que no
+         quede duplicado en dos sitios. -->
+    <springProperty scope="context" name="nombreServicio"
+                    source="spring.application.name" defaultValue="employees-service"/>
+
+    <appender name="CONSOLA_JSON" class="ch.qos.logback.core.ConsoleAppender">
+        <encoder class="net.logstash.logback.encoder.LoggingEventCompositeJsonEncoder">
+            <providers>
+                <timestamp>
+                    <fieldName>timestamp</fieldName>
+                    <timeZone>UTC</timeZone>
+                    <pattern>yyyy-MM-dd'T'HH:mm:ss.SSS'Z'</pattern>
+                </timestamp>
+                <logLevel>
+                    <fieldName>level</fieldName>
+                </logLevel>
+                <pattern>
+                    <!-- service, traceId y spanId como campos de primer nivel.
+                         Los dos últimos salen del MDC que alimenta Micrometer
+                         Tracing; cuando no hay traza activa quedan vacíos. -->
+                    <pattern>
+                        {
+                        "service": "${nombreServicio}",
+                        "traceId": "%mdc{traceId:-}",
+                        "spanId": "%mdc{spanId:-}"
+                        }
+                    </pattern>
+                </pattern>
+                <loggerName>
+                    <fieldName>logger</fieldName>
+                    <shortenedLoggerNameLength>40</shortenedLoggerNameLength>
+                </loggerName>
+                <threadName>
+                    <fieldName>thread</fieldName>
+                </threadName>
+                <message>
+                    <fieldName>message</fieldName>
+                </message>
+                <!-- Los argumentos con clave del log (por ejemplo
+                     log.info("...", kv("employeeId", id))) aparecen como campos
+                     propios, no embebidos en el mensaje. -->
+                <arguments/>
+                <stackTrace>
+                    <fieldName>stackTrace</fieldName>
+                </stackTrace>
+            </providers>
+        </encoder>
+    </appender>
+
+    <appender name="CONSOLA_LEGIBLE" class="ch.qos.logback.core.ConsoleAppender">
+        <encoder>
+            <pattern>%d{HH:mm:ss.SSS} %-5level [%X{traceId:-}] %logger{36} - %msg%n</pattern>
+        </encoder>
+    </appender>
+
+    <!-- Dentro de Docker siempre JSON: es lo que Promtail envía a Loki. -->
+    <springProfile name="!local">
+        <root level="INFO">
+            <appender-ref ref="CONSOLA_JSON"/>
+        </root>
+    </springProfile>
+
+    <springProfile name="local">
+        <root level="INFO">
+            <appender-ref ref="CONSOLA_LEGIBLE"/>
+        </root>
+    </springProfile>
+
+</configuration>

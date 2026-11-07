@@ -9,6 +9,7 @@ import { RabbitMQPublisher } from '../messaging/rabbitmq.publisher.ts';
 import type { Prisma } from '../generated/prisma/client.ts';
 import type { PaginatedResponse } from '../types/pagination.ts';
 import { finEsAnteriorAInicio, inicioEsPasado } from '../domain/vacation-rules.ts';
+import { conSpanRaiz } from '../observability/amqp-tracing.ts';
 
 export interface EventEnvelope {
   id: string;
@@ -552,14 +553,36 @@ export class VacationService {
     const inicioDelDia = new Date(ahora.getTime());
     inicioDelDia.setUTCHours(0, 0, 0, 0);
 
+    // Cada transición abre su propio span RAÍZ (Reto 8).
+    //
+    // Es el caso que no cubre la instrumentación automática: aquí no hay
+    // petición HTTP entrante, así que no existe traza de la que colgar. Sin
+    // este span, el evento se publicaría sin contexto y la cadena que sigue
+    // —auth-service suspende la cuenta, notifications-service envía el correo—
+    // aparecería en Zipkin como spans sueltos, sin relación entre sí. Y es
+    // justo el flujo que más cuesta depurar, porque ocurre de madrugada.
+    //
+    // El span va por período y no por ciclo a propósito: una traza por
+    // transición es lo que se quiere consultar, no un árbol con todas las
+    // transiciones del día mezcladas.
     let iniciadas = 0;
     for (const period of await this.repository.findPeriodsToStart(ahora)) {
-      if (await this.startPeriod(period)) iniciadas += 1;
+      const transicionada = await conSpanRaiz(
+        'scheduler.vacaciones.iniciar',
+        { 'vacaciones.id': period.id, 'empleado.id': period.empleadoId },
+        () => this.startPeriod(period),
+      );
+      if (transicionada) iniciadas += 1;
     }
 
     let finalizadas = 0;
     for (const period of await this.repository.findPeriodsToFinish(inicioDelDia)) {
-      if (await this.finishPeriod(period)) finalizadas += 1;
+      const transicionada = await conSpanRaiz(
+        'scheduler.vacaciones.finalizar',
+        { 'vacaciones.id': period.id, 'empleado.id': period.empleadoId },
+        () => this.finishPeriod(period),
+      );
+      if (transicionada) finalizadas += 1;
     }
 
     return { iniciadas, finalizadas };

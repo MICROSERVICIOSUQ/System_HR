@@ -21,6 +21,10 @@
         <java.version>17</java.version>
         <spring-cloud.version>2023.0.1</spring-cloud.version>
         <jjwt.version>0.12.6</jjwt.version>
+        <!-- La 7.4 es compatible con el Logback 1.4 que trae Spring Boot 3.2 y
+             con el 1.5 de Boot 3.4, así que los tres servicios Java comparten
+             versión aunque estén en versiones distintas del framework. -->
+        <logstash-logback-encoder.version>7.4</logstash-logback-encoder.version>
     </properties>
 
     <dependencies>
@@ -62,6 +66,35 @@
             <groupId>org.springdoc</groupId>
             <artifactId>springdoc-openapi-starter-webflux-ui</artifactId>
             <version>2.5.0</version>
+        </dependency>
+
+        <!-- ── Observabilidad (Reto 8) ──────────────────────────────────── -->
+
+        <!-- Expone /actuator/prometheus. Micrometer ya instrumentaba las
+             peticiones del gateway; esto solo añade el formato de salida. -->
+        <dependency>
+            <groupId>io.micrometer</groupId>
+            <artifactId>micrometer-registry-prometheus</artifactId>
+        </dependency>
+
+        <!-- Trazas con el SDK de OpenTelemetry por debajo y propagación W3C
+             Trace Context. En el gateway es la pieza clave del reto: aquí nace
+             el traceId de cada petición y desde aquí se propaga en las
+             cabeceras a los servicios Java y Node de aguas abajo. -->
+        <dependency>
+            <groupId>io.micrometer</groupId>
+            <artifactId>micrometer-tracing-bridge-otel</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>io.opentelemetry</groupId>
+            <artifactId>opentelemetry-exporter-zipkin</artifactId>
+        </dependency>
+
+        <!-- Logs JSON con traceId, para correlacionar en Loki. -->
+        <dependency>
+            <groupId>net.logstash.logback</groupId>
+            <artifactId>logstash-logback-encoder</artifactId>
+            <version>${logstash-logback-encoder.version}</version>
         </dependency>
 
         <dependency>

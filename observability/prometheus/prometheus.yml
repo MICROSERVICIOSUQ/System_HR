@@ -1,0 +1,100 @@
+# Configuración de Prometheus para el ecosistema System_HR.
+#
+# Prometheus funciona por PULL: nadie le envía nada, es él quien visita
+# ("raspa") el endpoint de métricas de cada servicio cada scrape_interval. Eso
+# tiene una consecuencia que da sentido a este reto: si un servicio no está en
+# esta lista, su caída pasa desapercibida. No hay error, no hay alerta, no hay
+# hueco en la gráfica — simplemente nadie lo estaba mirando.
+#
+# Los targets usan el NOMBRE DE SERVICIO de Docker Compose, no IPs ni
+# localhost. Dentro de la red sistema_rrhh_network el DNS de Docker resuelve
+# esos nombres, y así la configuración sobrevive a cualquier reinicio que
+# cambie las IPs de los contenedores.
+
+global:
+  scrape_interval: 15s
+  scrape_timeout: 10s
+  # Etiquetas que Prometheus añade a todas las series. Sirven para distinguir
+  # este entorno de otro (producción, staging) si algún día conviven.
+  external_labels:
+    entorno: desarrollo
+    ecosistema: system-hr
+
+rule_files: []
+
+scrape_configs:
+  # ── El API Gateway va primero, y no por capricho ─────────────────────────
+  # Es el único punto de entrada del sistema (ADR-008), así que sus métricas de
+  # latencia y de tasa de error son las que más se parecen a lo que percibe el
+  # cliente. Si el gateway dice que todo va bien, va bien de verdad; si un
+  # servicio interno está lento, aquí se ve antes que en ningún otro sitio.
+  - job_name: 'api-gateway'
+    metrics_path: '/actuator/prometheus'
+    static_configs:
+      - targets: ['api-gateway:8080']
+        labels:
+          lenguaje: java
+          capa: borde
+
+  # ── Servicios Java (Spring Boot + Actuator + Micrometer) ─────────────────
+  # Micrometer expone las métricas en /actuator/prometheus, no en /metrics.
+  - job_name: 'auth-service'
+    metrics_path: '/actuator/prometheus'
+    static_configs:
+      - targets: ['auth-service:8085']
+        labels:
+          lenguaje: java
+          capa: negocio
+
+  - job_name: 'employees-service'
+    metrics_path: '/actuator/prometheus'
+    static_configs:
+      - targets: ['employees-service:8080']
+        labels:
+          lenguaje: java
+          capa: negocio
+
+  # ── Servicios Node/TypeScript (Express + prom-client) ────────────────────
+  # prom-client expone en /metrics, que es la convención en el resto de
+  # lenguajes. La diferencia de ruta entre familias de servicios es
+  # precisamente por qué metrics_path se configura por job y no globalmente.
+  - job_name: 'departments-service'
+    metrics_path: '/metrics'
+    static_configs:
+      - targets: ['departments-service:8081']
+        labels:
+          lenguaje: nodejs
+          capa: negocio
+
+  - job_name: 'notifications-service'
+    metrics_path: '/metrics'
+    static_configs:
+      - targets: ['notifications-service:8082']
+        labels:
+          lenguaje: nodejs
+          capa: negocio
+
+  - job_name: 'profiles-service'
+    metrics_path: '/metrics'
+    static_configs:
+      - targets: ['profiles-service:8083']
+        labels:
+          lenguaje: nodejs
+          capa: negocio
+
+  - job_name: 'vacations-service'
+    metrics_path: '/metrics'
+    static_configs:
+      - targets: ['vacations-service:8084']
+        labels:
+          lenguaje: nodejs
+          capa: negocio
+
+  # ── Prometheus se vigila a sí mismo ──────────────────────────────────────
+  # Barato y útil: si el propio recolector se degrada, el resto de los datos
+  # deja de ser fiable y conviene saberlo.
+  - job_name: 'prometheus'
+    static_configs:
+      - targets: ['localhost:9090']
+        labels:
+          capa: observabilidad

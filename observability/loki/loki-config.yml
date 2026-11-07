@@ -1,0 +1,58 @@
+# Configuración de Loki para un entorno de desarrollo de una sola instancia.
+#
+# Loki se diferencia de Elasticsearch en que NO indexa el contenido del log,
+# solo las etiquetas (service, level, container). El texto se guarda comprimido
+# y se recorre al consultar. Eso lo hace mucho más liviano, y también explica la
+# regla de oro: pocas etiquetas y de baja cardinalidad. Si se usara el traceId
+# como etiqueta, cada petición crearía un flujo nuevo y el índice se degradaría;
+# por eso el traceId se queda como campo dentro del JSON y se busca con un
+# filtro de línea.
+
+auth_enabled: false
+
+server:
+  http_listen_port: 3100
+  grpc_listen_port: 9096
+  log_level: warn
+
+common:
+  instance_addr: 127.0.0.1
+  path_prefix: /loki
+  storage:
+    filesystem:
+      chunks_directory: /loki/chunks
+      rules_directory: /loki/rules
+  replication_factor: 1
+  ring:
+    kvstore:
+      store: inmemory
+
+schema_config:
+  configs:
+    - from: 2024-01-01
+      store: tsdb
+      object_store: filesystem
+      schema: v13
+      index:
+        prefix: index_
+        period: 24h
+
+limits_config:
+  metric_aggregation_enabled: false
+  # Los contenedores arrancan y paran todo el tiempo en desarrollo, y al
+  # reiniciar Promtail puede reenviar líneas con fecha anterior. Sin esta
+  # ventana Loki las rechazaría por "entry too far behind".
+  reject_old_samples: true
+  reject_old_samples_max_age: 168h
+  allow_structured_metadata: true
+  volume_enabled: true
+
+ruler:
+  # Las reglas de alerta viven en Grafana, no aquí: el reto pide configurarlas
+  # en Grafana y así quedan todas en un solo sitio, junto a las de métricas.
+  alertmanager_url: ""
+
+# Sin telemetría hacia Grafana Labs: es un entorno de clase y no hay por qué
+# enviar estadísticas de uso a internet.
+analytics:
+  reporting_enabled: false

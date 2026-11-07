@@ -1,5 +1,6 @@
 import amqplib, { Channel, ChannelModel } from 'amqplib';
 import { rabbitConfig } from '../config/rabbitmq.ts';
+import { cabecerasConContexto } from '../observability/amqp-tracing.ts';
 
 export interface VacacionesProgramadasEvent {
   id: string;           // UUID del VacationPeriod
@@ -124,10 +125,15 @@ export class RabbitMQPublisher {
 
     const payload = Buffer.from(JSON.stringify(envelope));
 
-    // Publicar al exchange fanout hr.events (routing key vacía para fanout)
+    // Publicar al exchange fanout hr.events (routing key vacía para fanout).
+    // Las cabeceras llevan el contexto de traza (traceparent, W3C): es lo que
+    // permite que el span del consumidor cuelgue de esta misma traza en lugar de
+    // aparecer como una traza suelta en Zipkin. Por HTTP esto lo hace el SDK
+    // solo; por el broker hay que inyectarlo a mano.
     this.channel.publish(this.exchangeName, '', payload, {
       contentType: 'application/json',
       persistent: true,
+      headers: cabecerasConContexto(),
     });
 
     console.log(

@@ -1,0 +1,77 @@
+# Promtail: el agente que recoge los logs de los contenedores y los empuja a Loki.
+#
+# A diferencia de Prometheus, que va a buscar las métricas (pull), aquí el
+# modelo es PUSH: Promtail descubre los contenedores por el socket de Docker,
+# lee su salida estándar y la envía a Loki. Por eso el servicio promtail del
+# docker-compose necesita /var/run/docker.sock montado: sin acceso al socket no
+# puede enterarse de qué contenedores existen.
+#
+# Nada de esto requiere tocar los microservicios. Ellos solo tienen que escribir
+# JSON por stdout, que es lo que un contenedor debe hacer de todos modos.
+
+server:
+  http_listen_port: 9080
+  grpc_listen_port: 0
+
+positions:
+  # Hasta dónde se leyó cada log. Si Promtail se reinicia, continúa desde aquí
+  # en lugar de reenviar todo otra vez.
+  filename: /tmp/positions.yaml
+
+clients:
+  - url: http://loki:3100/loki/api/v1/push
+
+scrape_configs:
+  - job_name: docker-containers
+    docker_sd_configs:
+      - host: unix:///var/run/docker.sock
+        refresh_interval: 5s
+
+    relabel_configs:
+      # Nombre del contenedor, sin la barra inicial que añade Docker.
+      - source_labels: ['__meta_docker_container_name']
+        regex: '/(.*)'
+        target_label: 'container'
+
+      # El nombre del servicio de Compose es la etiqueta más útil para filtrar
+      # en Grafana: {service="employees-service"} es legible, el id del
+      # contenedor no.
+      - source_labels: ['__meta_docker_container_label_com_docker_compose_service']
+        target_label: 'service'
+
+      - source_labels: ['__meta_docker_container_label_com_docker_compose_project']
+        target_label: 'proyecto'
+
+      # Sin esta etiqueta estática los logs no quedan agrupados por trabajo y
+      # cuesta distinguirlos de otras fuentes si algún día se añade otra.
+      - target_label: 'job'
+        replacement: 'docker'
+
+    pipeline_stages:
+      # Los logs de los microservicios son JSON. Extraer los campos aquí
+      # permite consultarlos con LogQL por valor —por ejemplo buscar un
+      # traceId concreto— en vez de tratar la línea como texto plano.
+      - json:
+          expressions:
+            level: level
+            service: service
+            traceId: traceId
+            message: message
+
+      # El nivel sí se convierte en etiqueta: es de baja cardinalidad (INFO,
+      # WARN, ERROR...) y filtrar por él es la consulta más frecuente.
+      - labels:
+          level:
+
+      # El traceId NO se convierte en etiqueta a propósito. Cada petición tiene
+      # uno distinto, así que sería un valor de cardinalidad altísima y crearía
+      # un flujo nuevo en Loki por cada traza, lo que degrada el índice. Se
+      # queda como campo del log y se busca con un filtro de línea.
+      - timestamp:
+          source: timestamp
+          format: RFC3339Nano
+          # Si el log no trae timestamp parseable, se usa la hora de ingesta en
+          # lugar de descartar la línea.
+          fallback_formats:
+            - RFC3339
+            - UnixMs

@@ -31,4 +31,9 @@ COPY --from=deps /app/dist ./dist
 
 EXPOSE 8084
 
-CMD ["sh", "-c", "npx prisma migrate deploy && exec node dist/server.js"]
+# --import carga el SDK de OpenTelemetry ANTES del código de la aplicación.
+# La instrumentación automática parchea http, express, pg y amqplib al cargarlos;
+# si el SDK arrancara después, el parche llegaría tarde y no se generaría ni un
+# span. Aquí la ruta apunta a dist/ porque este servicio sí compila con tsc, a
+# diferencia de los otros tres, que ejecutan los .ts directamente con tsx.
+CMD ["sh", "-c", "npx prisma migrate deploy && exec node --import ./dist/observability/tracing.js dist/server.js"]

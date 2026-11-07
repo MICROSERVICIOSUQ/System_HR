@@ -1,0 +1,31 @@
+# Política de notificación: a dónde va cada alerta (Reto 8).
+#
+# Con un solo canal el árbol es trivial, pero conviene dejarlo explícito porque
+# aquí viven los tiempos, que son lo que diferencia una alerta útil de una que
+# acaba silenciada por ruidosa.
+
+apiVersion: 1
+
+policies:
+  - orgId: 1
+    receiver: discord-system-hr
+
+    # Agrupa las alertas por regla y por servicio: si se caen tres servicios a
+    # la vez llegan tres mensajes, uno por servicio, en lugar de uno ilegible
+    # con todo mezclado.
+    group_by:
+      - alertname
+      - job
+
+    # Espera antes del primer aviso de un grupo nuevo. Da margen a que, si el
+    # incidente afecta a varios servicios, lleguen juntos en un solo mensaje en
+    # lugar de uno por segundo.
+    group_wait: 30s
+
+    # Tiempo mínimo entre mensajes del mismo grupo cuando se añaden alertas.
+    group_interval: 1m
+
+    # Cada cuánto se repite el aviso de algo que sigue roto. Cinco minutos es
+    # corto para producción, pero este es un entorno de clase y la demo no
+    # puede esperar cuatro horas a ver el segundo recordatorio.
+    repeat_interval: 5m

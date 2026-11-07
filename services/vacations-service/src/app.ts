@@ -8,6 +8,8 @@ import { VacationController } from './controllers/vacation.controller.ts';
 import { ValidationError } from './services/vacation.service.ts';
 import { correlationMiddleware } from './middlewares/correlation.middleware.ts';
 import { idempotencyMiddleware } from './middlewares/idempotency.middleware.ts';
+import { middlewareMetricas, handlerMetricas } from './observability/metrics.ts';
+import { comprobarSalud } from './observability/health.ts';
 
 const app = express();
 const controller = new VacationController();
@@ -282,8 +284,23 @@ app.get(
   (_req: Request, res: Response) => res.json(openApiSpec)
 );
 
-// Endpoint de salud
-app.get('/health', controller.getHealth);
+// Mide todas las peticiones (Reto 8). Va antes de las rutas para que el
+// temporizador arranque cuando la peticion entra, no cuando llega al controlador.
+app.use(middlewareMetricas);
+
+// Endpoint que raspa Prometheus cada 15 s (modelo pull).
+app.get('/metrics', handlerMetricas);
+
+// Sonda de salud con verificacion real de dependencias: antes devolvia
+// {"status":"ok"} sin comprobar nada.
+app.get('/health', async (_req, res, next) => {
+  try {
+    const salud = await comprobarSalud();
+    res.status(salud.status === 'UP' ? 200 : 503).json(salud);
+  } catch (error) {
+    next(error);
+  }
+});
 
 // Rutas de períodos de vacaciones (Productor)
 // Importante: /balances debe registrarse ANTES de /:id para evitar colisión de rutas

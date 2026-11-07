@@ -1,0 +1,24 @@
+# Proveedor de dashboards (Reto 8).
+#
+# Grafana lee los .json de la carpeta al arrancar y los crea. Esto es lo que
+# hace que el dashboard esté disponible tras un `docker compose up` sin que
+# nadie lo importe a mano, y lo que permite versionarlo en Git: un dashboard
+# construido clicando en la interfaz se pierde al recrear el contenedor y nadie
+# sabe qué paneles tenía.
+
+apiVersion: 1
+
+providers:
+  - name: 'System_HR'
+    orgId: 1
+    folder: 'System_HR'
+    type: file
+    # Los cambios hechos desde la interfaz NO se borran al recargar, para poder
+    # experimentar durante la demo. Pero el archivo sigue siendo la fuente de
+    # verdad: si se quiere conservar un cambio, hay que exportarlo y commitearlo.
+    disableDeletion: false
+    allowUiUpdates: true
+    updateIntervalSeconds: 30
+    options:
+      path: /etc/grafana/provisioning/dashboards
+      foldersFromFilesStructure: false
