@@ -2,6 +2,8 @@
 
 Esta entrega corresponde a Vacaciones en TypeScript y Notificaciones migrado a Go, sobre la rama valentina actualizada con main (incluido el reto 8). Los correos son simulados por decisión del equipo. Mantenga el proyecto completo en `System_HR`: no copie los dos servicios a otra carpeta, porque necesitan el broker, las bases de datos, Auth y el Gateway.
 
+La ruta manual con Postman está en la sección 9. Incluye los archivos para importar, la configuración y el orden de las peticiones.
+
 ## Preparación previa
 
 Complete primero [la instalación y el arranque en otro computador](GUIA-DESARROLLADOR3-OTRO-PC.md). Esta guía se concentra en la sustentación. Abra PowerShell en la raíz de System_HR y mantenga los servicios del grupo de negocio encendidos.
@@ -139,3 +141,175 @@ En esta entrega las pruebas de ambos servicios con PostgreSQL/RabbitMQ reales ap
 En el computador donde se hizo esta validación puede abrir la traza `c8d6eaa6561dae61f11e89cc2e33b905` en Zipkin. Incluye Gateway, Empleados, Auth, Perfiles, Vacaciones y Notificaciones. En otro computador o tras reiniciar Zipkin ejecute la demostración y busque las trazas nuevas; no espere encontrar ese mismo ID.
 
 Antes de presentar, confirme `git branch --show-current` y revise el último commit. La base correcta es valentina con main integrado y la entrega de Dev 3 publicada o copiada según la guía de instalación.
+
+## 9. Sustentar con Postman
+
+### 9.1 Importar la colección y el entorno
+
+Abra Postman Desktop. Pulse **Import**, seleccione estos dos archivos de la carpeta postman del repositorio y confirme la importación:
+
+- `postman/desarrollador3-sustentacion.postman_collection.json`.
+- `postman/desarrollador3-local.postman_environment.json`.
+
+En Collections aparecerá **Dev 3 - Sustentación Vacaciones y Notificaciones**. En Environments aparecerá **Dev 3 - Local (completar valores locales)**. Seleccione ese entorno como activo en la parte superior antes de enviar peticiones. Si usa Postman web, necesita el Desktop Agent para acceder a localhost.
+
+La colección ya tiene métodos, URLs, cuerpos JSON, autorización y scripts de validación. Los archivos que se entregan no incluyen contraseñas ni tokens reales.
+
+### 9.2 Preparar una cuenta activa para la demostración manual
+
+Este paso se hace una vez antes de empezar las peticiones. Crea un departamento y un empleado nuevos, activa su cuenta y termina sin programar vacaciones ni retirarlo. El token de activación se obtiene en una cola temporal independiente y se utiliza en memoria. No se añade una API para consultar tokens.
+
+Desde PowerShell, en la raíz del proyecto:
+
+```powershell
+$taskSettings = @{}
+Get-Content -Encoding UTF8 .env | ForEach-Object {
+    if ($_ -match '^(AUTH_SEED_ADMIN_EMAIL|AUTH_SEED_ADMIN_PASSWORD)=(.*)$') {
+        $taskSettings[$matches[1]] = $matches[2].Trim().Trim('"').Trim("'")
+    }
+}
+$env:DEMO_ADMIN_USER = $taskSettings['AUTH_SEED_ADMIN_EMAIL']
+$env:DEMO_ADMIN_PASSWORD = $taskSettings['AUTH_SEED_ADMIN_PASSWORD']
+$taskEmployeePassword = Read-Host 'Elija una contraseña de prueba: mínimo 8 caracteres, una letra y un dígito' -AsSecureString
+$env:DEMO_EMPLOYEE_PASSWORD = [System.Net.NetworkCredential]::new('', $taskEmployeePassword).Password
+$env:DEMO_PREPARAR_POSTMAN = '1'
+$taskPreviousEncoding = $OutputEncoding
+$OutputEncoding = [System.Text.UTF8Encoding]::new()
+try {
+    Get-Content -Raw -Encoding UTF8 .\scripts\demo-desarrollador3.cjs |
+        docker compose exec -T -e DEMO_ADMIN_USER -e DEMO_ADMIN_PASSWORD -e DEMO_EMPLOYEE_PASSWORD -e DEMO_PREPARAR_POSTMAN vacations-service node -
+    if ($LASTEXITCODE -ne 0) { throw 'No se pudo preparar la cuenta de Postman.' }
+}
+finally {
+    $OutputEncoding = $taskPreviousEncoding
+    Remove-Item Env:DEMO_ADMIN_USER, Env:DEMO_ADMIN_PASSWORD, Env:DEMO_EMPLOYEE_PASSWORD, Env:DEMO_PREPARAR_POSTMAN -ErrorAction SilentlyContinue
+}
+```
+
+La contraseña se escribe oculta. Recuérdela para colocarla en Postman; no la imprime el script. Al terminar verá un JSON con tres valores públicos: `dev3EmpleadoId`, `dev3EmpleadoEmail`, `dev3DepartamentoId`. Cópielos al entorno. Los IDs cambian cada vez que ejecuta la preparación.
+
+La preparación es un cliente de demostración: la contraseña la elige usted y se establece mediante el endpoint normal de Auth. El servicio de Notificaciones sigue simulando los correos y no guarda el token.
+
+### 9.3 Completar las variables del entorno
+
+Abra el entorno importado y complete sus valores locales:
+
+| Variable | Qué colocar |
+|---|---|
+| `dev3BaseUrl` | `http://localhost:8080`, o el puerto GATEWAY_PORT de ese computador |
+| `dev3AdminEmail` | AUTH_SEED_ADMIN_EMAIL de su .env |
+| `dev3AdminPassword` | La contraseña vigente de ADMIN; en una instalación nueva es AUTH_SEED_ADMIN_PASSWORD |
+| `dev3EmpleadoId` | El ID público que imprimió la preparación |
+| `dev3EmpleadoEmail` | El email público que imprimió la preparación |
+| `dev3DepartamentoId` | El ID del departamento que imprimió la preparación |
+| `dev3EmpleadoPassword` | La contraseña de prueba que usted eligió en el paso anterior |
+
+Deje vacíos `dev3AdminToken`, `dev3UsuarioToken`, `dev3PeriodoId`, `dev3CancelarId`, `dev3MessageId` y las fechas: los scripts los completan durante la ejecución. Marque contraseñas y tokens como sensibles en Postman y manténgalos como valores locales. No exporte ni publique un entorno rellenado con credenciales.
+
+Las variables `{{dev3BaseUrl}}` y similares deben aparecer resueltas al usarlas. Si Postman indica que no están definidas, revise el entorno seleccionado y la escritura exacta del nombre.
+
+### 9.4 Cómo configurar una petición manualmente
+
+Por ejemplo, para autenticar ADMIN:
+
+1. Cree o abra una petición y seleccione **POST**.
+2. URL: `{{dev3BaseUrl}}/auth/login`.
+3. En **Authorization**, seleccione **No Auth**.
+4. En **Body**, seleccione **raw** y luego **JSON**.
+5. Coloque:
+
+```json
+{
+  "usuario": "{{dev3AdminEmail}}",
+  "password": "{{dev3AdminPassword}}"
+}
+```
+
+6. Confirme en **Headers** que exista `Content-Type: application/json`; Postman lo añade al seleccionar JSON.
+7. Pulse **Send**. Debe ver HTTP **200**.
+8. La petición importada ya guarda el token en `dev3AdminToken` con su script de respuesta. No necesita copiarlo del JSON.
+
+Para una petición protegida seleccione **Bearer Token** y escriba en el campo Token únicamente `{{dev3AdminToken}}`. Postman añade el prefijo Bearer. En las peticiones importadas basta con conservar **Inherit auth from parent**, porque la colección ya configura ese token.
+
+Las peticiones de login y la prueba sin token usan No Auth. La prueba de permisos USER usa `{{dev3UsuarioToken}}`. No cambie esas excepciones por el token ADMIN.
+
+Los scripts están en **Scripts → Post-response**; en versiones anteriores aparecen como **Tests**. Revise **Test Results** después de cada envío: además del HTTP esperado, se validan los cambios de cuenta y la ausencia de credenciales en el historial.
+
+### 9.5 Ejecutar las peticiones en orden
+
+La colección tiene cuatro carpetas. Para sustentar, abra cada petición y pulse Send; lea el resultado antes de continuar. Las fechas se calculan como días UTC futuros al ejecutar la petición 01, para que no caduquen los ejemplos de la guía.
+
+| Número | Petición | Resultado esperado |
+|---|---|---|
+| 01 | Login ADMIN | 200; guarda token ADMIN y fechas |
+| 02 | Login del empleado activo | 200; guarda token USER |
+| 03 | GET saldo del empleado | 200; réplica presente |
+| 04–05 | Historial y notificación por ID de evento | 200; bienvenida sin token |
+| 06 | GET vacaciones sin token | 401 |
+| 07 | USER intenta programar vacaciones | 403 |
+| 08 | Inicio y regreso iguales | 400 |
+| 09 | Fechas invertidas | 400 |
+| 10 | Inicio en el pasado | 400 |
+| 11 | Programar vacaciones válidas | 201; guarda dev3PeriodoId y espera la confirmación |
+| 12 | Repetir el período solapado | 400 |
+| 13–14 | Consultar período y listar por empleado | 200 |
+| 15 | Reprogramar con PUT | 200; sigue PROGRAMADA con fechas nuevas |
+| 16 | Forzar inicio | 200; espera que Auth bloquee el login |
+| 17 | Login del empleado en vacaciones | 401 |
+| 18 | Consultar historial | 200; eventos de vacaciones y cuenta |
+| 19 | Forzar fin | 200; espera que Auth reactive el login |
+| 20 | Login después del regreso | 200 |
+| 21–22 | Crear otro período futuro y cancelarlo | 201 y luego 200; estado CANCELADA |
+| 23 | Retirar empleado, al final de la demostración | 200; espera la desactivación y la réplica RETIRADO |
+| 24 | Login del empleado retirado | 401 |
+| 25 | Intentar nuevas vacaciones para el retirado | 400 |
+| 26 | Historial final | 200 y sin campos de credenciales |
+
+**Retire al empleado únicamente al final.** Después del paso 23 necesitará ejecutar nuevamente la preparación y cambiar los IDs/email en el entorno para repetir el flujo desde el principio. Cada repetición genera otro empleado; no se borra el historial anterior.
+
+Los pasos con efectos asíncronos hacen polling por condición en los scripts de Postman. Si una validación falla, revise Test Results, RabbitMQ y los logs; no dé por aprobado un paso únicamente porque la petición inicial respondió 200.
+
+### 9.6 URLs y JSON que está enviando
+
+Todas las peticiones de negocio van por el Gateway. Actualmente se usa `/notifications` porque es la ruta que el Gateway ya expone. El servicio Go también tiene `/notificaciones`, cuya publicación canónica debe completar el desarrollador 4.
+
+Para crear el período, el paso 11 utiliza POST `{{dev3BaseUrl}}/vacaciones`, Body → raw → JSON:
+
+```json
+{
+  "empleadoId": "{{dev3EmpleadoId}}",
+  "fechaInicio": "{{dev3Inicio}}",
+  "fechaFin": "{{dev3Fin}}"
+}
+```
+
+Para reprogramar, el paso 15 utiliza PUT `{{dev3BaseUrl}}/vacaciones/{{dev3PeriodoId}}`:
+
+```json
+{
+  "fechaInicio": "{{dev3NuevoInicio}}",
+  "fechaFin": "{{dev3NuevoFin}}"
+}
+```
+
+Las operaciones siguientes no llevan Body:
+
+- GET `{{dev3BaseUrl}}/vacaciones/{{dev3PeriodoId}}`.
+- GET `{{dev3BaseUrl}}/vacaciones?empleadoId={{dev3EmpleadoId}}`.
+- GET `{{dev3BaseUrl}}/notifications/empleado/{{dev3EmpleadoId}}`.
+- POST `{{dev3BaseUrl}}/vacaciones/{{dev3PeriodoId}}/forzar-inicio`.
+- POST `{{dev3BaseUrl}}/vacaciones/{{dev3PeriodoId}}/forzar-fin`.
+- DELETE `{{dev3BaseUrl}}/vacaciones/{{dev3CancelarId}}`.
+- DELETE `{{dev3BaseUrl}}/empleados/{{dev3EmpleadoId}}`.
+
+Para el login del empleado use POST `/auth/login`, No Auth y JSON con `usuario: {{dev3EmpleadoEmail}}` y `password: {{dev3EmpleadoPassword}}`, como ya está configurado en los pasos 02, 17, 20 y 24. Se comprueba un login nuevo en cada estado de la cuenta.
+
+### 9.7 Qué mostrar y qué explicar
+
+Muestre el método, URL, Body, código HTTP y Test Results. Explique que PROGRAMADA/EN_CURSO/FINALIZADA pertenecen al período y que Auth aplica la suspensión/reactivación de la cuenta mediante eventos. Los botones de forzar inicio/fin son operaciones de demostración; las pruebas de integración son las que verifican el scheduler con fechas controladas.
+
+La salud individual y las métricas internas se muestran con los comandos de las secciones 1 y 5: no suponga que el `/health` del Gateway representa la salud de todos los servicios. Los puertos internos no están publicados directamente en Windows.
+
+Para automatizar el mismo orden puede abrir Run collection y seleccionar las 26 peticiones, una iteración. Antes prepare una cuenta nueva y complete el entorno. El Runner retira esa cuenta al final, igual que la ruta manual.
+
+Referencias de la interfaz: [importar archivos](https://learning.postman.com/v11/docs/getting-started/importing-and-exporting/importing-data), [variables locales y sensibles](https://learning.postman.com/latest-v-12/docs/use/send-requests/variables/define-variables).

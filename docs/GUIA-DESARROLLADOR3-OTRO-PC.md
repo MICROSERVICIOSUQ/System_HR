@@ -101,7 +101,7 @@ Ambos deben responder `UP`, con database y messageBroker `UP`. Los puertos son l
 powershell -ExecutionPolicy Bypass -File .\scripts\probar-desarrollador3.ps1
 ```
 
-Este comando usa un entorno de pruebas separado, con sus propias bases y broker. No modifica los datos del sistema principal. Al terminar debe indicar que las pruebas de los dos servicios aprobaron. Las instrucciones de demostración y sus resultados esperados están en `GUIA-DESARROLLADOR3-SUSTENTACION.md`.
+Este comando usa un entorno de pruebas separado, con sus propias bases y broker. No modifica los datos del sistema principal. Al terminar debe indicar que las pruebas de los dos servicios aprobaron. Las instrucciones de demostración y sus resultados esperados están en `GUIA-DESARROLLADOR3-SUSTENTACION.md`; su sección 9 explica Postman, incluidos los dos archivos JSON para importar.
 
 ## 7. Herramientas del resto del proyecto
 

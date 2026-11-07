@@ -7,7 +7,8 @@ const assert = require('node:assert/strict');
 const base = process.env.DEMO_BASE_URL || 'http://api-gateway:8080';
 const employeeId = `DEMO-${randomUUID().slice(0, 8)}`;
 const email = `${employeeId.toLowerCase()}@example.test`;
-const employeePassword = `Demo1-${randomUUID()}`;
+const preparePostman = process.env.DEMO_PREPARAR_POSTMAN === '1';
+const employeePassword = process.env.DEMO_EMPLOYEE_PASSWORD || `Demo1-${randomUUID()}`;
 let adminToken;
 
 async function request(path, method = 'GET', data, authenticated = true) {
@@ -38,6 +39,9 @@ const loginEmployee = () => request('/auth/login', 'POST', { usuario: email, pas
 async function main() {
   if (!process.env.DEMO_ADMIN_USER || !process.env.DEMO_ADMIN_PASSWORD) {
     throw new Error('Defina DEMO_ADMIN_USER y DEMO_ADMIN_PASSWORD; consulte la guía.');
+  }
+  if (preparePostman && !process.env.DEMO_EMPLOYEE_PASSWORD) {
+    throw new Error('Para Postman indique DEMO_EMPLOYEE_PASSWORD; no se imprime ni se guarda.');
   }
   const login = await request('/auth/login', 'POST', {
     usuario: process.env.DEMO_ADMIN_USER, password: process.env.DEMO_ADMIN_PASSWORD,
@@ -78,6 +82,15 @@ async function main() {
     assert.equal(reset.status, 200, 'No se pudo activar la cuenta');
     await eventually(async () => (await loginEmployee()).status === 200, 'La cuenta no quedó activa');
     console.log(`2. Onboarding y activación: correctos. Empleado ${employeeId}.`);
+
+    if (preparePostman) {
+      await eventually(async () => (await request(`/vacaciones/balances/${employeeId}`)).status === 200,
+        'El empleado no llegó a la réplica de Vacaciones');
+      console.log('Datos públicos para el entorno de Postman:');
+      console.log(JSON.stringify({ dev3EmpleadoId: employeeId, dev3EmpleadoEmail: email, dev3DepartamentoId: departmentId }));
+      console.log('Cuenta ACTIVA, sin vacaciones y sin retiro. Use la contraseña que eligió.');
+      return;
+    }
 
     const invalid = await request('/vacaciones', 'POST', {
       empleadoId: employeeId, fechaInicio: day(5), fechaFin: day(5),

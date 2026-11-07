@@ -53,3 +53,11 @@ Los correos son simulados, sin SMTP. Vacaciones conserva la limitación previa d
 La auditoría de dependencias de Vacaciones conserva dos avisos moderados de node-cron 3 y su uuid transitivo. Se aplicaron las correcciones compatibles de los avisos altos; no se forzó una migración mayor del scheduler.
 
 El primer arranque del sistema principal notificó RabbitMQ no disponible durante su inicialización. Después quedó healthy y se repitió el arranque sin eliminar datos ni modificar su configuración. La demostración final se ejecutó con todos los servicios necesarios saludables.
+
+## Colección de Postman verificada
+
+Se añadió una ruta manual de sustentación en la sección 9 de la guía, junto con colección y entorno importables. El entorno versionado no contiene contraseñas ni tokens reales.
+
+La colección se ejecutó con Newman contra el sistema real: 26 peticiones de la colección, 35 aserciones aprobadas y cero fallos. Hubo 32 solicitudes HTTP en total al incluir el polling de los efectos asíncronos. Se verificaron login ADMIN/USER, rechazo 401/403, reglas de fechas, CRUD de vacaciones, suspensión/reactivación, retiro e historial sin credenciales.
+
+El modo de preparación de Postman del script de demostración también se ejecutó: crea una cuenta activa con una contraseña elegida por el cliente de prueba, utiliza el token de activación solo en memoria y devuelve únicamente identificadores públicos. No añade endpoints ni cambia los servicios de negocio.
