@@ -69,7 +69,7 @@ el token y el webhook. Solo entonces arranca Jenkins.
 
 | Herramienta | Dirección | Usuario | Contraseña |
 |---|---|---|---|
-| Jenkins | http://localhost:9090 | `JENKINS_ADMIN_USER`, por defecto `admin` | `JENKINS_ADMIN_PASSWORD` de `.env` |
+| Jenkins | http://localhost:9091 | `JENKINS_ADMIN_USER`, por defecto `admin` | `JENKINS_ADMIN_PASSWORD` de `.env` |
 | SonarQube | http://localhost:9000 | `admin` | `SONAR_ADMIN_PASSWORD` de `.env` |
 
 El asistente inicial de Jenkins está desactivado porque el administrador y los
@@ -85,15 +85,15 @@ docker compose logs --tail=100 sonar-setup jenkins sonarqube
 ```
 
 El HTML navegable se abre desde **Escenarios BDD en español**. Jenkins sirve
-ese contenido desde `http://127.0.0.1:9090`, un origen distinto de su interfaz
-`http://localhost:9090`. Esto permite desplegar los escenarios y usar los filtros
+ese contenido desde `http://127.0.0.1:9091`, un origen distinto de su interfaz
+`http://localhost:9091`. Esto permite desplegar los escenarios y usar los filtros
 sin desactivar la protección de la interfaz principal. Si cambias el puerto,
 ajusta también `JENKINS_RESOURCE_URL` en `.env`.
 
 El token se guarda en un volumen compartido de solo lectura para Jenkins y se
 carga como la credencial `sonar-token`. No aparece en el Jenkinsfile. El webhook
 apunta a `http://jenkins:8080/sonarqube-webhook/`, dirección de la red interna;
-`localhost:9090` es la dirección que usa la persona desde su navegador.
+`localhost:9091` es la dirección que usa la persona desde su navegador.
 
 ## 3. Ejecutar un pipeline
 

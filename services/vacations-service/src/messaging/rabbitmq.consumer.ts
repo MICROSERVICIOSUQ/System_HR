@@ -1,40 +1,50 @@
+import { conSpanDeConsumo } from '../observability/amqp-tracing.ts';
+import { brokerHealth } from '../observability/health.ts';
+import { log } from '../observability/logger.ts';
 import amqplib, { Channel, ChannelModel, ConsumeMessage } from 'amqplib';
 import { rabbitConfig } from '../config/rabbitmq.ts';
 import { VacationService } from '../services/vacation.service.ts';
-import { conSpanDeConsumo } from '../observability/amqp-tracing.ts';
 
 export class RabbitMQConsumer {
   private connection: ChannelModel | null = null;
   private channel: Channel | null = null;
   private isConnecting = false;
+  private stopped = false;
 
   constructor(private readonly service = new VacationService()) {}
 
   async start(): Promise<void> {
-    if (this.isConnecting) return;
+    if (this.isConnecting || this.stopped) return;
     this.isConnecting = true;
 
     const connectWithRetry = async () => {
+      if (this.stopped) return;
       try {
-        console.log(`[RABBITMQ] Conectando a ${rabbitConfig.host}:${rabbitConfig.port}...`);
+        log.info(`[RABBITMQ] Conectando a ${rabbitConfig.host}:${rabbitConfig.port}...`);
         this.connection = await amqplib.connect(rabbitConfig.url);
         this.channel = await this.connection.createChannel();
 
+        this.channel.on('error', () => {
+          brokerHealth.connected = false;
+          void this.connection?.close().catch(() => {});
+        });
+        this.channel.on('close', () => { brokerHealth.connected = false; });
         await this.channel.prefetch(10);
 
         this.connection.on('error', (err) => {
-          console.error('[RABBITMQ] Error en conexión:', err.message);
+          log.error('[RABBITMQ] Error en conexión:', err.message);
         });
 
         this.connection.on('close', () => {
-          console.warn('[RABBITMQ] Conexión cerrada. Reconectando en 5 segundos...');
+          log.warn('[RABBITMQ] Conexión cerrada. Reconectando en 5 segundos...');
+          brokerHealth.connected = false;
           this.connection = null;
           this.channel = null;
           this.isConnecting = false;
-          setTimeout(() => this.start(), 5000);
+          if (!this.stopped) setTimeout(() => this.start(), 5000);
         });
 
-        console.log(
+        log.info(
           `[RABBITMQ] Conectado exitosamente. Escuchando cola: '${rabbitConfig.queueName}'`
         );
 
@@ -48,13 +58,14 @@ export class RabbitMQConsumer {
           { noAck: false }
         );
 
+        brokerHealth.connected = true;
         this.isConnecting = false;
       } catch (error: any) {
-        console.error(
+        log.error(
           `[RABBITMQ] Fallo de conexión: ${error.message}. Reintentando en 5 segundos...`
         );
         this.isConnecting = false;
-        setTimeout(connectWithRetry, 5000);
+        if (!this.stopped) setTimeout(connectWithRetry, 5000);
       }
     };
 
@@ -71,33 +82,23 @@ export class RabbitMQConsumer {
       try {
         envelope = JSON.parse(contentStr);
       } catch (parseErr) {
-        console.error(
-          '[VACATIONS] [ERROR] Mensaje recibido no es un JSON válido. Descartando:',
-          contentStr
+        log.error(
+          '[VACATIONS] [ERROR] Mensaje recibido no es un JSON válido; se rechaza sin imprimir su contenido'
         );
         this.channel.ack(msg);
         return;
       }
 
-      // Este servicio es a la vez productor y consumidor: aqui consume los
-      // eventos de empleado para mantener su replica local. El span se ancla a
-      // la traza del publicador con el contexto de las cabeceras.
-      const result = await conSpanDeConsumo(
-        envelope?.type ?? 'desconocido',
-        msg.properties?.headers,
-        {
-          'event.id': String(envelope?.id ?? ''),
-          'messaging.destination.name': rabbitConfig.queueName,
-        },
-        () => this.service.processEvent(envelope),
-      );
+      const result = await conSpanDeConsumo(envelope.type, msg.properties.headers,
+        { 'event.id': String(envelope.id), 'messaging.destination.name': rabbitConfig.queueName },
+        () => this.service.processEvent(envelope));
 
       if (result === 'DUPLICATE') {
-        console.log(`Evento duplicado omitido: ${envelope.id}`);
+        log.info(`Evento duplicado omitido: ${envelope.id}`);
       }
       this.channel.ack(msg);
     } catch (error: any) {
-      console.error(
+      log.error(
         '[VACATIONS] [ERROR] Excepción no controlada procesando mensaje:',
         error.message
       );
@@ -106,12 +107,14 @@ export class RabbitMQConsumer {
   }
 
   async stop(): Promise<void> {
+    this.stopped = true;
+    brokerHealth.connected = false;
     try {
       if (this.channel) await this.channel.close();
       if (this.connection) await this.connection.close();
-      console.log('[RABBITMQ] Conexión cerrada ordenadamente.');
+      log.info('[RABBITMQ] Conexión cerrada ordenadamente.');
     } catch (err: any) {
-      console.error('[RABBITMQ] Error cerrando conexión:', err.message);
+      log.error('[RABBITMQ] Error cerrando conexión:', err.message);
     }
   }
 }

@@ -1,3 +1,4 @@
+import { log } from '../observability/logger.ts';
 import cron, { ScheduledTask } from 'node-cron';
 import { VacationService } from '../services/vacation.service.ts';
 
@@ -33,12 +34,12 @@ export class VacationScheduler {
 
   start(): void {
     if (!this.habilitado) {
-      console.log('[VACATIONS] [SCHEDULER] Deshabilitado por VACACIONES_SCHEDULER_ENABLED=false');
+      log.info('[VACATIONS] [SCHEDULER] Deshabilitado por VACACIONES_SCHEDULER_ENABLED=false');
       return;
     }
 
     if (!cron.validate(this.expresionCron)) {
-      console.error(
+      log.error(
         `[VACATIONS] [SCHEDULER] Expresión cron inválida: '${this.expresionCron}'. El scheduler no se inicia.`
       );
       return;
@@ -48,7 +49,7 @@ export class VacationScheduler {
       void this.ejecutarCiclo();
     });
 
-    console.log(
+    log.info(
       `[VACATIONS] [SCHEDULER] Activo con expresión '${this.expresionCron}' (configurable en VACACIONES_CRON)`
     );
   }
@@ -59,7 +60,7 @@ export class VacationScheduler {
    */
   private async ejecutarCiclo(): Promise<void> {
     if (this.ejecutando) {
-      console.warn('[VACATIONS] [SCHEDULER] Ciclo anterior aún en curso; se omite este disparo');
+      log.warn('[VACATIONS] [SCHEDULER] Ciclo anterior aún en curso; se omite este disparo');
       return;
     }
     this.ejecutando = true;
@@ -67,14 +68,14 @@ export class VacationScheduler {
     try {
       const { iniciadas, finalizadas } = await this.service.runSchedulerCycle();
       if (iniciadas > 0 || finalizadas > 0) {
-        console.log(
+        log.info(
           `[VACATIONS] [SCHEDULER] Ciclo completado | iniciadas: ${iniciadas} | finalizadas: ${finalizadas}`
         );
       }
     } catch (err: any) {
       // Un fallo transitorio de base de datos no debe tumbar el proceso:
       // el siguiente ciclo volverá a intentarlo.
-      console.error('[VACATIONS] [SCHEDULER] Error en el ciclo:', err?.message ?? err);
+      log.error('[VACATIONS] [SCHEDULER] Error en el ciclo:', err?.message ?? err);
     } finally {
       this.ejecutando = false;
     }
@@ -84,7 +85,7 @@ export class VacationScheduler {
     if (this.task) {
       this.task.stop();
       this.task = null;
-      console.log('[VACATIONS] [SCHEDULER] Detenido.');
+      log.info('[VACATIONS] [SCHEDULER] Detenido.');
     }
   }
 }

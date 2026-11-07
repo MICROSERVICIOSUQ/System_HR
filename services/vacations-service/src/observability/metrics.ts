@@ -82,7 +82,7 @@ export function middlewareMetricas(
   res.on('finish', () => {
     const ruta = req.route?.path
       ? `${req.baseUrl}${req.route.path}`
-      : req.baseUrl || req.path;
+      : req.baseUrl || '/sin-ruta';
     const etiquetas = {
       method: req.method,
       route: ruta,
@@ -100,3 +100,10 @@ export async function handlerMetricas(_req: Request, res: Response): Promise<voi
   res.set('Content-Type', registro.contentType);
   res.end(await registro.metrics());
 }
+
+export const registry = registro;
+export const httpMetrics = middlewareMetricas;
+export const transitions = new Counter({
+  name: 'vacations_transitions_total', help: 'Transiciones de períodos',
+  labelNames: ['state'], registers: [registro],
+});

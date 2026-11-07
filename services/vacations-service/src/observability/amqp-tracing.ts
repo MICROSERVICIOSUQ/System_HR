@@ -21,7 +21,7 @@
  * El formato es W3C Trace Context, el mismo que usa Spring AMQP en los
  * servicios Java cuando se activa su instrumentación por observación. Por eso
  * una traza que nace en employees-service (Java) y se consume en
- * notifications-service (Node) queda en el mismo árbol: los dos hablan el mismo
+ * notifications-service (Go) queda en el mismo árbol: los dos hablan el mismo
  * estándar sin saber nada el uno del otro.
  */
 import {

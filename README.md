@@ -1,5 +1,7 @@
 # Sistema de Recursos Humanos — System_HR (Retos 3 a 7)
 
+> Actualización del desarrollador 3: Notificaciones migró a Go y Vacaciones usa fechaFin como regreso. Las instrucciones vigentes de esta parte están en [la instalación en otro PC](docs/GUIA-DESARROLLADOR3-OTRO-PC.md), [la guía de sustentación](docs/GUIA-DESARROLLADOR3-SUSTENTACION.md) y [la guía de integración del desarrollador 4](docs/GUIA-DESARROLLADOR4-INTEGRACION.md). Las secciones de retos anteriores conservan su contexto histórico.
+
 Sistema empresarial de gestión de empleados y departamentos basado en **Arquitectura de Microservicios**, combinando comunicación síncrona protegida mediante **Circuit Breaker** (Reto 3) con comunicación asíncrona desacoplada mediante **RabbitMQ y Arquitectura Orientada a Eventos** (Reto 4).
 
 ---
@@ -1247,7 +1249,7 @@ python3 ci/preparar-entorno.py
 docker compose up -d --build
 ```
 
-Jenkins se abre en http://localhost:9090 y SonarQube en http://localhost:9000.
+Jenkins se abre en http://localhost:9091 y SonarQube en http://localhost:9000.
 El usuario inicial es `admin`; las contraseñas generadas están en `.env`, en
 `JENKINS_ADMIN_PASSWORD` y `SONAR_ADMIN_PASSWORD`. No se usa el asistente inicial
 de Jenkins: JCasC crea el administrador y los dos jobs. Antes de ejecutar un

@@ -159,7 +159,7 @@ services:
       rabbitmq:
         condition: service_healthy
     environment:
-      NODE_ENV: production
+      OTEL_EXPORTER_ZIPKIN_ENDPOINT: ${OTEL_EXPORTER_ZIPKIN_ENDPOINT:-}
       PORT: ${NOTIFICACIONES_PORT:-8082}
       DATABASE_URL: postgresql://${NOTIFICACIONES_DB_USER:-postgres}:${NOTIFICACIONES_DB_PASSWORD:-postgres}@database-notificaciones:5432/${NOTIFICACIONES_DB_NAME:-gestion_notificaciones}
       RABBITMQ_HOST: ${RABBITMQ_HOST:-rabbitmq}
@@ -217,6 +217,7 @@ services:
       rabbitmq:
         condition: service_healthy
     environment:
+      OTEL_EXPORTER_ZIPKIN_ENDPOINT: ${OTEL_EXPORTER_ZIPKIN_ENDPOINT:-}
       NODE_ENV: production
       PORT: ${VACACIONES_PORT:-8084}
       DATABASE_URL: postgresql://${VACACIONES_DB_USER:-postgres}:${VACACIONES_DB_PASSWORD:-postgres}@db-vacaciones:5432/${VACACIONES_DB_NAME:-gestion_vacaciones}

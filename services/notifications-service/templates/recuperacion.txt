@@ -1,0 +1,1 @@
+Para restablecer su contraseña use el token de recuperación recibido: {{.token}}

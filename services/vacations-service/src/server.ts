@@ -1,3 +1,5 @@
+import { telemetry } from './observability/tracing.ts';
+import { log } from './observability/logger.ts';
 import app from './app.ts';
 import { RabbitMQConsumer } from './messaging/rabbitmq.consumer.ts';
 import { VacationScheduler } from './scheduler/vacation.scheduler.ts';
@@ -5,14 +7,14 @@ import { VacationScheduler } from './scheduler/vacation.scheduler.ts';
 const PORT = Number(process.env.PORT ?? 8084);
 
 const server = app.listen(PORT, () => {
-  console.log(`[VACATIONS-SERVICE] Servidor HTTP escuchando en el puerto ${PORT}`);
+  log.info(`[VACATIONS-SERVICE] Servidor HTTP escuchando en el puerto ${PORT}`);
 });
 
 const consumer = new RabbitMQConsumer();
 
 // Iniciar consumidor RabbitMQ en segundo plano
 consumer.start().catch((err) => {
-  console.error('[VACATIONS-SERVICE] Error fatal iniciando consumidor RabbitMQ:', err);
+  log.error('[VACATIONS-SERVICE] Error fatal iniciando consumidor RabbitMQ:', err);
 });
 
 // Scheduler que hace avanzar los períodos al llegar sus fechas (Reto 5)
@@ -21,11 +23,12 @@ scheduler.start();
 
 // Manejo de apagado ordenado
 const shutdown = async () => {
-  console.log('[VACATIONS-SERVICE] Recibida señal de apagado, cerrando recursos...');
+  log.info('[VACATIONS-SERVICE] Recibida señal de apagado, cerrando recursos...');
   scheduler.stop();
   await consumer.stop();
+  await telemetry.shutdown();
   server.close(() => {
-    console.log('[VACATIONS-SERVICE] Servidor HTTP cerrado.');
+    log.info('[VACATIONS-SERVICE] Servidor HTTP cerrado.');
     process.exit(0);
   });
 };

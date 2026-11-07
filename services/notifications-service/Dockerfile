@@ -1,36 +1,15 @@
-FROM node:22-alpine AS deps
-
+FROM golang:1.25-alpine AS build
 WORKDIR /app
+COPY go.mod go.sum ./
+RUN go mod download
+COPY *.go schema.sql openapi.json ./
+COPY templates ./templates
+RUN CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /notifications .
 
-ARG PRISMA_GENERATE_DATABASE_URL=postgresql://placeholder:placeholder@placeholder:5432/placeholder
-ENV DATABASE_URL=${PRISMA_GENERATE_DATABASE_URL}
-
-COPY package*.json ./
-RUN npm ci --include=dev
-
-COPY prisma ./prisma
-COPY prisma.config.ts ./
-COPY src ./src
-RUN npx prisma generate
-
-FROM node:22-alpine AS runner
-
-WORKDIR /app
-ENV NODE_ENV=production
+FROM alpine:3.22
+RUN apk add --no-cache ca-certificates curl && adduser -D -u 10001 app
+COPY --from=build /notifications /notifications
+USER app
 ENV PORT=8082
-
-RUN apk add --no-cache curl
-
-COPY package*.json ./
-COPY --from=deps /app/node_modules ./node_modules
-COPY --from=deps /app/prisma ./prisma
-COPY --from=deps /app/prisma.config.ts ./
-COPY --from=deps /app/src ./src
-
 EXPOSE 8082
-
-# --import carga el SDK de OpenTelemetry ANTES del codigo de la aplicacion.
-# La instrumentacion automatica parchea http, express, pg y amqplib al
-# cargarlos; si el SDK arrancara despues, el parche llegaria tarde y no se
-# generaria ni un span.
-CMD ["sh", "-c", "npx prisma migrate deploy && exec npx tsx --import ./src/observability/tracing.ts src/server.ts"]
+ENTRYPOINT ["/notifications"]

@@ -258,18 +258,12 @@ export class VacationRepository {
     });
   }
 
-  /**
-   * Períodos EN_CURSO cuya fechaFin ya pasó por completo.
-   *
-   * La fechaFin es inclusiva: unas vacaciones que terminan hoy siguen vigentes
-   * hoy, así que solo se consideran finalizadas cuando la fecha es estrictamente
-   * anterior al día en curso.
-   */
+  /** Finalizar al llegar el día de regreso, no al día siguiente. */
   async findPeriodsToFinish(inicioDelDia: Date) {
     return prisma.vacationPeriod.findMany({
       where: {
         estado: 'EN_CURSO',
-        fechaFin: { lt: inicioDelDia },
+        fechaFin: { lte: inicioDelDia },
       },
       orderBy: { fechaFin: 'asc' },
     });

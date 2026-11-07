@@ -71,7 +71,7 @@ scrape_configs:
     static_configs:
       - targets: ['notifications-service:8082']
         labels:
-          lenguaje: nodejs
+          lenguaje: go
           capa: negocio
 
   - job_name: 'profiles-service'

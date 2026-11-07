@@ -114,7 +114,7 @@ class RepositorioFake {
 
   async findPeriodsToFinish(inicioDelDia: Date) {
     return this.periodos.filter(
-      (p) => p.estado === 'EN_CURSO' && p.fechaFin.getTime() < inicioDelDia.getTime()
+      (p) => p.estado === 'EN_CURSO' && p.fechaFin.getTime() <= inicioDelDia.getTime()
     );
   }
 
@@ -189,21 +189,27 @@ describe('VacationService.createPeriod — las cuatro validaciones', () => {
       (e: ValidationError) => {
         assert.equal(e.name, 'ValidationError');
         assert.equal(e.statusCode, 400);
-        assert.match(e.message, /no puede ser anterior a fechaInicio/);
+        assert.match(e.message, /debe ser posterior a fechaInicio/);
         return true;
       }
     );
     assert.equal(repo.periodos.length, 0, 'no debe persistir nada');
   });
 
-  test('validación 1: acepta un período de un solo día', async () => {
+  test('rechaza inicio y regreso el mismo día', async () => {
     repo.conEmpleado('E001');
-    const r = await service.createPeriod({
-      empleadoId: 'E001',
-      fechaInicio: enDias(3),
-      fechaFin: enDias(3),
-    } as any);
-    assert.equal(r.fechaInicio, r.fechaFin);
+    await assert.rejects(() => service.createPeriod({
+      empleadoId: 'E001', fechaInicio: enDias(3), fechaFin: enDias(3),
+    }), /debe ser posterior/);
+  });
+
+  test('rechaza programar para un empleado retirado', async () => {
+    repo.conEmpleado('E001', 'RETIRADO');
+    await assert.rejects(() => service.createPeriod({
+      empleadoId: 'E001', fechaInicio: enDias(3), fechaFin: enDias(4),
+    }), /empleado ACTIVO/);
+    assert.equal(repo.periodos.length, 0);
+    assert.deepEqual(publisher.publicados, []);
   });
 
   test('validación 2: rechaza fechaInicio en el pasado', async () => {
@@ -223,7 +229,7 @@ describe('VacationService.createPeriod — las cuatro validaciones', () => {
     const r = await service.createPeriod({
       empleadoId: 'E001',
       fechaInicio: hoyIso(),
-      fechaFin: hoyIso(),
+      fechaFin: enDias(1),
     } as any);
     assert.equal(r.estado, 'PROGRAMADA');
   });
@@ -259,7 +265,7 @@ describe('VacationService.createPeriod — las cuatro validaciones', () => {
     assert.equal(repo.periodos.length, 1, 'no debe añadir un segundo período');
   });
 
-  test('validación 4: rechaza el solapamiento de un solo día compartido', async () => {
+  test('validación 4: rechaza un día realmente compartido', async () => {
     repo.conEmpleado('E001').conPeriodo({
       empleadoId: 'E001',
       fechaInicio: d(enDias(10)),
@@ -268,7 +274,7 @@ describe('VacationService.createPeriod — las cuatro validaciones', () => {
     });
 
     await assert.rejects(
-      () => service.createPeriod({ empleadoId: 'E001', fechaInicio: enDias(20), fechaFin: enDias(28) } as any),
+      () => service.createPeriod({ empleadoId: 'E001', fechaInicio: enDias(19), fechaFin: enDias(28) } as any),
       (e: ValidationError) => {
         assert.match(e.message, /se solapa/);
         return true;
@@ -369,7 +375,7 @@ describe('VacationService — scheduler: transiciones por paso del tiempo', () =
     assert.deepEqual(publisher.publicados, []);
   });
 
-  test('la fechaFin es inclusiva: un período que termina hoy sigue EN_CURSO', async () => {
+  test('finaliza en la fecha de regreso, incluido hoy', async () => {
     const hoy = new Date();
     hoy.setUTCHours(0, 0, 0, 0);
 
@@ -383,8 +389,8 @@ describe('VacationService — scheduler: transiciones por paso del tiempo', () =
 
     const r = await service.runSchedulerCycle();
 
-    assert.equal(r.finalizadas, 0);
-    assert.equal(repo.periodos[0].estado, 'EN_CURSO');
+    assert.equal(r.finalizadas, 1);
+    assert.equal(repo.periodos[0].estado, 'FINALIZADA');
   });
 
   test('dos ciclos seguidos no publican el evento dos veces (compare-and-set)', async () => {
@@ -484,7 +490,12 @@ describe('VacationService — reprogramación y cancelación', () => {
     assert.deepEqual(publisher.tipos(), ['vacaciones.reprogramadas']);
   });
 
-  test('cambiar solo la fecha final conserva la fecha inicial', async () => {
+  test('rechaza reprogramar para un empleado retirado', async () => {
+    repo.conEmpleado('E001', 'RETIRADO');
+    await assert.rejects(() => service.updatePeriod('p1', { fechaFin: enDias(12) }), /empleado ACTIVO/);
+  });
+
+  test('cambiar solo la fecha final conserva la fecha inicial' , async () => {
     const result = await service.updatePeriod('p1', { fechaFin: enDias(12) });
     assert.equal(result.fechaInicio, enDias(5));
     assert.equal(result.fechaFin, enDias(12));
@@ -501,7 +512,7 @@ describe('VacationService — reprogramación y cancelación', () => {
   });
 
   test('rechaza fechas invertidas o en el pasado al reprogramar', async () => {
-    await assert.rejects(() => service.updatePeriod('p1', { fechaInicio: enDias(20) }), /anterior/);
+    await assert.rejects(() => service.updatePeriod('p1', { fechaInicio: enDias(20) }), /posterior/);
     await assert.rejects(() => service.updatePeriod('p1', { fechaInicio: enDias(-1) }), /pasada/);
     assert.equal(repo.periodos[0].fechaInicio.toISOString().split('T')[0], enDias(5));
   });

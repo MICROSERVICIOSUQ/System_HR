@@ -46,3 +46,10 @@ Desktop.ini
 # Caché de los scripts de CI
 **/__pycache__/
 **/*.pyc
+
+# Go
+**/coverage.out
+**/*.test
+
+# Respaldos y secretos locales
+secrets/
