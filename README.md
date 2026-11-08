@@ -32,7 +32,7 @@ Solo el Gateway publica un puerto al host. Los servicios de negocio usan `expose
 |---|---|---|---|
 | api-gateway | Java 17, Spring Boot y Spring Cloud Gateway | 8080 | 8080 |
 | employees-service | Java 21, Spring Boot, JPA y Resilience4j | 8080 | Mediante Gateway |
-| departments-service | Node.js 22, TypeScript, Express y Prisma | 8081 | Mediante Gateway |
+| departments-service | Python 3.12, FastAPI, SQLAlchemy y Alembic | 8081 | Mediante Gateway |
 | database-empleados | PostgreSQL 16 | 5432 | Sin puerto publicado |
 | database-departamentos | PostgreSQL 16 | 5432 | Sin puerto publicado |
 
@@ -193,7 +193,7 @@ Notifications     Profiles      Vacations
 |---|---|---|---|---|
 | api-gateway | Spring Boot | 8080 | No | Enrutamiento perimetral |
 | employees-service | Spring Boot | 8080 | PostgreSQL | Productor de eventos de dominio |
-| departments-service | Node + Prisma | 8081 | PostgreSQL | Catálogo de departamentos |
+| departments-service | Python + FastAPI | 8081 | PostgreSQL | Catálogo de departamentos |
 | notifications-service | Node + Prisma | 8082 | PostgreSQL | Consumidor asíncrono (notificaciones) |
 | profiles-service | Node + Prisma | 8083 | PostgreSQL | Consumidor asíncrono (Read Model CQRS) |
 | vacations-service | Node + Prisma | 8084 | PostgreSQL | Consumidor asíncrono (saldo vacaciones) + scheduler (Reto 5) |
@@ -393,6 +393,8 @@ El historial formal de decisiones técnicas se documenta en [`docs/decisions/`](
 * **[ADR-005](docs/decisions/ADR-005-event-driven-architecture.md):** Adopción de Arquitectura Orientada a Eventos (EDA).
 * **[ADR-006](docs/decisions/ADR-006-fanout-exchange.md):** Uso de Exchange Fanout `hr.events` para distribución simultánea 1 a N.
 * **[ADR-007](docs/decisions/ADR-007-idempotent-consumers.md):** Consumidores idempotentes basados en Event ID.
+
+Los ADR posteriores (008 a 013) se listan en el [índice de decisiones](docs/decisions/README.md); cubren la validación del JWT en el Gateway, los estados de cuenta, la pirámide de pruebas, la verificación de efectos asíncronos, la reconstrucción de departamentos en Python y la regla para renombrar un campo ya publicado.
 
 ## 10. Resultados Obtenidos del Reto 4
 
@@ -1226,3 +1228,70 @@ Las evidencias de los tres últimos puntos están en `docs/evidencias/`:
 [tres ejecuciones](docs/evidencias/reto6-bdd-ejecuciones.txt).
 Los archivos de evidencia de la suite BDD conservan las salidas originales de la
 versión de 41 escenarios; la suite vigente tiene 39.
+
+---
+
+# Remediación de la auditoría — Dev 1 y Dev 2
+
+La auditoría estática del sistema dejó una lista de hallazgos repartida entre
+cuatro desarrolladores, cada uno con dos servicios y un lenguaje. Los dos
+primeros lotes están implementados y verificados.
+
+El detalle completo —el porqué de cada decisión, los códigos de error, las
+trampas operativas y cómo comprobar cada punto— está en
+**[docs/REMEDIACION-AUDITORIA.md](docs/REMEDIACION-AUDITORIA.md)**.
+
+## 27. Qué cambió
+
+| Dev | Servicio | Cambio |
+|---|---|---|
+| 1 | employees-service | `GET /empleados?desde=&hasta=` es la ruta canónica de la auditoría de retiros; `/empleados/auditoria` delega en ella y queda como alias `@Deprecated` |
+| 1 | employees-service | `fechaRetiro` pasa de `LocalDate` a `LocalDateTime` (migración `V3`, `TIMESTAMP(3)`) |
+| 1 | departments-service | Reconstruido en **Python 3.12 / FastAPI**, con Swagger UI nativo en `/docs` y el contrato generado de los modelos Pydantic |
+| 2 | auth-service | `POST /auth/recover-password` exige que la cuenta esté `ACTIVA`; responde 401 con un mensaje distinto por estado |
+| 2 | auth-service | El `healthcheck` de Compose apunta a `/health`, que sí comprueba base y broker, en lugar de `/auth/health`, que respondía 200 siempre |
+| 2 | profiles-service | Cinco campos canónicos (`telefono`, `direccion`, `ciudad`, `biografia`, `fechaCreacion`), `employeeId` → `empleadoId` con alias, y marca `archivado` |
+| 2 | api-gateway | 14 pruebas de la regla ABAC —incluido el 403 del `USER` que edita un perfil ajeno— con `MockServerWebExchange`, sin abrir sockets |
+
+Las versiones de Java se verificaron antes de tocar nada: `employees-service` y
+`auth-service` ya estaban en **Java 21**, y el `api-gateway` se dejó
+deliberadamente en **Java 17**.
+
+## 28. Resultados verificados de la remediación
+
+| Suite | Resultado |
+|---|---|
+| `auth-service` | **24 / 24** |
+| `api-gateway` (ABAC) | **14 / 14** |
+| `departments-service` | **50 / 50**, 80,18 % con umbral del 70 % |
+| `employees-service` | **60 verdes**, 7 de integración omitidas |
+| `profiles-service` (`tsc --noEmit`) | sin errores |
+| Escenarios BDD | **39 / 39** |
+| Colecciones de Postman (Newman) | **5 colecciones, 0 fallos** |
+
+Las 21 pruebas que levantan un servidor en loopback (14 de `employees-service` y
+7 de `GatewayTest`) no se pueden ejecutar en este equipo —la misma restricción
+por la que Tomcat no arranca aquí— y no cubren ninguno de estos cambios. El
+detalle está en el documento de remediación.
+
+## 29. Las colecciones de Postman después de los cambios
+
+| Colección | Peticiones | Aserciones |
+|---|---|---|
+| `auth-service` | 22 | 49 |
+| `perfiles-service` | 19 | 38 |
+| `empleados-service` | 17 | 38 |
+| `departamentos-service` | 12 | 24 |
+| `observabilidad` | 18 | 39 |
+
+Son **secuenciales y con estado**: hay que ejecutarlas completas y en orden, con
+el entorno `system-hr` seleccionado. La primera petición de cada una es un login
+de ADMIN y es obligatoria; sin el token, el Gateway responde 401 a todo lo demás.
+
+```bash
+newman run postman/auth-service.postman_collection.json -e postman/system-hr.postman_environment.json
+```
+
+Dos de ellas estaban rotas desde el Reto 5 por no enviar el JWT —`departamentos`
+fallaba 17 de 17 aserciones y `empleados` 15 de 36— y nadie lo había notado
+porque no se ejecutaban completas. Quedaron corregidas junto con este lote.

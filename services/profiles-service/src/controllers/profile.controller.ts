@@ -1,6 +1,8 @@
 import type { Request, Response, NextFunction } from 'express';
 import { ProfileService } from '../services/profile.service.ts';
 import { ProfileError } from '../errors/profile.errors.ts';
+import { presentarPerfil, presentarPerfiles } from '../mappers/profile.mapper.ts';
+import type { CampoOrdenable } from '../repositories/profile.repository.ts';
 
 export class ProfileController {
   constructor(private readonly service = new ProfileService()) {}
@@ -34,32 +36,48 @@ export class ProfileController {
           }
         : undefined;
 
-      const profiles = await this.service.getAll(estado, pagination);
-      return res.json(profiles);
+      // ?archivado=false es la consulta corriente: los perfiles de la gente
+      // que sigue en la empresa. Se separa del filtro por estado a proposito:
+      // hoy coinciden, pero un perfil podria archivarse por otro motivo sin
+      // estar retirado, y entonces las dos consultas dejarian de ser la misma.
+      const archivado = this.parseArchivado(req.query.archivado);
+
+      const resultado = await this.service.getAll(estado, pagination, archivado);
+
+      // El alias employeeId se anade aqui, en la frontera HTTP: la columna se
+      // renombro a empleadoId pero la respuesta sigue llevando los dos nombres
+      // para no romper a ningun cliente.
+      if (Array.isArray(resultado)) {
+        return res.json(presentarPerfiles(resultado as any));
+      }
+      return res.json({
+        ...resultado,
+        data: presentarPerfiles((resultado as any).data),
+      });
     } catch (error) {
       return next(error);
     }
   };
 
   /**
-   * GET /profiles/:employeeId
+   * GET /profiles/:empleadoId
    */
-  getByEmployeeId = async (req: Request, res: Response, next: NextFunction) => {
+  getByEmpleadoId = async (req: Request, res: Response, next: NextFunction) => {
     try {
-      const employeeId = Array.isArray(req.params.employeeId)
-        ? req.params.employeeId[0]
-        : req.params.employeeId;
+      const empleadoId = Array.isArray(req.params.empleadoId)
+        ? req.params.empleadoId[0]
+        : req.params.empleadoId;
 
-      const profile = await this.service.getByEmployeeId(employeeId);
+      const profile = await this.service.getByEmpleadoId(empleadoId);
       if (!profile) {
         return res.status(404).json({
           status: 404,
           error: 'Not Found',
-          message: `Perfil con employeeId '${employeeId}' no encontrado`,
+          message: `Perfil con empleadoId '${empleadoId}' no encontrado`,
         });
       }
 
-      return res.json(profile);
+      return res.json(presentarPerfil(profile as any));
     } catch (error) {
       return next(error);
     }
@@ -71,7 +89,7 @@ export class ProfileController {
         ...req.body,
         lastEventId: this.getIdempotencyKey(req),
       });
-      return res.status(201).json(profile);
+      return res.status(201).json(presentarPerfil(profile as any));
     } catch (error) {
       return next(error);
     }
@@ -79,12 +97,12 @@ export class ProfileController {
 
   update = async (req: Request, res: Response, next: NextFunction) => {
     try {
-      const employeeId = this.getEmployeeId(req);
-      const profile = await this.service.update(employeeId, {
+      const empleadoId = this.getEmpleadoId(req);
+      const profile = await this.service.update(empleadoId, {
         ...req.body,
         lastEventId: this.getIdempotencyKey(req),
       });
-      return res.json(profile);
+      return res.json(presentarPerfil(profile as any));
     } catch (error) {
       return next(error);
     }
@@ -93,21 +111,36 @@ export class ProfileController {
   retire = async (req: Request, res: Response, next: NextFunction) => {
     try {
       const profile = await this.service.retire(
-        this.getEmployeeId(req),
+        this.getEmpleadoId(req),
         this.getIdempotencyKey(req),
       );
-      return res.json(profile);
+      return res.json(presentarPerfil(profile as any));
     } catch (error) {
       return next(error);
     }
   };
 
-  private getEmployeeId(req: Request): string {
-    const employeeId = Array.isArray(req.params.employeeId)
-      ? req.params.employeeId[0]
-      : req.params.employeeId;
-    if (!employeeId?.trim()) throw new ProfileError(400, 'employeeId es obligatorio');
-    return employeeId.trim();
+  private getEmpleadoId(req: Request): string {
+    const empleadoId = Array.isArray(req.params.empleadoId)
+      ? req.params.empleadoId[0]
+      : req.params.empleadoId;
+    if (!empleadoId?.trim()) throw new ProfileError(400, 'empleadoId es obligatorio');
+    return empleadoId.trim();
+  }
+
+  /**
+   * Interpreta ?archivado=true|false.
+   *
+   * Ausente significa "no filtrar", que no es lo mismo que false: sin este
+   * matiz, GET /perfiles dejaria de devolver los perfiles archivados y cambiaria
+   * el comportamiento de un endpoint ya publicado.
+   */
+  private parseArchivado(value: unknown): boolean | undefined {
+    if (value === undefined) return undefined;
+    const texto = String(Array.isArray(value) ? value[0] : value).toLowerCase();
+    if (texto === 'true') return true;
+    if (texto === 'false') return false;
+    throw new ProfileError(400, 'archivado debe ser true o false');
   }
 
   private getIdempotencyKey(req: Request): string | undefined {
@@ -134,9 +167,9 @@ export class ProfileController {
     return limit;
   }
 
-  private parseSortBy(value: unknown): 'employeeId' | 'nombre' | 'apellido' | 'email' | 'cargo' | 'departamentoId' | 'fechaIngreso' | 'estado' | 'fechaRetiro' | 'createdAt' | 'updatedAt' {
+  private parseSortBy(value: unknown): CampoOrdenable {
     const selected = Array.isArray(value) ? value[0] : value;
-    const allowed = ['employeeId', 'nombre', 'apellido', 'email', 'cargo', 'departamentoId', 'fechaIngreso', 'estado', 'fechaRetiro', 'createdAt', 'updatedAt'] as const;
+    const allowed = ['empleadoId', 'nombre', 'apellido', 'email', 'cargo', 'departamentoId', 'fechaIngreso', 'estado', 'fechaRetiro', 'fechaCreacion', 'archivado', 'updatedAt'] as const;
     if (selected === undefined) return 'updatedAt';
     if (!allowed.includes(String(selected) as typeof allowed[number])) {
       throw new ProfileError(400, `sortBy no permitido. Valores: ${allowed.join(', ')}`);

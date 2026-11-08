@@ -8,9 +8,15 @@ describe('profiles-service HTTP validation', () => {
 
   before(async () => {
     process.env.DATABASE_URL ??= 'postgresql://placeholder:5432/placeholder';
-    const { default: app } = await import('../app.ts');
+    // La anotación explícita hace falta porque el import dinámico de un módulo
+    // con export default devuelve el namespace, y TypeScript no infiere de ahí
+    // el tipo Express. Era otro de los errores de tipo que el servicio
+    // arrastraba sin que nadie los viera, porque tsx no comprueba tipos.
+    const { default: app } = (await import('../app.ts')) as unknown as {
+      default: import('express').Express;
+    };
     await new Promise<void>((resolve) => {
-      server = app.listen(0, resolve);
+      server = app.listen(0, () => resolve());
     });
     const address = server.address();
     if (!address || typeof address === 'string') throw new Error('No se obtuvo el puerto');
@@ -27,7 +33,7 @@ describe('profiles-service HTTP validation', () => {
     const response = await fetch(`${baseUrl}/profiles`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ employeeId: 'EMP-TEST' }),
+      body: JSON.stringify({ empleadoId: 'EMP-TEST' }),
     });
     const body = await response.json();
 

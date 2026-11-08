@@ -1,4 +1,8 @@
-import { ProfileRepository, EstadoFiltro } from '../repositories/profile.repository.ts';
+import {
+  ProfileRepository,
+  type CampoOrdenable,
+  type EstadoFiltro,
+} from '../repositories/profile.repository.ts';
 import { ProfileError } from '../errors/profile.errors.ts';
 import { EmployeeEventPublisher } from '../messaging/employee-event.publisher.ts';
 import crypto from 'node:crypto';
@@ -45,13 +49,22 @@ export class ProfileService {
     pagination?: {
       page: number;
       limit: number;
-      sortBy: 'employeeId' | 'nombre' | 'apellido' | 'email' | 'cargo' | 'departamentoId' | 'fechaIngreso' | 'estado' | 'fechaRetiro' | 'createdAt' | 'updatedAt';
+      sortBy: CampoOrdenable;
       order: 'asc' | 'desc';
     },
+    archivado?: boolean,
   ) {
     const estadoFiltro = this.parseEstado(estado);
-    const result = await this.repository.findAll(estadoFiltro, pagination);
-    if (!pagination) return result;
+    const result = await this.repository.findAll(estadoFiltro, pagination, archivado);
+
+    // Array.isArray además de !pagination, y no solo lo segundo: el repositorio
+    // devuelve un array cuando no se pagina y un objeto {total, data} cuando sí,
+    // de modo que su tipo es una unión. Sin estrechar por la forma del valor,
+    // TypeScript no puede saber cuál de las dos ramas llegó aquí y marca error
+    // al leer .data y .total. Era uno de los errores de tipo que arrastraba este
+    // servicio: no rompía en ejecución porque tsx elimina los tipos sin
+    // comprobarlos, así que nadie los veía.
+    if (!pagination || Array.isArray(result)) return result;
 
     return {
       data: result.data,
@@ -64,12 +77,12 @@ export class ProfileService {
     };
   }
 
-  async getByEmployeeId(employeeId: string) {
-    return this.repository.findByEmployeeId(employeeId);
+  async getByEmpleadoId(empleadoId: string) {
+    return this.repository.findByEmpleadoId(empleadoId);
   }
 
   async create(data: {
-    employeeId: string;
+    empleadoId: string;
     nombre: string;
     apellido: string;
     email: string;
@@ -80,7 +93,7 @@ export class ProfileService {
     lastEventId?: string;
   }) {
     this.validateRequiredFields(data, [
-      'employeeId',
+      'empleadoId',
       'nombre',
       'apellido',
       'email',
@@ -93,9 +106,9 @@ export class ProfileService {
     const existingEvent = await this.repository.findByLastEventId(eventId);
     if (existingEvent) return existingEvent;
 
-    const existingProfile = await this.repository.findByEmployeeId(data.employeeId);
+    const existingProfile = await this.repository.findByEmpleadoId(data.empleadoId);
     if (existingProfile) {
-      throw new ProfileError(409, `Ya existe un perfil para el empleado '${data.employeeId}'`);
+      throw new ProfileError(409, `Ya existe un perfil para el empleado '${data.empleadoId}'`);
     }
 
     const estado = this.parseEstado(data.estado ?? 'ACTIVO');
@@ -115,7 +128,7 @@ export class ProfileService {
   }
 
   async update(
-    employeeId: string,
+    empleadoId: string,
     data: {
       nombre?: string;
       apellido?: string;
@@ -124,6 +137,13 @@ export class ProfileService {
       departamentoId?: string;
       estado?: string;
       fechaRetiro?: string | null;
+      // Los cinco campos canonicos del perfil. A diferencia de nombre, cargo o
+      // departamento —que los gobierna employees-service y llegan por evento—
+      // estos los edita el propio empleado sobre su perfil.
+      telefono?: string | null;
+      direccion?: string | null;
+      ciudad?: string | null;
+      biografia?: string | null;
       lastEventId?: string;
     },
   ) {
@@ -139,8 +159,8 @@ export class ProfileService {
       }
     }
     if (data.email !== undefined) this.validateEmail(data.email);
-    const current = await this.repository.findByEmployeeId(employeeId);
-    if (!current) throw new ProfileError(404, `Perfil con employeeId '${employeeId}' no encontrado`);
+    const current = await this.repository.findByEmpleadoId(empleadoId);
+    if (!current) throw new ProfileError(404, `Perfil con empleadoId '${empleadoId}' no encontrado`);
 
     const eventId = data.lastEventId ?? crypto.randomUUID();
     const duplicate = await this.repository.findByLastEventId(eventId);
@@ -152,14 +172,20 @@ export class ProfileService {
     }
 
     const transitionToRetired = current.estado !== 'RETIRADO' && nextEstado === 'RETIRADO';
+    // El archivado acompana al retiro: el perfil se conserva para auditoria pero
+    // queda fuera de las consultas corrientes. Se escribe en la misma operacion
+    // que el cambio de estado para que no pueda quedar un perfil retirado sin
+    // archivar si algo falla en medio.
+    const archivado = transitionToRetired ? true : undefined;
     const fechaRetiro = nextEstado === 'RETIRADO'
       ? this.parseDate(data.fechaRetiro ?? new Date().toISOString(), 'fechaRetiro')
       : data.fechaRetiro === null ? null : undefined;
 
-    const updated = await this.repository.update(employeeId, {
+    const updated = await this.repository.update(empleadoId, {
       ...data,
       estado: nextEstado,
       fechaRetiro,
+      ...(archivado !== undefined && { archivado }),
       lastEventId: eventId,
     });
 
@@ -177,8 +203,8 @@ export class ProfileService {
     return updated;
   }
 
-  async retire(employeeId: string, lastEventId?: string) {
-    return this.update(employeeId, {
+  async retire(empleadoId: string, lastEventId?: string) {
+    return this.update(empleadoId, {
       estado: 'RETIRADO',
       lastEventId,
     });
@@ -188,10 +214,10 @@ export class ProfileService {
 
   async processEvent(envelope: EventEnvelope): Promise<ProcessingResult> {
     const { id: eventId, type: eventType, data } = envelope;
-    const employeeId = data?.id ?? 'UNKNOWN';
+    const empleadoId = data?.id ?? 'UNKNOWN';
 
     console.log(
-      `[PROFILE] Mensaje recibido | UUID: ${eventId} | Evento: ${eventType} | Empleado: ${employeeId}`
+      `[PROFILE] Mensaje recibido | UUID: ${eventId} | Evento: ${eventType} | Empleado: ${empleadoId}`
     );
 
     // Filtrar eventos no gestionados por este servicio
@@ -215,7 +241,7 @@ export class ProfileService {
     const existing = await this.repository.findByLastEventId(eventId);
     if (existing) {
       console.warn(
-        `[PROFILE] [DUPLICADO] Evento ya procesado anteriormente | UUID: ${eventId} | Tipo: ${eventType} | Empleado: ${employeeId}`
+        `[PROFILE] [DUPLICADO] Evento ya procesado anteriormente | UUID: ${eventId} | Tipo: ${eventType} | Empleado: ${empleadoId}`
       );
       return 'DUPLICATE';
     }
@@ -224,13 +250,13 @@ export class ProfileService {
     try {
       switch (eventType) {
         case 'empleado.creado':
-          return await this.handleEmpleadoCreado(eventId, employeeId, data);
+          return await this.handleEmpleadoCreado(eventId, empleadoId, data);
 
         case 'empleado.actualizado':
-          return await this.handleEmpleadoActualizado(eventId, employeeId, data);
+          return await this.handleEmpleadoActualizado(eventId, empleadoId, data);
 
         case 'empleado.retirado':
-          return await this.handleEmpleadoRetirado(eventId, employeeId, data);
+          return await this.handleEmpleadoRetirado(eventId, empleadoId, data);
 
         default:
           return 'IGNORED';
@@ -239,12 +265,12 @@ export class ProfileService {
       // Conflicto de UNIQUE constraint (condición de carrera entre réplicas)
       if (error?.code === 'P2002') {
         console.warn(
-          `[PROFILE] [DUPLICADO] Conflicto UNIQUE detectado al procesar | UUID: ${eventId} | Empleado: ${employeeId}`
+          `[PROFILE] [DUPLICADO] Conflicto UNIQUE detectado al procesar | UUID: ${eventId} | Empleado: ${empleadoId}`
         );
         return 'DUPLICATE';
       }
       console.error(
-        `[PROFILE] [ERROR] Excepción al procesar evento | UUID: ${eventId} | Tipo: ${eventType} | Empleado: ${employeeId} |`,
+        `[PROFILE] [ERROR] Excepción al procesar evento | UUID: ${eventId} | Tipo: ${eventType} | Empleado: ${empleadoId} |`,
         error
       );
       throw error;
@@ -255,7 +281,7 @@ export class ProfileService {
 
   private async handleEmpleadoCreado(
     eventId: string,
-    employeeId: string,
+    empleadoId: string,
     data: EventEnvelope['data']
   ): Promise<ProcessingResult> {
     this.validateRequiredFields(data, [
@@ -268,7 +294,7 @@ export class ProfileService {
     this.validateEmail(data.email as string);
 
     await this.repository.create({
-      employeeId,
+      empleadoId,
       nombre: data.nombre ?? '',
       apellido: data.apellido ?? '',
       email: data.email ?? '',
@@ -282,7 +308,7 @@ export class ProfileService {
     });
 
     console.log(
-      `[PROFILE] [CREADO] Perfil creado | UUID: ${eventId} | Empleado: ${employeeId} | ` +
+      `[PROFILE] [CREADO] Perfil creado | UUID: ${eventId} | Empleado: ${empleadoId} | ` +
         `Nombre: ${data.nombre} ${data.apellido} | Email: ${data.email}`
     );
     return 'CREATED';
@@ -290,16 +316,16 @@ export class ProfileService {
 
   private async handleEmpleadoActualizado(
     eventId: string,
-    employeeId: string,
+    empleadoId: string,
     data: EventEnvelope['data']
   ): Promise<ProcessingResult> {
     if (data.email !== undefined) this.validateEmail(data.email);
 
     // Verificar que el perfil base ya existe (puede llegar antes del creado en reentregas)
-    const profile = await this.repository.findByEmployeeId(employeeId);
+    const profile = await this.repository.findByEmpleadoId(empleadoId);
     if (!profile) {
       console.warn(
-        `[PROFILE] [ACTUALIZADO] Perfil no encontrado para actualizar | UUID: ${eventId} | Empleado: ${employeeId}. ` +
+        `[PROFILE] [ACTUALIZADO] Perfil no encontrado para actualizar | UUID: ${eventId} | Empleado: ${empleadoId}. ` +
           `Creando perfil desde evento actualizado.`
       );
       // Creación defensiva si el perfil no existe aún (reordenamiento de mensajes)
@@ -311,7 +337,7 @@ export class ProfileService {
         'departamentoId',
       ]);
       await this.repository.create({
-        employeeId,
+        empleadoId,
         nombre: data.nombre ?? '',
         apellido: data.apellido ?? '',
         email: data.email ?? '',
@@ -326,7 +352,7 @@ export class ProfileService {
       return 'CREATED';
     }
 
-    await this.repository.update(employeeId, {
+    await this.repository.update(empleadoId, {
       nombre: data.nombre,
       apellido: data.apellido,
       email: data.email,
@@ -336,7 +362,7 @@ export class ProfileService {
     });
 
     console.log(
-      `[PROFILE] [ACTUALIZADO] Perfil actualizado | UUID: ${eventId} | Empleado: ${employeeId} | ` +
+      `[PROFILE] [ACTUALIZADO] Perfil actualizado | UUID: ${eventId} | Empleado: ${empleadoId} | ` +
         `Nombre: ${data.nombre} ${data.apellido}`
     );
     return 'UPDATED';
@@ -344,13 +370,13 @@ export class ProfileService {
 
   private async handleEmpleadoRetirado(
     eventId: string,
-    employeeId: string,
+    empleadoId: string,
     data: EventEnvelope['data']
   ): Promise<ProcessingResult> {
-    const profile = await this.repository.findByEmployeeId(employeeId);
+    const profile = await this.repository.findByEmpleadoId(empleadoId);
     if (!profile) {
       console.warn(
-        `[PROFILE] [RETIRADO] Perfil no encontrado para retirar | UUID: ${eventId} | Empleado: ${employeeId}. Ignorando.`
+        `[PROFILE] [RETIRADO] Perfil no encontrado para retirar | UUID: ${eventId} | Empleado: ${empleadoId}. Ignorando.`
       );
       // Retornamos IGNORED de forma segura: no hay perfil que retirar
       return 'IGNORED';
@@ -360,13 +386,13 @@ export class ProfileService {
       ? this.parseDate(data.fechaRetiro, 'fechaRetiro')
       : new Date();
 
-    await this.repository.retire(employeeId, {
+    await this.repository.retire(empleadoId, {
       fechaRetiro,
       lastEventId: eventId,
     });
 
     console.log(
-      `[PROFILE] [RETIRADO] Perfil marcado como RETIRADO | UUID: ${eventId} | Empleado: ${employeeId} | ` +
+      `[PROFILE] [RETIRADO] Perfil marcado como RETIRADO | UUID: ${eventId} | Empleado: ${empleadoId} | ` +
         `FechaRetiro: ${fechaRetiro.toISOString()}`
     );
     return 'RETIRED';

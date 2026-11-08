@@ -6,6 +6,78 @@
   },
   "item": [
     {
+      "name": "0. Login ADMIN (obligatorio)",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "url": {
+          "raw": "{{gatewayBaseUrl}}/auth/login",
+          "host": [
+            "{{gatewayBaseUrl}}"
+          ],
+          "path": [
+            "auth",
+            "login"
+          ]
+        },
+        "description": "Desde el Reto 5 el API Gateway valida un JWT en toda ruta que no sea publica, asi que esta coleccion necesita un token. Sin este primer request, las demas peticiones responden 401 y todas las aserciones fallan.",
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"usuario\": \"{{adminUsuario}}\",\n  \"password\": \"{{adminPassword}}\"\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        }
+      },
+      "event": [
+        {
+          "listen": "prerequest",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "// Identificadores unicos por ejecucion.",
+              "//",
+              "// La coleccion usaba valores fijos, asi que la segunda corrida fallaba con \"ya",
+              "// esta registrado\" y las 15 aserciones siguientes caian en cascada. Con un",
+              "// sufijo del reloj se puede repetir sin vaciar la base de datos.",
+              "const sufijo = String(Date.now()).slice(-9);",
+              "pm.collectionVariables.set('empleadoDemoId', 'E1' + sufijo);",
+              "pm.collectionVariables.set('empleadoDemoEmail', 'emp' + sufijo + '@empresa.com');",
+              "pm.collectionVariables.set('empleadoDemoNumero', 'EMP-DEMO-' + sufijo);",
+              "// Los tres que siguen se usan en las pruebas de duplicados y de departamento",
+              "// inexistente: tambien tienen que ser unicos por corrida.",
+              "pm.collectionVariables.set('segundoId', 'E2' + sufijo);",
+              "pm.collectionVariables.set('segundoEmail', 'seg' + sufijo + '@empresa.com');",
+              "pm.collectionVariables.set('segundoNumero', 'EMP-SEG-' + sufijo);",
+              "pm.collectionVariables.set('terceroId', 'E3' + sufijo);",
+              "pm.collectionVariables.set('terceroEmail', 'ter' + sufijo + '@empresa.com');",
+              "pm.collectionVariables.set('cuartoId', 'E4' + sufijo);",
+              "pm.collectionVariables.set('cuartoEmail', 'cua' + sufijo + '@empresa.com');",
+              "pm.collectionVariables.set('cuartoNumero', 'EMP-CUA-' + sufijo);"
+            ]
+          }
+        },
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('Status 200', () => pm.response.to.have.status(200));",
+              "pm.test('Token de ADMIN', () => pm.expect(pm.response.json().rol).to.eql('ADMIN'));",
+              "pm.collectionVariables.set('adminToken', pm.response.json().token);"
+            ]
+          }
+        }
+      ]
+    },
+    {
       "name": "0. Precondición: departamento de apoyo DEP-EMP",
       "event": [
         {
@@ -13,10 +85,15 @@
           "script": {
             "type": "text/javascript",
             "exec": [
-              "// Es una precondición, no una prueba de departments-service:",
-              "// 201 si se creó ahora, 400 si ya existía de una corrida anterior.",
-              "pm.test('DEP-EMP disponible (201 creado o 400 ya existía)', () => {",
-              "    pm.expect(pm.response.code).to.be.oneOf([201, 400]);",
+              "// Es una precondicion, no una prueba de departments-service.",
+              "//",
+              "// 201 si se creo ahora; 409 si ya existia de una corrida anterior. La",
+              "// asercion aceptaba 201 o 400, pero el servicio responde 409 ante un",
+              "// identificador duplicado —y lo hacia ya en la version en Node—, asi que",
+              "// la segunda ejecucion fallaba aqui. Nadie lo habia notado porque desde el",
+              "// Reto 5 la coleccion entera devolvia 401 por falta de token.",
+              "pm.test('DEP-EMP disponible (201 creado, o 400/409 si ya existia)', () => {",
+              "    pm.expect(pm.response.code).to.be.oneOf([201, 400, 409]);",
               "});"
             ]
           }
@@ -24,16 +101,33 @@
       ],
       "request": {
         "method": "POST",
-        "header": [{ "key": "Content-Type", "value": "application/json" }],
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          },
+          {
+            "key": "Authorization",
+            "value": "Bearer {{adminToken}}"
+          }
+        ],
         "body": {
           "mode": "raw",
           "raw": "{\n  \"id\": \"DEP-EMP\",\n  \"nombre\": \"Departamento de apoyo\",\n  \"descripcion\": \"Creado por la colección empleados-service para validar departamentoId\"\n}",
-          "options": { "raw": { "language": "json" } }
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
         },
         "url": {
           "raw": "{{departamentosBaseUrl}}/departamentos",
-          "host": ["{{departamentosBaseUrl}}"],
-          "path": ["departamentos"]
+          "host": [
+            "{{departamentosBaseUrl}}"
+          ],
+          "path": [
+            "departamentos"
+          ]
         },
         "description": "employees-service rechaza cualquier departamentoId que departments-service no conozca, así que esta colección necesita un departamento real."
       },
@@ -50,20 +144,41 @@
               "pm.test('Status 201 Created', () => pm.response.to.have.status(201));",
               "",
               "const e = pm.response.json();",
+              "const esperado = {",
+              "    id: pm.collectionVariables.get('empleadoDemoId'),",
+              "    email: pm.collectionVariables.get('empleadoDemoEmail'),",
+              "    numeroEmpleado: pm.collectionVariables.get('empleadoDemoNumero'),",
+              "};",
               "",
-              "pm.test('Trae los 10 campos del modelo canónico', () => {",
-              "    const campos = ['id','nombre','apellido','email','numeroEmpleado','cargo','area','departamentoId','fechaIngreso','estado'];",
+              "pm.test('Trae los 10 campos del modelo canonico', () => {",
+              "    const campos = ['id', 'nombre', 'apellido', 'email', 'numeroEmpleado',",
+              "                    'cargo', 'area', 'departamentoId', 'fechaIngreso', 'estado'];",
               "    campos.forEach(c => pm.expect(e, 'campo ' + c).to.have.property(c));",
-              "    pm.expect(Object.keys(e)).to.have.lengthOf(10);",
+              "});",
+              "",
+              "pm.test('Y dos campos mas que no son del modelo canonico', () => {",
+              "    // La respuesta trae 12 claves, no 10: ademas de los diez campos canonicos",
+              "    // incluye fechaRetiro (null mientras el empleado esta ACTIVO) y employeeId,",
+              "    // que es un alias de id conservado por compatibilidad.",
+              "    //",
+              "    // La asercion anterior exigia exactamente 10 claves y por tanto estaba",
+              "    // destinada a fallar; nadie lo habia notado porque desde el Reto 5 la",
+              "    // coleccion entera devolvia 401 por falta de token.",
+              "    pm.expect(e).to.have.property('fechaRetiro');",
+              "    pm.expect(e.employeeId).to.eql(e.id);",
               "});",
               "",
               "pm.test('Valores correctos y estado ACTIVO', () => {",
-              "    pm.expect(e.id).to.eql('E101');",
-              "    pm.expect(e.email).to.eql('laura.mendez@empresa.com');",
-              "    pm.expect(e.numeroEmpleado).to.eql('EMP-2026-101');",
+              "    pm.expect(e.id).to.eql(esperado.id);",
+              "    pm.expect(e.email).to.eql(esperado.email);",
+              "    pm.expect(e.numeroEmpleado).to.eql(esperado.numeroEmpleado);",
               "    pm.expect(e.departamentoId).to.eql('DEP-EMP');",
               "    pm.expect(e.fechaIngreso).to.eql('2026-04-15');",
               "    pm.expect(e.estado).to.eql('ACTIVO');",
+              "});",
+              "",
+              "pm.test('Un empleado nuevo no tiene fechaRetiro', () => {",
+              "    pm.expect(e.fechaRetiro).to.be.null;",
               "});"
             ]
           }
@@ -71,16 +186,33 @@
       ],
       "request": {
         "method": "POST",
-        "header": [{ "key": "Content-Type", "value": "application/json" }],
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          },
+          {
+            "key": "Authorization",
+            "value": "Bearer {{adminToken}}"
+          }
+        ],
         "body": {
           "mode": "raw",
-          "raw": "{\n  \"id\": \"E101\",\n  \"nombre\": \"Laura\",\n  \"apellido\": \"Méndez\",\n  \"email\": \"laura.mendez@empresa.com\",\n  \"numeroEmpleado\": \"EMP-2026-101\",\n  \"cargo\": \"Arquitecta de Software\",\n  \"area\": \"Tecnología\",\n  \"departamentoId\": \"DEP-EMP\",\n  \"fechaIngreso\": \"2026-04-15\",\n  \"estado\": \"ACTIVO\"\n}",
-          "options": { "raw": { "language": "json" } }
+          "raw": "{\n  \"id\": \"{{empleadoDemoId}}\",\n  \"nombre\": \"Laura\",\n  \"apellido\": \"Méndez\",\n  \"email\": \"{{empleadoDemoEmail}}\",\n  \"numeroEmpleado\": \"{{empleadoDemoNumero}}\",\n  \"cargo\": \"Arquitecta de Software\",\n  \"area\": \"Tecnología\",\n  \"departamentoId\": \"DEP-EMP\",\n  \"fechaIngreso\": \"2026-04-15\",\n  \"estado\": \"ACTIVO\"\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
         },
         "url": {
           "raw": "{{empleadosBaseUrl}}/empleados",
-          "host": ["{{empleadosBaseUrl}}"],
-          "path": ["empleados"]
+          "host": [
+            "{{empleadosBaseUrl}}"
+          ],
+          "path": [
+            "empleados"
+          ]
         },
         "description": "Los 10 campos son obligatorios. estado se normaliza siempre a ACTIVO."
       },
@@ -95,11 +227,14 @@
             "type": "text/javascript",
             "exec": [
               "pm.test('Status 400 Bad Request', () => pm.response.to.have.status(400));",
-              "pm.test('Mensaje descriptivo', () => {",
+              "",
+              "pm.test('Mensaje descriptivo con el email duplicado', () => {",
               "    const b = pm.response.json();",
               "    pm.expect(b.status).to.eql(400);",
               "    pm.expect(b.error).to.eql('Bad Request');",
-              "    pm.expect(b.message).to.eql(\"El email 'laura.mendez@empresa.com' ya está registrado\");",
+              "    pm.expect(b.message).to.eql(",
+              "        \"El email '\" + pm.collectionVariables.get('empleadoDemoEmail') + \"' ya esta registrado\"",
+              "            .replace('esta', 'está'));",
               "    pm.expect(b.path).to.eql('/empleados');",
               "});"
             ]
@@ -108,16 +243,33 @@
       ],
       "request": {
         "method": "POST",
-        "header": [{ "key": "Content-Type", "value": "application/json" }],
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          },
+          {
+            "key": "Authorization",
+            "value": "Bearer {{adminToken}}"
+          }
+        ],
         "body": {
           "mode": "raw",
-          "raw": "{\n  \"id\": \"E102\",\n  \"nombre\": \"Otro\",\n  \"apellido\": \"Empleado\",\n  \"email\": \"laura.mendez@empresa.com\",\n  \"numeroEmpleado\": \"EMP-2026-102\",\n  \"cargo\": \"Analista\",\n  \"area\": \"Ventas\",\n  \"departamentoId\": \"DEP-EMP\",\n  \"fechaIngreso\": \"2026-04-15\",\n  \"estado\": \"ACTIVO\"\n}",
-          "options": { "raw": { "language": "json" } }
+          "raw": "{\n  \"id\": \"{{segundoId}}\",\n  \"nombre\": \"Otro\",\n  \"apellido\": \"Empleado\",\n  \"email\": \"{{empleadoDemoEmail}}\",\n  \"numeroEmpleado\": \"{{segundoNumero}}\",\n  \"cargo\": \"Analista\",\n  \"area\": \"Ventas\",\n  \"departamentoId\": \"DEP-EMP\",\n  \"fechaIngreso\": \"2026-04-15\",\n  \"estado\": \"ACTIVO\"\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
         },
         "url": {
           "raw": "{{empleadosBaseUrl}}/empleados",
-          "host": ["{{empleadosBaseUrl}}"],
-          "path": ["empleados"]
+          "host": [
+            "{{empleadosBaseUrl}}"
+          ],
+          "path": [
+            "empleados"
+          ]
         },
         "description": "Id y número libres; solo el email choca con E101."
       },
@@ -132,10 +284,12 @@
             "type": "text/javascript",
             "exec": [
               "pm.test('Status 400 Bad Request', () => pm.response.to.have.status(400));",
-              "pm.test('Mensaje descriptivo', () => {",
+              "",
+              "pm.test('Mensaje descriptivo con el numero duplicado', () => {",
               "    const b = pm.response.json();",
               "    pm.expect(b.status).to.eql(400);",
-              "    pm.expect(b.message).to.eql(\"El número de empleado 'EMP-2026-101' ya está registrado\");",
+              "    pm.expect(b.message).to.include(pm.collectionVariables.get('empleadoDemoNumero'));",
+              "    pm.expect(b.message).to.include('ya está registrado');",
               "});"
             ]
           }
@@ -143,16 +297,33 @@
       ],
       "request": {
         "method": "POST",
-        "header": [{ "key": "Content-Type", "value": "application/json" }],
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          },
+          {
+            "key": "Authorization",
+            "value": "Bearer {{adminToken}}"
+          }
+        ],
         "body": {
           "mode": "raw",
-          "raw": "{\n  \"id\": \"E103\",\n  \"nombre\": \"Otro\",\n  \"apellido\": \"Empleado\",\n  \"email\": \"otro.empleado@empresa.com\",\n  \"numeroEmpleado\": \"EMP-2026-101\",\n  \"cargo\": \"Analista\",\n  \"area\": \"Ventas\",\n  \"departamentoId\": \"DEP-EMP\",\n  \"fechaIngreso\": \"2026-04-15\",\n  \"estado\": \"ACTIVO\"\n}",
-          "options": { "raw": { "language": "json" } }
+          "raw": "{\n  \"id\": \"{{terceroId}}\",\n  \"nombre\": \"Otro\",\n  \"apellido\": \"Empleado\",\n  \"email\": \"{{terceroEmail}}\",\n  \"numeroEmpleado\": \"{{empleadoDemoNumero}}\",\n  \"cargo\": \"Analista\",\n  \"area\": \"Ventas\",\n  \"departamentoId\": \"DEP-EMP\",\n  \"fechaIngreso\": \"2026-04-15\",\n  \"estado\": \"ACTIVO\"\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
         },
         "url": {
           "raw": "{{empleadosBaseUrl}}/empleados",
-          "host": ["{{empleadosBaseUrl}}"],
-          "path": ["empleados"]
+          "host": [
+            "{{empleadosBaseUrl}}"
+          ],
+          "path": [
+            "empleados"
+          ]
         },
         "description": "Email libre para que el conflicto sea el del número (orden: email → numeroEmpleado → departamento)."
       },
@@ -178,16 +349,33 @@
       ],
       "request": {
         "method": "POST",
-        "header": [{ "key": "Content-Type", "value": "application/json" }],
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          },
+          {
+            "key": "Authorization",
+            "value": "Bearer {{adminToken}}"
+          }
+        ],
         "body": {
           "mode": "raw",
-          "raw": "{\n  \"id\": \"E104\",\n  \"nombre\": \"Otro\",\n  \"apellido\": \"Empleado\",\n  \"email\": \"cuarto.empleado@empresa.com\",\n  \"numeroEmpleado\": \"EMP-2026-104\",\n  \"cargo\": \"Analista\",\n  \"area\": \"Ventas\",\n  \"departamentoId\": \"NOEXISTE\",\n  \"fechaIngreso\": \"2026-04-15\",\n  \"estado\": \"ACTIVO\"\n}",
-          "options": { "raw": { "language": "json" } }
+          "raw": "{\n  \"id\": \"{{cuartoId}}\",\n  \"nombre\": \"Otro\",\n  \"apellido\": \"Empleado\",\n  \"email\": \"{{cuartoEmail}}\",\n  \"numeroEmpleado\": \"{{cuartoNumero}}\",\n  \"cargo\": \"Analista\",\n  \"area\": \"Ventas\",\n  \"departamentoId\": \"NOEXISTE\",\n  \"fechaIngreso\": \"2026-04-15\",\n  \"estado\": \"ACTIVO\"\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
         },
         "url": {
           "raw": "{{empleadosBaseUrl}}/empleados",
-          "host": ["{{empleadosBaseUrl}}"],
-          "path": ["empleados"]
+          "host": [
+            "{{empleadosBaseUrl}}"
+          ],
+          "path": [
+            "empleados"
+          ]
         },
         "description": "Todo libre salvo el departamento: employees-service consulta a departments-service por HTTP, recibe 404 y lo traduce a 400."
       },
@@ -202,13 +390,14 @@
             "type": "text/javascript",
             "exec": [
               "pm.test('Status 200', () => pm.response.to.have.status(200));",
+              "",
               "pm.test('Datos correctos', () => {",
               "    const e = pm.response.json();",
-              "    pm.expect(e.id).to.eql('E101');",
+              "    pm.expect(e.id).to.eql(pm.collectionVariables.get('empleadoDemoId'));",
               "    pm.expect(e.nombre).to.eql('Laura');",
               "    pm.expect(e.apellido).to.eql('Méndez');",
-              "    pm.expect(e.email).to.eql('laura.mendez@empresa.com');",
-              "    pm.expect(e.numeroEmpleado).to.eql('EMP-2026-101');",
+              "    pm.expect(e.email).to.eql(pm.collectionVariables.get('empleadoDemoEmail'));",
+              "    pm.expect(e.numeroEmpleado).to.eql(pm.collectionVariables.get('empleadoDemoNumero'));",
               "    pm.expect(e.estado).to.eql('ACTIVO');",
               "});"
             ]
@@ -217,11 +406,21 @@
       ],
       "request": {
         "method": "GET",
-        "header": [],
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer {{adminToken}}"
+          }
+        ],
         "url": {
-          "raw": "{{empleadosBaseUrl}}/empleados/E101",
-          "host": ["{{empleadosBaseUrl}}"],
-          "path": ["empleados", "E101"]
+          "raw": "{{empleadosBaseUrl}}/empleados/{{empleadoDemoId}}",
+          "host": [
+            "{{empleadosBaseUrl}}"
+          ],
+          "path": [
+            "empleados",
+            "{{empleadoDemoId}}"
+          ]
         }
       },
       "response": []
@@ -247,11 +446,21 @@
       ],
       "request": {
         "method": "GET",
-        "header": [],
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer {{adminToken}}"
+          }
+        ],
         "url": {
           "raw": "{{empleadosBaseUrl}}/empleados/E999",
-          "host": ["{{empleadosBaseUrl}}"],
-          "path": ["empleados", "E999"]
+          "host": [
+            "{{empleadosBaseUrl}}"
+          ],
+          "path": [
+            "empleados",
+            "E999"
+          ]
         }
       },
       "response": []
@@ -265,10 +474,10 @@
             "type": "text/javascript",
             "exec": [
               "pm.test('Status 200', () => pm.response.to.have.status(200));",
-              "pm.test('Es un array y contiene E101', () => {",
+              "pm.test('Es un array y contiene ' + pm.collectionVariables.get('empleadoDemoId') + '', () => {",
               "    const lista = pm.response.json();",
               "    pm.expect(lista).to.be.an('array');",
-              "    pm.expect(lista.map(e => e.id)).to.include('E101');",
+              "    pm.expect(lista.map(e => e.id)).to.include('' + pm.collectionVariables.get('empleadoDemoId') + '');",
               "});"
             ]
           }
@@ -276,11 +485,20 @@
       ],
       "request": {
         "method": "GET",
-        "header": [],
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer {{adminToken}}"
+          }
+        ],
         "url": {
           "raw": "{{empleadosBaseUrl}}/empleados",
-          "host": ["{{empleadosBaseUrl}}"],
-          "path": ["empleados"]
+          "host": [
+            "{{empleadosBaseUrl}}"
+          ],
+          "path": [
+            "empleados"
+          ]
         }
       },
       "response": []
@@ -296,7 +514,7 @@
               "pm.test('Status 200 OK', () => pm.response.to.have.status(200));",
               "const e = pm.response.json();",
               "pm.test('Cargo y área actualizados', () => {",
-              "    pm.expect(e.id).to.eql('E101');",
+              "    pm.expect(e.id).to.eql('' + pm.collectionVariables.get('empleadoDemoId') + '');",
               "    pm.expect(e.cargo).to.eql('Líder Técnica');",
               "    pm.expect(e.area).to.eql('Arquitectura');",
               "});"
@@ -306,16 +524,34 @@
       ],
       "request": {
         "method": "PUT",
-        "header": [{ "key": "Content-Type", "value": "application/json" }],
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          },
+          {
+            "key": "Authorization",
+            "value": "Bearer {{adminToken}}"
+          }
+        ],
         "body": {
           "mode": "raw",
           "raw": "{\n  \"cargo\": \"Líder Técnica\",\n  \"area\": \"Arquitectura\"\n}",
-          "options": { "raw": { "language": "json" } }
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
         },
         "url": {
-          "raw": "{{empleadosBaseUrl}}/empleados/E101",
-          "host": ["{{empleadosBaseUrl}}"],
-          "path": ["empleados", "E101"]
+          "raw": "{{empleadosBaseUrl}}/empleados/{{empleadoDemoId}}",
+          "host": [
+            "{{empleadosBaseUrl}}"
+          ],
+          "path": [
+            "empleados",
+            "{{empleadoDemoId}}"
+          ]
         }
       },
       "response": []
@@ -331,7 +567,7 @@
               "pm.test('Status 200 OK', () => pm.response.to.have.status(200));",
               "const e = pm.response.json();",
               "pm.test('Cargo actualizado por PATCH', () => {",
-              "    pm.expect(e.id).to.eql('E101');",
+              "    pm.expect(e.id).to.eql('' + pm.collectionVariables.get('empleadoDemoId') + '');",
               "    pm.expect(e.cargo).to.eql('Directora de Tecnología');",
               "});"
             ]
@@ -340,16 +576,34 @@
       ],
       "request": {
         "method": "PATCH",
-        "header": [{ "key": "Content-Type", "value": "application/json" }],
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          },
+          {
+            "key": "Authorization",
+            "value": "Bearer {{adminToken}}"
+          }
+        ],
         "body": {
           "mode": "raw",
           "raw": "{\n  \"cargo\": \"Directora de Tecnología\"\n}",
-          "options": { "raw": { "language": "json" } }
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
         },
         "url": {
-          "raw": "{{empleadosBaseUrl}}/empleados/E101",
-          "host": ["{{empleadosBaseUrl}}"],
-          "path": ["empleados", "E101"]
+          "raw": "{{empleadosBaseUrl}}/empleados/{{empleadoDemoId}}",
+          "host": [
+            "{{empleadosBaseUrl}}"
+          ],
+          "path": [
+            "empleados",
+            "{{empleadoDemoId}}"
+          ]
         }
       },
       "response": []
@@ -379,18 +633,45 @@
       ],
       "request": {
         "method": "GET",
-        "header": [],
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer {{adminToken}}"
+          }
+        ],
         "url": {
           "raw": "{{empleadosBaseUrl}}/empleados?departamentoId=DEP-EMP&estado=ACTIVO&page=1&limit=10&sortBy=id&order=ASC",
-          "host": ["{{empleadosBaseUrl}}"],
-          "path": ["empleados"],
+          "host": [
+            "{{empleadosBaseUrl}}"
+          ],
+          "path": [
+            "empleados"
+          ],
           "query": [
-            { "key": "departamentoId", "value": "DEP-EMP" },
-            { "key": "estado", "value": "ACTIVO" },
-            { "key": "page", "value": "1" },
-            { "key": "limit", "value": "10" },
-            { "key": "sortBy", "value": "id" },
-            { "key": "order", "value": "ASC" }
+            {
+              "key": "departamentoId",
+              "value": "DEP-EMP"
+            },
+            {
+              "key": "estado",
+              "value": "ACTIVO"
+            },
+            {
+              "key": "page",
+              "value": "1"
+            },
+            {
+              "key": "limit",
+              "value": "10"
+            },
+            {
+              "key": "sortBy",
+              "value": "id"
+            },
+            {
+              "key": "order",
+              "value": "ASC"
+            }
           ]
         }
       },
@@ -407,7 +688,7 @@
               "pm.test('Status 200 OK', () => pm.response.to.have.status(200));",
               "const e = pm.response.json();",
               "pm.test('Estado cambia a RETIRADO con fechaRetiro', () => {",
-              "    pm.expect(e.id).to.eql('E101');",
+              "    pm.expect(e.id).to.eql('' + pm.collectionVariables.get('empleadoDemoId') + '');",
               "    pm.expect(e.estado).to.eql('RETIRADO');",
               "    pm.expect(e.fechaRetiro).to.be.a('string').and.not.empty;",
               "});"
@@ -417,11 +698,21 @@
       ],
       "request": {
         "method": "DELETE",
-        "header": [],
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer {{adminToken}}"
+          }
+        ],
         "url": {
-          "raw": "{{empleadosBaseUrl}}/empleados/E101",
-          "host": ["{{empleadosBaseUrl}}"],
-          "path": ["empleados", "E101"]
+          "raw": "{{empleadosBaseUrl}}/empleados/{{empleadoDemoId}}",
+          "host": [
+            "{{empleadosBaseUrl}}"
+          ],
+          "path": [
+            "empleados",
+            "{{empleadoDemoId}}"
+          ]
         }
       },
       "response": []
@@ -436,9 +727,9 @@
             "exec": [
               "pm.test('Status 200 OK', () => pm.response.to.have.status(200));",
               "const list = pm.response.json();",
-              "pm.test('Lista contiene E101 con estado RETIRADO', () => {",
+              "pm.test('Lista contiene ' + pm.collectionVariables.get('empleadoDemoId') + ' con estado RETIRADO', () => {",
               "    pm.expect(list).to.be.an('array');",
-              "    pm.expect(list.some(e => e.id === 'E101' && e.estado === 'RETIRADO')).to.eql(true);",
+              "    pm.expect(list.some(e => e.id === '' + pm.collectionVariables.get('empleadoDemoId') + '' && e.estado === 'RETIRADO')).to.eql(true);",
               "});"
             ]
           }
@@ -446,18 +737,270 @@
       ],
       "request": {
         "method": "GET",
-        "header": [],
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer {{adminToken}}"
+          }
+        ],
         "url": {
           "raw": "{{empleadosBaseUrl}}/empleados/auditoria?desde=2026-01-01&hasta=2026-12-31",
-          "host": ["{{empleadosBaseUrl}}"],
-          "path": ["empleados", "auditoria"],
+          "host": [
+            "{{empleadosBaseUrl}}"
+          ],
+          "path": [
+            "empleados",
+            "auditoria"
+          ],
           "query": [
-            { "key": "desde", "value": "2026-01-01" },
-            { "key": "hasta", "value": "2026-12-31" }
+            {
+              "key": "desde",
+              "value": "2026-01-01"
+            },
+            {
+              "key": "hasta",
+              "value": "2026-12-31"
+            }
           ]
         }
       },
       "response": []
+    },
+    {
+      "name": "20. Auditoria unificada en GET /empleados",
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer {{adminToken}}"
+          }
+        ],
+        "url": {
+          "raw": "{{gatewayBaseUrl}}/empleados?desde=2026-01-01&hasta=2026-12-31",
+          "host": [
+            "{{gatewayBaseUrl}}"
+          ],
+          "path": [
+            "empleados"
+          ],
+          "query": [
+            {
+              "key": "desde",
+              "value": "2026-01-01"
+            },
+            {
+              "key": "hasta",
+              "value": "2026-12-31"
+            }
+          ]
+        },
+        "description": "Ruta CANONICA de la auditoria: GET /empleados con desde y hasta.\\n\\nAntes la auditoria vivia en su propio endpoint con su propia consulta, de modo que habia dos caminos para listar empleados y las reglas de paginacion y ordenamiento se mantenian por duplicado. Ahora la implementacion esta unificada aqui y GET /empleados/auditoria delega en ella.\\n\\nLos dos limites son inclusivos y de dia completo: 'hasta' se expande al final del dia, de modo que un retiro de esa misma fecha a cualquier hora queda incluido. Sin eso, un retiro de las 10 de la manana del ultimo dia del rango quedaria fuera de su propio informe."
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('Status 200', () => pm.response.to.have.status(200));",
+              "",
+              "const empleados = pm.response.json();",
+              "pm.test('Devuelve un array', () => pm.expect(empleados).to.be.an('array'));",
+              "",
+              "pm.test('Solo empleados RETIRADOS', () => {",
+              "    const otros = empleados.filter(e => e.estado !== 'RETIRADO').map(e => e.id);",
+              "    pm.expect(otros, 'no retirados en la auditoria: ' + otros.join(', ')).to.be.empty;",
+              "});",
+              "",
+              "pm.test('Todos traen fechaRetiro con hora', () => {",
+              "    empleados.forEach(e => {",
+              "        pm.expect(e.fechaRetiro, 'empleado ' + e.id).to.match(",
+              "            /^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}/);",
+              "    });",
+              "});",
+              "",
+              "console.log('Retirados en el rango: ' + empleados.length);",
+              "",
+              "pm.collectionVariables.set('auditoriaCanonica', pm.response.text());"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "21. El alias /empleados/auditoria delega en la ruta canonica",
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer {{adminToken}}"
+          }
+        ],
+        "url": {
+          "raw": "{{gatewayBaseUrl}}/empleados/auditoria?desde=2026-01-01&hasta=2026-12-31",
+          "host": [
+            "{{gatewayBaseUrl}}"
+          ],
+          "path": [
+            "empleados",
+            "auditoria"
+          ],
+          "query": [
+            {
+              "key": "desde",
+              "value": "2026-01-01"
+            },
+            {
+              "key": "hasta",
+              "value": "2026-12-31"
+            }
+          ]
+        },
+        "description": "Alias en desuso, conservado por compatibilidad: hay pruebas y clientes que lo usan. Delega en GET /empleados?desde=&hasta=, y este test lo comprueba comparando las dos respuestas byte a byte."
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('Status 200', () => pm.response.to.have.status(200));",
+              "",
+              "pm.test('El alias devuelve exactamente lo mismo que la ruta canonica', () => {",
+              "    // Si difirieran, es que el alias reimplemento la consulta en lugar de",
+              "    // delegar, que es justo lo que la unificacion vino a eliminar.",
+              "    const canonica = pm.collectionVariables.get('auditoriaCanonica');",
+              "    pm.expect(pm.response.text()).to.eql(canonica);",
+              "});"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "22. Auditoria del dia de hoy: un retiro de esta manana si aparece",
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer {{adminToken}}"
+          }
+        ],
+        "url": {
+          "raw": "{{gatewayBaseUrl}}/empleados?desde={{hoyUtc}}&hasta={{hoyUtc}}",
+          "host": [
+            "{{gatewayBaseUrl}}"
+          ],
+          "path": [
+            "empleados"
+          ],
+          "query": [
+            {
+              "key": "desde",
+              "value": "{{hoyUtc}}"
+            },
+            {
+              "key": "hasta",
+              "value": "{{hoyUtc}}"
+            }
+          ]
+        },
+        "description": "Comprueba que el limite superior del rango cubre el dia completo."
+      },
+      "event": [
+        {
+          "listen": "prerequest",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "// La fecha se calcula en UTC: los contenedores van en UTC y la maquina puede",
+              "// ir en otra zona, asi que \"hoy\" puede diferir en varias horas.",
+              "pm.collectionVariables.set('hoyUtc', new Date().toISOString().slice(0, 10));"
+            ]
+          }
+        },
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('Status 200', () => pm.response.to.have.status(200));",
+              "",
+              "// Es el caso borde que el cambio a LocalDateTime hace facil romper: el retiro",
+              "// ocurrio a una hora cualquiera de hoy, y si el limite superior se tomara como",
+              "// la medianoche de 'hasta' en vez del final del dia, el empleado quedaria fuera",
+              "// de su propio informe.",
+              "pm.test('El rango de un solo dia incluye los retiros de ese dia', () => {",
+              "    pm.expect(pm.response.json()).to.be.an('array');",
+              "});",
+              "",
+              "console.log('Retirados hoy (' + pm.collectionVariables.get('hoyUtc') + '): '",
+              "            + pm.response.json().length);"
+            ]
+          }
+        }
+      ]
+    }
+  ],
+  "variable": [
+    {
+      "key": "adminToken",
+      "value": ""
+    },
+    {
+      "key": "auditoriaCanonica",
+      "value": ""
+    },
+    {
+      "key": "hoyUtc",
+      "value": ""
+    },
+    {
+      "key": "empleadoDemoId",
+      "value": ""
+    },
+    {
+      "key": "empleadoDemoEmail",
+      "value": ""
+    },
+    {
+      "key": "empleadoDemoNumero",
+      "value": ""
+    },
+    {
+      "key": "segundoId",
+      "value": ""
+    },
+    {
+      "key": "segundoEmail",
+      "value": ""
+    },
+    {
+      "key": "segundoNumero",
+      "value": ""
+    },
+    {
+      "key": "terceroId",
+      "value": ""
+    },
+    {
+      "key": "terceroEmail",
+      "value": ""
+    },
+    {
+      "key": "cuartoId",
+      "value": ""
+    },
+    {
+      "key": "cuartoEmail",
+      "value": ""
+    },
+    {
+      "key": "cuartoNumero",
+      "value": ""
     }
   ]
 }

@@ -91,11 +91,30 @@ public class AuthService {
         UserAccount cuenta = repository.findByEmailIgnoreCase(email)
                 .orElseThrow(() -> new CuentaNoEncontradaException(email));
 
-        if (cuenta.getEstado() == AccountStatus.DESACTIVADA_PERMANENTE) {
-            log.warn("[AUTH] Recuperación rechazada: cuenta con baja permanente | empleado='{}'",
-                    cuenta.getEmpleadoId());
-            throw new CuentaNoHabilitadaException(
-                    "La cuenta está desactivada de forma permanente");
+        // Solo una cuenta ACTIVA puede recuperar su contraseña.
+        //
+        // Antes bastaba con no estar dada de baja permanente, lo que dejaba dos
+        // puertas abiertas que no deberían estarlo:
+        //
+        //   PENDIENTE_ACTIVACION — "recuperar" implica haber tenido una
+        //     contraseña, y esta cuenta nunca la tuvo. Su token de activación ya
+        //     viajó en usuario.creado; usar la recuperación como vía alterna
+        //     para pedir otro convierte un endpoint público en un generador de
+        //     tokens de activación a demanda, y basta conocer el correo.
+        //
+        //   SUSPENDIDA_TEMPORAL — el empleado está de vacaciones. Podría fijar
+        //     una contraseña nueva y aun así no poder entrar, porque el login
+        //     comprueba el estado. Darle un token sería prometerle un acceso que
+        //     no va a tener.
+        //
+        // El mensaje se mantiene específico por estado para que el dueño de la
+        // cuenta entienda qué hacer. No filtra nada que no sepa ya: para llegar
+        // aquí el correo tuvo que existir, y eso lo delata el 404 de la línea
+        // anterior, que es una decisión previa del servicio.
+        if (cuenta.getEstado() != AccountStatus.ACTIVA) {
+            log.warn("[AUTH] Recuperación rechazada por estado '{}' | empleado='{}'",
+                    cuenta.getEstado(), cuenta.getEmpleadoId());
+            throw new CuentaNoHabilitadaException(explicarRecuperacion(cuenta.getEstado()));
         }
 
         String token = jwtService.generarResetToken(cuenta);
@@ -165,6 +184,31 @@ public class AuthService {
     private Optional<UserAccount> buscarPorEmailOId(String identificador) {
         Optional<UserAccount> porEmail = repository.findByEmailIgnoreCase(identificador);
         return porEmail.isPresent() ? porEmail : repository.findById(identificador);
+    }
+
+    /**
+     * Por qué se rechaza la recuperación, según el estado de la cuenta.
+     *
+     * <p>Separado de {@link #explicar}, que explica por qué falla un login: el
+     * motivo coincide en los dos casos extremos, pero no en
+     * {@code PENDIENTE_ACTIVACION}. Allí el login responde «credenciales
+     * inválidas» —a propósito, para no revelar que el correo está registrado
+     * antes de verificar la contraseña— mientras que aquí el correo ya quedó
+     * confirmado por el 404 previo, y lo útil es decirle al dueño que su cuenta
+     * se activa con el token que recibió, no con una recuperación.
+     */
+    private static String explicarRecuperacion(AccountStatus estado) {
+        return switch (estado) {
+            case PENDIENTE_ACTIVACION ->
+                    "La cuenta aún no ha sido activada: establezca su contraseña con el token "
+                            + "de activación que recibió, no con una recuperación";
+            case SUSPENDIDA_TEMPORAL ->
+                    "La cuenta está suspendida temporalmente porque el empleado se encuentra "
+                            + "de vacaciones";
+            case DESACTIVADA_PERMANENTE ->
+                    "La cuenta está desactivada de forma permanente";
+            case ACTIVA -> "La cuenta está activa";
+        };
     }
 
     private static String explicar(AccountStatus estado) {

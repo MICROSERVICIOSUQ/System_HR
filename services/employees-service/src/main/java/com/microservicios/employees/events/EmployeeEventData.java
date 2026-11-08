@@ -22,8 +22,18 @@ public record EmployeeEventData(
         @JsonProperty("fechaRetiro") String fechaRetiro
 ) {
     public static EmployeeEventData from(Employee employee) {
-        String fechaRetiro = (employee.getStatus() == EmployeeStatus.RETIRED)
-                ? LocalDate.now().toString()
+        // La fecha del retiro sale de la entidad, no del reloj.
+        //
+        // Antes era LocalDate.now(), lo que tenía dos problemas. El evidente:
+        // ignoraba el valor almacenado, así que si el evento se volvía a
+        // publicar —una reentrega, una reconstrucción del read model— informaba
+        // de la fecha de ese momento y no de la del retiro. El segundo: con
+        // precisión de día se perdía la hora exacta, que es justamente lo que el
+        // cambio a LocalDateTime vino a conservar, y los consumidores la
+        // recibían a medianoche.
+        String fechaRetiro = (employee.getStatus() == EmployeeStatus.RETIRED
+                && employee.getFechaRetiro() != null)
+                ? employee.getFechaRetiro().toString()
                 : null;
 
         return new EmployeeEventData(

@@ -23,7 +23,7 @@ export interface RetiredEmployeeEvent {
 
 export class EmployeeEventPublisher {
   async publishRetired(profile: {
-    employeeId: string;
+    empleadoId: string;
     nombre: string;
     apellido: string;
     email: string;
@@ -37,9 +37,20 @@ export class EmployeeEventPublisher {
       type: 'empleado.retirado',
       version: '1.0',
       occurredAt: new Date().toISOString(),
-      producer: 'employees-service',
+      // El productor es este servicio, no employees-service.
+      //
+      // Decía 'employees-service', lo que contradecía el tipo declarado arriba
+      // (`producer: 'profiles-service'`). El error nunca salió porque el
+      // servicio se ejecuta con tsx, que elimina los tipos sin comprobarlos; se
+      // destapó al correr `tsc --noEmit`.
+      //
+      // No es solo un error de tipos: el campo `producer` del envelope existe
+      // para saber quién emitió un evento cuando hay que depurar la cadena. Un
+      // servicio que firma con el nombre de otro hace que esa información
+      // engañe, que es peor que no tenerla.
+      producer: 'profiles-service',
       data: {
-        id: profile.employeeId,
+        id: profile.empleadoId,
         nombre: profile.nombre,
         apellido: profile.apellido,
         email: profile.email,

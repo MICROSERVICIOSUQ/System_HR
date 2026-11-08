@@ -71,7 +71,13 @@ services:
       - "${AUTH_PORT:-8085}"
     restart: unless-stopped
     healthcheck:
-      test: ["CMD-SHELL", "curl -f --silent http://localhost:$${SERVER_PORT:-8085}/auth/health"]
+      # /health y no /auth/health: es la sonda estandarizada del ecosistema, la
+      # que comprueba de verdad PostgreSQL y RabbitMQ y devuelve 503 cuando
+      # alguno falla. /auth/health sigue existiendo por compatibilidad, pero
+      # responde siempre 200 sin mirar sus dependencias, así que como healthcheck
+      # de Docker daba una garantía falsa: el contenedor se declaraba sano con la
+      # base de datos caída.
+      test: ["CMD-SHELL", "curl -f --silent http://localhost:$${SERVER_PORT:-8085}/health"]
       # Mismo motivo que en employees-service: el arranque en frío de un JVM
       # con JPA, Flyway y RabbitMQ no cabe en el margen anterior.
       interval: 10s

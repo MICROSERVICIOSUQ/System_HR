@@ -1,85 +1,1006 @@
 {
   "info": {
-    "name": "perfiles-service",
-    "description": "CRUD del read model EmployeeProfile, baja lógica, paginación e idempotencia.",
+    "name": "perfiles-service (Dev 2)",
+    "description": "Read model CQRS de empleados. Verifica los cambios del Desarrollador 2:\n\n  - Los cinco campos canonicos del perfil (telefono, direccion, ciudad, biografia, fechaCreacion).\n  - El renombrado de employeeId a empleadoId, con alias de compatibilidad.\n  - La marca de archivado y su filtro.\n  - La regla de propiedad del recurso (ABAC): 200 en el perfil propio, 403 en el ajeno.\n\nORDEN: las cuatro carpetas van de corrido, pero con RETARDO de ~2500 ms entre peticiones. El perfil no se crea con un POST: este servicio es un read model y su unica fuente son los eventos de RabbitMQ, que tardan unos segundos en propagarse.\n\nNOTA: todas las peticiones van por el API Gateway. La version anterior de esta coleccion apuntaba a {{perfilesBaseUrl}}, el puerto directo del servicio, que no esta publicado al host (ADR-008: impide esquivar la validacion del JWT) y que tampoco estaba definido en el entorno, asi que no se podia ejecutar.",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
   },
-  "variable": [
-    { "key": "perfilesBaseUrl", "value": "http://localhost:8083" },
-    { "key": "profileEmployeeId", "value": "EMP-PROFILE-CRUD" },
-    { "key": "profileIdempotencyKey", "value": "profile-crud-create-001" }
-  ],
   "item": [
     {
-      "name": "1. POST /profiles",
-      "request": {
-        "method": "POST",
-        "header": [
-          { "key": "Content-Type", "value": "application/json" },
-          { "key": "Idempotency-Key", "value": "{{profileIdempotencyKey}}" }
-        ],
-        "body": {
-          "mode": "raw",
-          "raw": "{\n  \"employeeId\": \"{{profileEmployeeId}}\",\n  \"nombre\": \"Ana\",\n  \"apellido\": \"Pardo\",\n  \"email\": \"ana.pardo@empresa.com\",\n  \"cargo\": \"Analista\",\n  \"departamentoId\": \"DEPT-R4\",\n  \"fechaIngreso\": \"2026-03-01\"\n}",
-          "options": { "raw": { "language": "json" } }
+      "name": "0. Preparacion",
+      "description": "Token de ADMIN y dos empleados cuyos perfiles llegan por evento.",
+      "item": [
+        {
+          "name": "0.1 Login ADMIN",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{gatewayBaseUrl}}/auth/login",
+              "host": [
+                "{{gatewayBaseUrl}}"
+              ],
+              "path": [
+                "auth",
+                "login"
+              ]
+            },
+            "description": "Guarda adminToken. Todo lo demas depende de esta peticion.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"usuario\": \"{{adminUsuario}}\",\n  \"password\": \"{{adminPassword}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const sufijo = String(Date.now()).slice(-9);",
+                  "pm.collectionVariables.set('empleadoId', 'EPRF' + sufijo);",
+                  "pm.collectionVariables.set('empleadoEmail', 'prf' + sufijo + '@empresa.com');",
+                  "pre = 'EMP-PRF-' + sufijo;",
+                  "pm.collectionVariables.set('numeroEmpleado', pre);",
+                  "// Un segundo empleado para probar la regla de propiedad: hace falta un perfil",
+                  "// AJENO al que intentar escribir.",
+                  "pm.collectionVariables.set('ajenoId', 'EPRF' + sufijo + 'B');",
+                  "pm.collectionVariables.set('ajenoEmail', 'prf' + sufijo + 'b@empresa.com');",
+                  "pm.collectionVariables.set('ajenoNumero', pre + 'B');"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 200', () => pm.response.to.have.status(200));",
+                  "pm.collectionVariables.set('adminToken', pm.response.json().token);"
+                ]
+              }
+            }
+          ]
         },
-        "url": { "raw": "{{perfilesBaseUrl}}/profiles", "host": ["{{perfilesBaseUrl}}"], "path": ["profiles"] }
-      },
-      "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": [
-        "pm.test('Status 201', () => pm.response.to.have.status(201));",
-        "pm.test('Perfil ACTIVO creado', () => pm.expect(pm.response.json().estado).to.eql('ACTIVO'));"
-      ] } }]
+        {
+          "name": "0.2 Precondicion: departamento IT",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{adminToken}}"
+              }
+            ],
+            "url": {
+              "raw": "{{gatewayBaseUrl}}/departamentos",
+              "host": [
+                "{{gatewayBaseUrl}}"
+              ],
+              "path": [
+                "departamentos"
+              ]
+            },
+            "description": "El alta de empleado valida el departamento. Tolera 400/409 si ya existe.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"id\": \"IT\",\n  \"nombre\": \"Tecnologia\",\n  \"descripcion\": \"Departamento de tecnologia\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('IT disponible', () => pm.expect(pm.response.code).to.be.oneOf([201, 400, 409]));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "0.3 Crear empleado (el perfil llega por evento)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{adminToken}}"
+              }
+            ],
+            "url": {
+              "raw": "{{gatewayBaseUrl}}/empleados",
+              "host": [
+                "{{gatewayBaseUrl}}"
+              ],
+              "path": [
+                "empleados"
+              ]
+            },
+            "description": "El perfil NO se crea con un POST /perfiles. Este servicio es un read model CQRS: su unica fuente son los eventos. Al crear el empleado, employees-service publica empleado.creado y profiles-service construye el perfil al consumirlo. Por eso la peticion siguiente espera unos segundos.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"id\": \"{{empleadoId}}\",\n  \"nombre\": \"Perfil\",\n  \"apellido\": \"Demo\",\n  \"email\": \"{{empleadoEmail}}\",\n  \"numeroEmpleado\": \"{{numeroEmpleado}}\",\n  \"cargo\": \"Analista\",\n  \"area\": \"Tecnologia\",\n  \"departamentoId\": \"IT\",\n  \"fechaIngreso\": \"2026-11-08\",\n  \"estado\": \"ACTIVO\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 201', () => pm.response.to.have.status(201));",
+                  "console.log('Espere ~8s: el perfil se crea al consumir empleado.creado.');"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "0.4 Crear un segundo empleado (perfil ajeno)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{adminToken}}"
+              }
+            ],
+            "url": {
+              "raw": "{{gatewayBaseUrl}}/empleados",
+              "host": [
+                "{{gatewayBaseUrl}}"
+              ],
+              "path": [
+                "empleados"
+              ]
+            },
+            "description": "Hace falta un perfil que NO sea del usuario autenticado para poder comprobar la regla de propiedad (403) en la carpeta 3.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"id\": \"{{ajenoId}}\",\n  \"nombre\": \"Ajeno\",\n  \"apellido\": \"Demo\",\n  \"email\": \"{{ajenoEmail}}\",\n  \"numeroEmpleado\": \"{{ajenoNumero}}\",\n  \"cargo\": \"Analista\",\n  \"area\": \"Tecnologia\",\n  \"departamentoId\": \"IT\",\n  \"fechaIngreso\": \"2026-11-08\",\n  \"estado\": \"ACTIVO\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 201', () => pm.response.to.have.status(201));"
+                ]
+              }
+            }
+          ]
+        }
+      ]
     },
     {
-      "name": "2. GET /profiles paginado",
-      "request": {
-        "method": "GET",
-        "url": { "raw": "{{perfilesBaseUrl}}/profiles?page=1&limit=10", "host": ["{{perfilesBaseUrl}}"], "path": ["profiles"], "query": [
-          { "key": "page", "value": "1" },
-          { "key": "limit", "value": "10" }
-        ] }
-      },
-      "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": [
-        "pm.test('Status 200', () => pm.response.to.have.status(200));",
-        "const body = pm.response.json();",
-        "pm.test('Devuelve data y meta', () => { pm.expect(body.data).to.be.an('array'); pm.expect(body.meta.total).to.be.a('number'); });"
-      ] } }]
+      "name": "1. El modelo del perfil",
+      "description": "empleadoId, su alias y los cinco campos canonicos.",
+      "item": [
+        {
+          "name": "1.1 El perfil creado por el evento",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{adminToken}}"
+              }
+            ],
+            "url": {
+              "raw": "{{gatewayBaseUrl}}/perfiles/{{empleadoId}}",
+              "host": [
+                "{{gatewayBaseUrl}}"
+              ],
+              "path": [
+                "perfiles",
+                "{{empleadoId}}"
+              ]
+            },
+            "description": "Comprueba el modelo completo: el campo canonico, su alias y los cinco campos del perfil. Si responde 404, el evento aun no se ha consumido: espere unos segundos y reintente."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 200', () => pm.response.to.have.status(200));",
+                  "",
+                  "const p = pm.response.json();",
+                  "",
+                  "pm.test('empleadoId es el campo canonico', () => {",
+                  "    pm.expect(p.empleadoId).to.eql(pm.collectionVariables.get('empleadoId'));",
+                  "});",
+                  "",
+                  "pm.test('employeeId se mantiene como alias', () => {",
+                  "    // La columna se renombro a empleadoId para alinearla con el modelo canonico",
+                  "    // del sistema, que usa nombres en espanol. Quitar employeeId habria roto a",
+                  "    // cualquier cliente que lo leyera, asi que la respuesta lleva los dos. Es la",
+                  "    // misma solucion que employees-service, que expone id y employeeId.",
+                  "    pm.expect(p.employeeId).to.eql(p.empleadoId);",
+                  "});",
+                  "",
+                  "pm.test('Estan los cinco campos canonicos del perfil', () => {",
+                  "    ['telefono', 'direccion', 'ciudad', 'biografia', 'fechaCreacion'].forEach(c => {",
+                  "        pm.expect(p, 'falta ' + c).to.have.property(c);",
+                  "    });",
+                  "});",
+                  "",
+                  "pm.test('fechaCreacion es distinta de fechaIngreso', () => {",
+                  "    // fechaIngreso es cuando entro el empleado a la empresa; fechaCreacion es",
+                  "    // cuando se creo su perfil en el read model. Pueden diferir en meses.",
+                  "    pm.expect(p.fechaCreacion).to.not.be.null;",
+                  "});",
+                  "",
+                  "pm.test('Un perfil nuevo no esta archivado', () => {",
+                  "    pm.expect(p.archivado).to.eql(false);",
+                  "});",
+                  "",
+                  "console.log('empleadoId=' + p.empleadoId + ' | archivado=' + p.archivado",
+                  "            + ' | fechaCreacion=' + p.fechaCreacion);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "1.2 Editar los campos del perfil (ADMIN)",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{adminToken}}"
+              }
+            ],
+            "url": {
+              "raw": "{{gatewayBaseUrl}}/perfiles/{{empleadoId}}",
+              "host": [
+                "{{gatewayBaseUrl}}"
+              ],
+              "path": [
+                "perfiles",
+                "{{empleadoId}}"
+              ]
+            },
+            "description": "Los campos del perfil los edita su dueno. A diferencia de nombre, cargo o departamento —que los gobierna employees-service y llegan por evento— estos cinco son datos del perfil: employees-service no los conoce ni los publica. fechaCreacion no se edita: la fija la base de datos al crear la fila.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"telefono\": \"+57 310 555 0199\",\n  \"direccion\": \"Calle 10 #20-30\",\n  \"ciudad\": \"Armenia\",\n  \"biografia\": \"Analista de datos del area de Tecnologia\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 200', () => pm.response.to.have.status(200));",
+                  "",
+                  "const p = pm.response.json();",
+                  "pm.test('Los cuatro campos editables quedaron guardados', () => {",
+                  "    pm.expect(p.telefono).to.eql('+57 310 555 0199');",
+                  "    pm.expect(p.direccion).to.eql('Calle 10 #20-30');",
+                  "    pm.expect(p.ciudad).to.eql('Armenia');",
+                  "    pm.expect(p.biografia).to.eql('Analista de datos del area de Tecnologia');",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "1.3 Ordenar por fechaCreacion",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{adminToken}}"
+              }
+            ],
+            "url": {
+              "raw": "{{gatewayBaseUrl}}/perfiles?page=1&limit=5&sortBy=fechaCreacion&order=DESC",
+              "host": [
+                "{{gatewayBaseUrl}}"
+              ],
+              "path": [
+                "perfiles"
+              ],
+              "query": [
+                {
+                  "key": "page",
+                  "value": "1"
+                },
+                {
+                  "key": "limit",
+                  "value": "5"
+                },
+                {
+                  "key": "sortBy",
+                  "value": "fechaCreacion"
+                },
+                {
+                  "key": "order",
+                  "value": "DESC"
+                }
+              ]
+            },
+            "description": "fechaCreacion y archivado son campos ordenables nuevos. De paso: el listado paginado devuelve {data, meta}, mientras que sin parametros devuelve un array."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 200', () => pm.response.to.have.status(200));",
+                  "pm.test('Respuesta paginada con data y meta', () => {",
+                  "    const c = pm.response.json();",
+                  "    pm.expect(c).to.have.property('data');",
+                  "    pm.expect(c.meta).to.have.all.keys('total', 'page', 'limit', 'totalPages');",
+                  "});"
+                ]
+              }
+            }
+          ]
+        }
+      ]
     },
     {
-      "name": "3. GET /profiles/:employeeId",
-      "request": {
-        "method": "GET",
-        "url": { "raw": "{{perfilesBaseUrl}}/profiles/{{profileEmployeeId}}", "host": ["{{perfilesBaseUrl}}"], "path": ["profiles", "{{profileEmployeeId}}"] }
-      },
-      "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": [
-        "pm.test('Status 200', () => pm.response.to.have.status(200));",
-        "pm.test('Consulta por employeeId', () => pm.expect(pm.response.json().employeeId).to.eql(pm.collectionVariables.get('profileEmployeeId')));"
-      ] } }]
+      "name": "2. Archivado",
+      "description": "La marca y su filtro.",
+      "item": [
+        {
+          "name": "2.1 Solo los perfiles vigentes (?archivado=false)",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{adminToken}}"
+              }
+            ],
+            "url": {
+              "raw": "{{gatewayBaseUrl}}/perfiles?archivado=false",
+              "host": [
+                "{{gatewayBaseUrl}}"
+              ],
+              "path": [
+                "perfiles"
+              ],
+              "query": [
+                {
+                  "key": "archivado",
+                  "value": "false"
+                }
+              ]
+            },
+            "description": "La consulta corriente: los perfiles de quienes siguen en la empresa. Un perfil retirado no se borra —el historial se conserva para auditoria— pero se archiva para que no arrastre las consultas del dia a dia."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 200', () => pm.response.to.have.status(200));",
+                  "",
+                  "const perfiles = pm.response.json();",
+                  "const lista = Array.isArray(perfiles) ? perfiles : perfiles.data;",
+                  "",
+                  "pm.test('Ninguno esta archivado', () => {",
+                  "    const archivados = lista.filter(p => p.archivado).map(p => p.empleadoId);",
+                  "    pm.expect(archivados, 'archivados colados: ' + archivados.join(', ')).to.be.empty;",
+                  "});",
+                  "",
+                  "console.log('Perfiles activos (no archivados): ' + lista.length);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "2.2 Solo los archivados (?archivado=true)",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{adminToken}}"
+              }
+            ],
+            "url": {
+              "raw": "{{gatewayBaseUrl}}/perfiles?archivado=true",
+              "host": [
+                "{{gatewayBaseUrl}}"
+              ],
+              "path": [
+                "perfiles"
+              ],
+              "query": [
+                {
+                  "key": "archivado",
+                  "value": "true"
+                }
+              ]
+            },
+            "description": "El historial: perfiles de empleados ya retirados."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 200', () => pm.response.to.have.status(200));",
+                  "",
+                  "const lista = pm.response.json();",
+                  "pm.test('Todos estan archivados', () => {",
+                  "    const noArchivados = lista.filter(p => !p.archivado).map(p => p.empleadoId);",
+                  "    pm.expect(noArchivados).to.be.empty;",
+                  "});",
+                  "",
+                  "pm.test('Y todos estan RETIRADOS', () => {",
+                  "    // Hoy las dos condiciones coinciden, pero son filtros distintos: un perfil",
+                  "    // podria archivarse por otro motivo sin estar retirado, y entonces estas dos",
+                  "    // consultas dejarian de dar lo mismo.",
+                  "    pm.expect(lista.every(p => p.estado === 'RETIRADO')).to.be.true;",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "2.3 Un valor que no es booleano da 400",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{adminToken}}"
+              }
+            ],
+            "url": {
+              "raw": "{{gatewayBaseUrl}}/perfiles?archivado=quizas",
+              "host": [
+                "{{gatewayBaseUrl}}"
+              ],
+              "path": [
+                "perfiles"
+              ],
+              "query": [
+                {
+                  "key": "archivado",
+                  "value": "quizas"
+                }
+              ]
+            },
+            "description": "El filtro solo acepta true o false. Un valor invalido se rechaza en lugar de ignorarse: ignorarlo devolveria la lista completa y el cliente creeria que su filtro se aplico."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 400', () => pm.response.to.have.status(400));",
+                  "pm.test('Explica el valor esperado', () => {",
+                  "    pm.expect(pm.response.json().message).to.include('true o false');",
+                  "});"
+                ]
+              }
+            }
+          ]
+        }
+      ]
     },
     {
-      "name": "4. PATCH /profiles/:employeeId",
-      "request": {
-        "method": "PATCH",
-        "header": [{ "key": "Content-Type", "value": "application/json" }, { "key": "Idempotency-Key", "value": "profile-crud-update-001" }],
-        "body": { "mode": "raw", "raw": "{ \"cargo\": \"Analista Senior\" }", "options": { "raw": { "language": "json" } } },
-        "url": { "raw": "{{perfilesBaseUrl}}/profiles/{{profileEmployeeId}}", "host": ["{{perfilesBaseUrl}}"], "path": ["profiles", "{{profileEmployeeId}}"] }
-      },
-      "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": [
-        "pm.test('Status 200', () => pm.response.to.have.status(200));",
-        "pm.test('Perfil actualizado', () => pm.expect(pm.response.json().cargo).to.eql('Analista Senior'));"
-      ] } }]
+      "name": "3. Regla de propiedad (ABAC)",
+      "description": "200 en el perfil propio, 403 en el ajeno.",
+      "item": [
+        {
+          "name": "3.1 Activar la cuenta del empleado",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{gatewayBaseUrl}}/auth/reset-password",
+              "host": [
+                "{{gatewayBaseUrl}}"
+              ],
+              "path": [
+                "auth",
+                "reset-password"
+              ]
+            },
+            "description": "Hace falta un token de rol USER para probar la regla de propiedad. El token de activacion lo trae el script previo del evento usuario.creado.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"token\": \"{{tokenActivacion}}\",\n  \"nuevaPassword\": \"Secreta123\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Activa la cuenta del empleado para obtener un token de rol USER.",
+                  "//",
+                  "// El token de activacion no viaja en ninguna respuesta HTTP: se publica en el",
+                  "// evento usuario.creado y notifications-service lo persiste. Se recupera de ahi,",
+                  "// que es la prueba de que el sistema no lo expone.",
+                  "const base  = pm.environment.get('gatewayBaseUrl') || pm.variables.get('gatewayBaseUrl');",
+                  "const admin = pm.collectionVariables.get('adminToken');",
+                  "const email = pm.collectionVariables.get('empleadoEmail');",
+                  "",
+                  "pm.sendRequest({",
+                  "    url: base + '/notifications?limit=50&sortBy=processedAt&order=DESC',",
+                  "    method: 'GET',",
+                  "    header: { 'Authorization': 'Bearer ' + admin, 'Accept': 'application/json' }",
+                  "}, (err, res) => {",
+                  "    if (err) { console.log('No se pudo consultar /notifications:', err); return; }",
+                  "    const cuerpo = res.json();",
+                  "    const filas  = Array.isArray(cuerpo) ? cuerpo : (cuerpo.data || []);",
+                  "    const n = filas.find(x => x.eventType === 'usuario.creado'",
+                  "                           && String(x.email).toLowerCase() === String(email).toLowerCase());",
+                  "    if (!n) { console.log('Aun no llego usuario.creado para ' + email); return; }",
+                  "    pm.collectionVariables.set('tokenActivacion', n.payload.data.token);",
+                  "});"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (!pm.collectionVariables.get('tokenActivacion')) {",
+                  "    pm.test('El script previo no obtuvo el token de activacion', () => {",
+                  "        pm.expect.fail('Revise la consola: puede que el evento aun no haya llegado');",
+                  "    });",
+                  "} else {",
+                  "    pm.test('Status 200', () => pm.response.to.have.status(200));",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "3.2 Login del empleado (rol USER)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{gatewayBaseUrl}}/auth/login",
+              "host": [
+                "{{gatewayBaseUrl}}"
+              ],
+              "path": [
+                "auth",
+                "login"
+              ]
+            },
+            "description": "Guarda userToken.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"usuario\": \"{{empleadoEmail}}\",\n  \"password\": \"Secreta123\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 200', () => pm.response.to.have.status(200));",
+                  "const b = pm.response.json();",
+                  "pm.test('Rol USER', () => pm.expect(b.rol).to.eql('USER'));",
+                  "pm.collectionVariables.set('userToken', b.token);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "3.3 Un USER edita SU PROPIO perfil (200)",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{userToken}}"
+              }
+            ],
+            "url": {
+              "raw": "{{gatewayBaseUrl}}/perfiles/{{empleadoId}}",
+              "host": [
+                "{{gatewayBaseUrl}}"
+              ],
+              "path": [
+                "perfiles",
+                "{{empleadoId}}"
+              ]
+            },
+            "description": "Autorizacion por propiedad del recurso (ABAC), no RBAC: el permiso no depende solo del rol sino de quien es dueno del dato. El gateway compara el claim sub del token con el id de la ruta. Es lo que permite que cada empleado gestione su perfil sin darle permisos de administrador.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"ciudad\": \"Pereira\",\n  \"telefono\": \"+57 311 222 3344\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 200', () => pm.response.to.have.status(200));",
+                  "pm.test('El cambio se aplico', () => {",
+                  "    pm.expect(pm.response.json().ciudad).to.eql('Pereira');",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "3.4 Un USER intenta editar el perfil de OTRO (403)",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{userToken}}"
+              }
+            ],
+            "url": {
+              "raw": "{{gatewayBaseUrl}}/perfiles/{{ajenoId}}",
+              "host": [
+                "{{gatewayBaseUrl}}"
+              ],
+              "path": [
+                "perfiles",
+                "{{ajenoId}}"
+              ]
+            },
+            "description": "La otra mitad de la regla. El token es valido y el verbo esta permitido para el dueno, pero el id de la ruta es de otro empleado. Debe ser 403 ('se quien eres y no puedes') y no 401 ('no se quien eres'): responder 401 haria que el cliente intentara autenticarse de nuevo sin que eso resolviera nada.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"ciudad\": \"Intruso\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 403', () => pm.response.to.have.status(403));",
+                  "pm.test('No es 401: la identidad era valida', () => {",
+                  "    pm.expect(pm.response.code).to.not.eql(401);",
+                  "});",
+                  "pm.test('El mensaje explica que falta el permiso', () => {",
+                  "    pm.expect(pm.response.json().message).to.include('no tiene permiso');",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "3.5 Un USER SI puede LEER el perfil de otro (200)",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{userToken}}"
+              }
+            ],
+            "url": {
+              "raw": "{{gatewayBaseUrl}}/perfiles/{{ajenoId}}",
+              "host": [
+                "{{gatewayBaseUrl}}"
+              ],
+              "path": [
+                "perfiles",
+                "{{ajenoId}}"
+              ]
+            },
+            "description": "La restriccion de propiedad es de escritura. El rol USER tiene lectura sobre todo el ecosistema."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 200', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        }
+      ]
     },
     {
-      "name": "5. DELETE /profiles/:employeeId (baja lógica)",
-      "request": {
-        "method": "DELETE",
-        "header": [{ "key": "Idempotency-Key", "value": "profile-crud-retire-001" }],
-        "url": { "raw": "{{perfilesBaseUrl}}/profiles/{{profileEmployeeId}}", "host": ["{{perfilesBaseUrl}}"], "path": ["profiles", "{{profileEmployeeId}}"] }
-      },
-      "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": [
-        "pm.test('Status 200', () => pm.response.to.have.status(200));",
-        "pm.test('Perfil RETIRADO y conservado', () => { const p = pm.response.json(); pm.expect(p.estado).to.eql('RETIRADO'); pm.expect(p.fechaRetiro).to.exist; });"
-      ] } }]
+      "name": "4. Retiro y archivado",
+      "description": "El ciclo completo por eventos.",
+      "item": [
+        {
+          "name": "4.1 Retirar al empleado (ADMIN)",
+          "request": {
+            "method": "DELETE",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{adminToken}}"
+              }
+            ],
+            "url": {
+              "raw": "{{gatewayBaseUrl}}/empleados/{{empleadoId}}",
+              "host": [
+                "{{gatewayBaseUrl}}"
+              ],
+              "path": [
+                "empleados",
+                "{{empleadoId}}"
+              ]
+            },
+            "description": "El retiro ocurre en employees-service y se propaga por el evento empleado.retirado. profiles-service lo consume y archiva el perfil."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 200', () => pm.response.to.have.status(200));",
+                  "",
+                  "pm.test('El empleado queda RETIRADO con la hora exacta', () => {",
+                  "    const e = pm.response.json();",
+                  "    pm.expect(e.estado).to.eql('RETIRADO');",
+                  "    // fechaRetiro es un instante desde el cambio del Dev 1: antes era solo la",
+                  "    // fecha y dos retiros del mismo dia eran indistinguibles.",
+                  "    pm.expect(e.fechaRetiro).to.match(/^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}/);",
+                  "});",
+                  "",
+                  "console.log('Espere ~8s: el perfil se archiva al consumir empleado.retirado.');"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "4.2 El perfil quedo archivado",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{adminToken}}"
+              }
+            ],
+            "url": {
+              "raw": "{{gatewayBaseUrl}}/perfiles/{{empleadoId}}",
+              "host": [
+                "{{gatewayBaseUrl}}"
+              ],
+              "path": [
+                "perfiles",
+                "{{empleadoId}}"
+              ]
+            },
+            "description": "El archivado se escribe en la misma operacion que el cambio de estado: si fueran dos escrituras, un fallo entre ellas dejaria un perfil retirado sin archivar y el filtro ?archivado=false seguiria devolviendolo."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 200', () => pm.response.to.have.status(200));",
+                  "",
+                  "const p = pm.response.json();",
+                  "",
+                  "pm.test('El perfil quedo RETIRADO y ARCHIVADO', () => {",
+                  "    pm.expect(p.estado).to.eql('RETIRADO');",
+                  "    pm.expect(p.archivado).to.eql(true);",
+                  "});",
+                  "",
+                  "pm.test('El perfil NO se borro: la baja es logica', () => {",
+                  "    // El historial se conserva para auditoria. Lo que cambia es que queda fuera",
+                  "    // de las consultas corrientes, no que desaparezca.",
+                  "    pm.expect(p.empleadoId).to.eql(pm.collectionVariables.get('empleadoId'));",
+                  "});",
+                  "",
+                  "pm.test('La fechaRetiro llego con la hora, no a medianoche', () => {",
+                  "    // El evento empleado.retirado transporta el instante del retiro. Antes",
+                  "    // enviaba LocalDate.now(), asi que el perfil la recibia truncada a las 00:00",
+                  "    // y, si el evento se reentregaba, con la fecha de ese momento.",
+                  "    pm.expect(p.fechaRetiro).to.match(/^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}/);",
+                  "    pm.expect(p.fechaRetiro).to.not.include('T00:00:00.000');",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "4.3 Ya no aparece entre los vigentes",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{adminToken}}"
+              }
+            ],
+            "url": {
+              "raw": "{{gatewayBaseUrl}}/perfiles?archivado=false",
+              "host": [
+                "{{gatewayBaseUrl}}"
+              ],
+              "path": [
+                "perfiles"
+              ],
+              "query": [
+                {
+                  "key": "archivado",
+                  "value": "false"
+                }
+              ]
+            },
+            "description": "Cierra el ciclo: el perfil existe, pero fuera de la consulta corriente."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 200', () => pm.response.to.have.status(200));",
+                  "",
+                  "const lista = pm.response.json();",
+                  "const yo = pm.collectionVariables.get('empleadoId');",
+                  "",
+                  "pm.test('El perfil retirado quedo fuera del listado vigente', () => {",
+                  "    pm.expect(lista.map(p => p.empleadoId)).to.not.include(yo);",
+                  "});"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "variable": [
+    {
+      "key": "adminToken",
+      "value": ""
+    },
+    {
+      "key": "userToken",
+      "value": ""
+    },
+    {
+      "key": "tokenActivacion",
+      "value": ""
+    },
+    {
+      "key": "empleadoId",
+      "value": ""
+    },
+    {
+      "key": "empleadoEmail",
+      "value": ""
+    },
+    {
+      "key": "numeroEmpleado",
+      "value": ""
+    },
+    {
+      "key": "ajenoId",
+      "value": ""
+    },
+    {
+      "key": "ajenoEmail",
+      "value": ""
+    },
+    {
+      "key": "ajenoNumero",
+      "value": ""
     }
   ]
 }
