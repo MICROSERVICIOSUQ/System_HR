@@ -43,3 +43,9 @@ logs/
 .DS_Store
 Thumbs.db
 Desktop.ini
+# Entorno virtual de Python (departments-service)
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.coverage

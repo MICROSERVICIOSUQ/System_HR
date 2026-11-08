@@ -60,7 +60,7 @@ public class SaludController {
     private final String nombreServicio;
 
     public SaludController(HealthEndpoint healthEndpoint,
-                           @Value("${spring.application.name}") String nombreServicio) {
+                           @Value("${spring.application.name:employees-service}") String nombreServicio) {
         this.healthEndpoint = healthEndpoint;
         this.nombreServicio = nombreServicio;
     }

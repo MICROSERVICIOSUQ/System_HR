@@ -60,7 +60,11 @@ spring:
           predicates:
             - Path=/v3/api-docs/departamentos
           filters:
-            - SetPath=/docs/openapi.json
+            # /openapi.json y no /docs/openapi.json: departments-service se
+            # reconstruyó en Python con FastAPI, que sirve el contrato en esa
+            # ruta de fábrica. La versión en Node lo exponía bajo /docs porque
+            # el documento se escribía a mano en un archivo aparte.
+            - SetPath=/openapi.json
 
 jwt:
   # Mismo secreto simétrico con el que auth-service firma. Se inyecta por

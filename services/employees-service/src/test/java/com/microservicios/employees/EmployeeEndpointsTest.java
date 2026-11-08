@@ -357,6 +357,82 @@ class EmployeeEndpointsTest {
                 .andExpect(jsonPath("$[?(@.employeeId == 'E001')].nombre").value("Juan"));
     }
 
+    /**
+     * La auditoría en su ruta canónica: GET /empleados con desde y hasta.
+     *
+     * <p>Antes la auditoría solo existía en su propio endpoint, con su propia
+     * consulta. Ahora la implementación está unificada en GET /empleados y
+     * /empleados/auditoria delega en ella, de modo que las reglas de filtrado,
+     * paginación y ordenamiento se mantienen en un solo sitio.
+     */
+    @Test
+    @Order(19)
+    void auditoriaUnificadaEnListadoDeEmpleados() throws Exception {
+        // El rango acota a los retirados, aunque no se pida el estado: una
+        // auditoría es por definición sobre empleados dados de baja.
+        mockMvc.perform(get("/empleados?desde=2026-01-01&hasta=2026-12-31"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$").isArray())
+                .andExpect(jsonPath("$[?(@.employeeId == 'E001')].estado").value("RETIRADO"))
+                .andExpect(jsonPath("$[?(@.employeeId == 'E001')].fechaRetiro").isNotEmpty());
+
+        // Un rango que no cubre el retiro no devuelve nada.
+        mockMvc.perform(get("/empleados?desde=2024-01-01&hasta=2024-12-31"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$", hasSize(0)));
+
+        // El día del retiro, acotado a ese único día, SÍ lo incluye. Es el caso
+        // que el cambio a LocalDateTime hacía fácil romper: el retiro ocurrió a
+        // una hora cualquiera de hoy, y si el límite superior se tomara como la
+        // medianoche de 'hasta' en vez del final del día, el empleado quedaría
+        // fuera de su propio informe.
+        String hoy = java.time.LocalDate.now().toString();
+        mockMvc.perform(get("/empleados?desde=" + hoy + "&hasta=" + hoy))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$[?(@.employeeId == 'E001')].estado").value("RETIRADO"));
+
+        // La ruta canónica y el alias devuelven lo mismo: una implementación.
+        String porListado = mockMvc.perform(get("/empleados?desde=2026-01-01&hasta=2026-12-31"))
+                .andReturn().getResponse().getContentAsString();
+        String porAlias = mockMvc.perform(get("/empleados/auditoria?desde=2026-01-01&hasta=2026-12-31"))
+                .andReturn().getResponse().getContentAsString();
+        org.assertj.core.api.Assertions.assertThat(porListado)
+                .as("el alias debe delegar en la ruta canónica, no reimplementarla")
+                .isEqualTo(porAlias);
+
+        // Sin rango, GET /empleados sigue siendo el listado completo: el filtro
+        // de auditoría es opcional y no debe alterar el comportamiento previo.
+        mockMvc.perform(get("/empleados"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$").isArray());
+    }
+
+    /**
+     * fechaRetiro viaja con hora, no solo con día (migración V3).
+     *
+     * <p>Lo que el formato demuestra: antes la respuesta traía "2026-10-21" y dos
+     * empleados retirados el mismo día eran indistinguibles. Ahora trae el
+     * instante, que es lo que una auditoría laboral necesita para reconstruir el
+     * orden de los hechos.
+     */
+    @Test
+    @Order(19)
+    void fechaRetiroIncluyeLaHoraDelHecho() throws Exception {
+        String cuerpo = mockMvc.perform(get("/empleados/E001"))
+                .andExpect(status().isOk())
+                .andReturn().getResponse().getContentAsString();
+
+        String fechaRetiro = com.jayway.jsonpath.JsonPath.read(cuerpo, "$.fechaRetiro").toString();
+
+        org.assertj.core.api.Assertions.assertThat(fechaRetiro)
+                .as("ISO-8601 con hora: aaaa-MM-ddTHH:mm:ss, no solo la fecha")
+                .matches("\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}.*");
+
+        org.assertj.core.api.Assertions.assertThat(
+                        java.time.LocalDateTime.parse(fechaRetiro).toLocalDate())
+                .isEqualTo(java.time.LocalDate.now());
+    }
+
     @Test
     @Order(20)
     void auditEndpointValidatesDateParameters() throws Exception {

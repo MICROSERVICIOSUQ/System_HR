@@ -26,6 +26,8 @@ import org.springframework.data.jpa.domain.Specification;
 import jakarta.persistence.criteria.Predicate;
 
 import java.time.LocalDate;
+import java.time.LocalDateTime;
+import java.time.LocalTime;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -150,7 +152,9 @@ public class EmployeeService {
         if (updatedData.getStatus() != null) {
             existing.setStatus(updatedData.getStatus());
             if (updatedData.getStatus() == EmployeeStatus.RETIRED && existing.getFechaRetiro() == null) {
-                existing.setFechaRetiro(LocalDate.now());
+                // Igual que en retire(): el momento del retiro se registra con
+                // hora, no solo con día (migración V3).
+                existing.setFechaRetiro(LocalDateTime.now());
             }
         }
 
@@ -182,7 +186,9 @@ public class EmployeeService {
         }
         existing.setStatus(EmployeeStatus.RETIRED);
         if (existing.getFechaRetiro() == null) {
-            existing.setFechaRetiro(LocalDate.now());
+            // Fecha Y hora del retiro. Antes era LocalDate.now(), que perdía la
+            // hora exacta del hecho (migración V3).
+            existing.setFechaRetiro(LocalDateTime.now());
         }
         Employee saved = repository.save(existing);
 
@@ -205,8 +211,36 @@ public class EmployeeService {
             maxAttempts = 3,
             backoff = @Backoff(delay = 250, multiplier = 2.0)
     )
+    /**
+     * Auditoría de empleados retirados en un rango de fechas.
+     *
+     * <p>Quedó como delegación: la implementación real vive en
+     * {@link #findAll}, que es la ruta canónica
+     * ({@code GET /empleados?desde=&hasta=}). Se conserva porque
+     * {@code GET /empleados/auditoria} es un contrato publicado —hay pruebas y
+     * colecciones de Postman que lo usan— y romperlo no aportaría nada: lo que
+     * se quería eliminar era la consulta duplicada, no la ruta.
+     */
     public Object findAuditoria(LocalDate desde, LocalDate hasta, Integer page, Integer size,
                                 String sortBy, String order) {
+        // La validación se repite aquí a propósito. findAll trata desde/hasta
+        // como filtros opcionales —sin ellos devuelve la lista completa, que es
+        // su comportamiento correcto—, pero en esta ruta son obligatorios: una
+        // "auditoría" sin rango que devolviera todos los empleados sería una
+        // respuesta engañosa. Sin esta línea, GET /empleados/auditoria sin
+        // parámetros pasaba de 400 a 200 y devolvía el listado entero.
+        validarRangoDeAuditoria(desde, hasta);
+        return findAll(null, null, null, desde, hasta, page, size, sortBy, order);
+    }
+
+    /**
+     * Valida el rango de la consulta de auditoría.
+     *
+     * <p>Los dos límites son obligatorios a propósito: una auditoría sin fecha
+     * final devolvería "todos los retiros desde X", que con el tiempo crece sin
+     * techo. Pedir el rango completo obliga a acotar la consulta.
+     */
+    private static void validarRangoDeAuditoria(LocalDate desde, LocalDate hasta) {
         if (desde == null) {
             throw new IllegalArgumentException("El parámetro de fecha inicial 'desde' es obligatorio");
         }
@@ -214,20 +248,9 @@ public class EmployeeService {
             throw new IllegalArgumentException("El parámetro de fecha final 'hasta' es obligatorio");
         }
         if (desde.isAfter(hasta)) {
-            throw new IllegalArgumentException("La fecha 'desde' (" + desde + ") no puede ser posterior a la fecha 'hasta' (" + hasta + ")");
+            throw new IllegalArgumentException("La fecha 'desde' (" + desde
+                    + ") no puede ser posterior a la fecha 'hasta' (" + hasta + ")");
         }
-        if (page == null && size == null && sortBy == null && order == null) {
-            return repository.findByEstadoAndFechaRetiroBetween(EmployeeStatus.RETIRED, desde, hasta);
-        }
-
-        Pagination pagination = pagination(page, size, sortBy, order);
-        var result = repository.findByEstadoAndFechaRetiroBetween(
-                EmployeeStatus.RETIRED,
-                desde,
-                hasta,
-                PageRequest.of(pagination.page() - 1, pagination.limit(), pagination.sort())
-        );
-        return paginated(result.getContent(), result.getTotalElements(), pagination);
     }
 
     @Retryable(
@@ -269,18 +292,51 @@ public class EmployeeService {
             maxAttempts = 3,
             backoff = @Backoff(delay = 250, multiplier = 2.0)
     )
-    public Object findAll(String departamentoId, EmployeeStatus estado, String cargo, Integer page, Integer size,
-                          String sortBy, String order) {
+    public Object findAll(String departamentoId, EmployeeStatus estado, String cargo,
+                          LocalDate desde, LocalDate hasta,
+                          Integer page, Integer size, String sortBy, String order) {
+
+        // Consulta de auditoría unificada en este mismo método.
+        //
+        // Antes la auditoría vivía en su propio endpoint con su propia consulta,
+        // de modo que había dos caminos para listar empleados y las reglas de
+        // paginación y ordenamiento se mantenían por duplicado. Ahora
+        // GET /empleados?desde=&hasta= es la ruta canónica y
+        // GET /empleados/auditoria delega aquí.
+        final EmployeeStatus estadoEfectivo;
+        final LocalDateTime inicioRango;
+        final LocalDateTime finRango;
+
+        if (desde != null || hasta != null) {
+            validarRangoDeAuditoria(desde, hasta);
+            // La auditoría es, por definición, sobre empleados dados de baja: un
+            // empleado activo no tiene fecha de retiro que filtrar.
+            estadoEfectivo = EmployeeStatus.RETIRED;
+            // Día completo en los dos extremos. fecha_retiro es un TIMESTAMP
+            // desde la migración V3: si el límite superior fuera
+            // hasta.atStartOfDay(), un retiro de las 10 de la mañana del último
+            // día del rango quedaría fuera del informe.
+            inicioRango = desde.atStartOfDay();
+            finRango = hasta.atTime(LocalTime.MAX);
+        } else {
+            estadoEfectivo = estado;
+            inicioRango = null;
+            finRango = null;
+        }
+
         Specification<Employee> spec = (root, query, cb) -> {
             List<Predicate> predicates = new ArrayList<>();
             if (departamentoId != null && !departamentoId.isBlank()) {
                 predicates.add(cb.equal(root.get("departamentoId"), departamentoId.trim()));
             }
-            if (estado != null) {
-                predicates.add(cb.equal(root.get("estado"), estado));
+            if (estadoEfectivo != null) {
+                predicates.add(cb.equal(root.get("estado"), estadoEfectivo));
             }
             if (cargo != null && !cargo.isBlank()) {
                 predicates.add(cb.like(cb.lower(root.get("cargo")), "%" + cargo.trim().toLowerCase() + "%"));
+            }
+            if (inicioRango != null) {
+                predicates.add(cb.between(root.get("fechaRetiro"), inicioRango, finRango));
             }
             return cb.and(predicates.toArray(new Predicate[0]));
         };

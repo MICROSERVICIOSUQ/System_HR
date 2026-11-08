@@ -1,0 +1,31 @@
+# departments-service — Python 3.12 / FastAPI
+#
+# Versiones fijas, no rangos: una imagen que se reconstruye en seis meses debe
+# instalar exactamente lo mismo. Es la misma razón por la que los servicios Java
+# heredan versiones del BOM de Spring Boot y los Node tienen package-lock.json.
+
+# ── API ──────────────────────────────────────────────────────────────────────
+fastapi==0.115.6
+# Swagger UI en /docs lo sirve FastAPI de fábrica a partir de los modelos
+# Pydantic: no hay un archivo OpenAPI que mantener a mano y que se desincronice
+# del código, que es lo que le pasaba a la versión en Node.
+uvicorn[standard]==0.34.0
+pydantic==2.10.4
+
+# ── Persistencia ─────────────────────────────────────────────────────────────
+SQLAlchemy==2.0.36
+psycopg[binary]==3.2.3
+alembic==1.14.0
+
+# ── Cliente HTTP hacia employees-service ─────────────────────────────────────
+httpx==0.28.1
+
+# ── Observabilidad (Reto 8) ──────────────────────────────────────────────────
+prometheus-client==0.21.1
+opentelemetry-sdk==1.29.0
+opentelemetry-api==1.29.0
+opentelemetry-exporter-zipkin-json==1.29.0
+opentelemetry-instrumentation-fastapi==0.50b0
+opentelemetry-instrumentation-sqlalchemy==0.50b0
+opentelemetry-instrumentation-httpx==0.50b0
+python-json-logger==3.2.1
