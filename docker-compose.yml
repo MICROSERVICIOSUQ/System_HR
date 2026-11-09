@@ -284,8 +284,32 @@ services:
     networks:
       - microservices-net
 
+  # ──────────────────────────────────────────────────────────────────────────
+  # Integración continua (Reto 7)
+  #
+  # Los cuatro servicios de CI llevan el perfil 'ci' y NO arrancan con un
+  # 'docker compose up' normal:
+  #
+  #   docker compose --profile ci up -d        # Jenkins + SonarQube
+  #   docker compose up -d                     # solo la aplicación
+  #
+  # El motivo es doble. SonarQube pide unos 2 GB de memoria y tarda minutos en
+  # estar listo, así que no debería retrasar el arranque de la aplicación; y sus
+  # contraseñas eran obligatorias con ${VAR:?...}, de modo que un .env anterior
+  # a este lote hacía fallar 'docker compose up' POR COMPLETO, incluso para
+  # levantar solo los microservicios. Ahora el valor por omisión está vacío y es
+  # cada servicio el que se niega a arrancar sin él, con un mensaje propio.
+  # ──────────────────────────────────────────────────────────────────────────
   jenkins:
-    image: jenkins/jenkins:lts-jdk21
+    # Y no 'image: jenkins/jenkins:lts-jdk21': la imagen oficial no trae los
+    # plugins de jenkins/plugins.txt, ni el casc.yaml con los pipelines, ni el
+    # cliente de Docker, ni el entrypoint que arregla el grupo del socket. Con
+    # la imagen oficial, Jenkins arrancaba vacío: sin trabajos y sin poder
+    # ejecutar los 'docker.image(...).inside(...)' de los Jenkinsfile.
+    build:
+      context: ./jenkins
+      dockerfile: Dockerfile
+    profiles: ["ci"]
     ports:
       - "8081:8080"
     environment:
@@ -293,12 +317,14 @@ services:
       CASC_JENKINS_CONFIG: /usr/share/jenkins/ref/casc.yaml
       SECRETS: /run/sonar
       JENKINS_ADMIN_USER: ${JENKINS_ADMIN_USER:-admin}
-      JENKINS_ADMIN_PASSWORD: ${JENKINS_ADMIN_PASSWORD:?Ejecute scripts/setup-secrets.sh}
-      JENKINS_URL: ${JENKINS_URL:-http://localhost:9091/}
-      JENKINS_RESOURCE_URL: ${JENKINS_RESOURCE_URL:-http://127.0.0.1:9091/}
+      JENKINS_ADMIN_PASSWORD: ${JENKINS_ADMIN_PASSWORD:-}
+      JENKINS_URL: ${JENKINS_URL:-http://localhost:8081/}
+      JENKINS_RESOURCE_URL: ${JENKINS_RESOURCE_URL:-http://127.0.0.1:8081/}
       CI_NETWORK: ${CI_NETWORK:-system_hr_ci}
       CI_REPOSITORY_URL: ${CI_REPOSITORY_URL:-https://github.com/MICROSERVICIOSUQ/System_HR.git}
-      CI_REPOSITORY_BRANCH: ${CI_REPOSITORY_BRANCH:-valentina}
+      # main y no una rama de trabajo: los pipelines deben construir lo que está
+      # integrado, no la rama de un compañero.
+      CI_REPOSITORY_BRANCH: ${CI_REPOSITORY_BRANCH:-main}
     volumes:
       - jenkins_home:/var/jenkins_home
       - sonar_credentials:/run/sonar:ro
@@ -318,12 +344,13 @@ services:
 
   sonarqube:
     image: sonarqube:10-community
+    profiles: ["ci"]
     ports:
       - "9000:9000"
     environment:
       SONAR_JDBC_URL: jdbc:postgresql://sonar-db:5432/sonar
       SONAR_JDBC_USERNAME: sonar
-      SONAR_JDBC_PASSWORD: ${SONAR_DB_PASSWORD:?Ejecute scripts/setup-secrets.sh}
+      SONAR_JDBC_PASSWORD: ${SONAR_DB_PASSWORD:-}
     volumes:
       - sonarqube_data:/opt/sonarqube/data
       - sonarqube_logs:/opt/sonarqube/logs
@@ -349,10 +376,11 @@ services:
 
   sonar-db:
     image: postgres:16
+    profiles: ["ci"]
     environment:
       POSTGRES_DB: sonar
       POSTGRES_USER: sonar
-      POSTGRES_PASSWORD: ${SONAR_DB_PASSWORD:?Ejecute scripts/setup-secrets.sh}
+      POSTGRES_PASSWORD: ${SONAR_DB_PASSWORD:-}
     volumes:
       - sonar_db_data:/var/lib/postgresql/data
     healthcheck:
@@ -368,8 +396,18 @@ services:
     build:
       context: .
       dockerfile: ci/Dockerfile.sonar-setup
+    profiles: ["ci"]
     environment:
-      SONAR_ADMIN_PASSWORD: ${SONAR_ADMIN_PASSWORD:?Ejecute scripts/setup-secrets.sh}
+      # Sin esta variable el script usaba su valor por omisión,
+      # http://localhost:9000, que dentro de su propio contenedor no es
+      # SonarQube: la configuración del Quality Gate nunca llegaba a ejecutarse.
+      SONAR_URL: http://sonarqube:9000
+      SONAR_ADMIN_PASSWORD: ${SONAR_ADMIN_PASSWORD:-}
+      # Donde Jenkins espera leer el token: casc.yaml resuelve ${SONAR_TOKEN}
+      # desde el directorio SECRETS, que es este mismo volumen montado en modo
+      # lectura. Nadie escribía ese archivo, así que la credencial del análisis
+      # quedaba sin resolver.
+      SONAR_SECRETS_DIR: /run/sonar
     volumes:
       - sonar_credentials:/run/sonar
     depends_on:

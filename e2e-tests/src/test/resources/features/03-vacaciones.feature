@@ -36,7 +36,7 @@ Característica: Gestión de vacaciones y suspensión de la cuenta
   Escenario: Rechazo por fechas incoherentes
     Cuando programo un período de vacaciones cuya fecha de fin es anterior a la de inicio
     Entonces la respuesta debe tener código 400
-    Y el mensaje de error debe contener "no puede ser anterior a fechaInicio"
+    Y el mensaje de error debe contener "debe ser posterior a fechaInicio"
 
   Escenario: Rechazo por fecha de inicio en el pasado
     Cuando programo un período de vacaciones que empezó la semana pasada
@@ -49,6 +49,12 @@ Característica: Gestión de vacaciones y suspensión de la cuenta
     Entonces la respuesta debe tener código 400
     Y el mensaje de error debe contener "se solapa con uno existente"
 
+  # fechaFin es el día de REGRESO, no el último día de descanso: un día de
+  # vacaciones son dos fechas consecutivas. El informe de auditoría dejó esta
+  # semántica a decisión del equipo —inclusiva frente a exclusiva— y
+  # vacations-service la resolvió exigiendo fechaFin > fechaInicio. Si el equipo
+  # prefiriera la lectura inclusiva, lo que hay que cambiar es el servicio, no
+  # este escenario.
   Escenario: Un período de un solo día es válido
     Cuando programo un período de vacaciones de 1 día que empieza mañana
     Entonces la respuesta debe tener código 201

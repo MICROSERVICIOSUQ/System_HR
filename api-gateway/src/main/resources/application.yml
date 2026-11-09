@@ -25,12 +25,17 @@ spring:
           uri: ${DEPARTAMENTOS_URL:http://departments-service:8081}
           predicates:
             - Path=/departamentos,/departamentos/**
+        # Sin StripPrefix: el servicio en Go registra sus rutas con el prefijo
+        # puesto —"GET /notificaciones", "GET /notificaciones/empleado/{id}"— y
+        # ademas sirve el alias /notifications. Quitarle el primer segmento
+        # convertia GET /notificaciones en GET /, que cae en su manejador
+        # comodin: el historial completo respondia 404 por el gateway aunque el
+        # servicio estuviera sano y consumiendo eventos. La version anterior en
+        # Node montaba sus rutas en la raiz y por eso lo necesitaba.
         - id: notificaciones-route
           uri: ${NOTIFICACIONES_URL:http://notifications-service:8082}
           predicates:
-            - Path=/notificaciones/**
-          filters:
-            - StripPrefix=1
+            - Path=/notificaciones,/notificaciones/**,/notifications,/notifications/**
         # El alias /perfiles lo sirve el propio profiles-service, igual que
         # vacations-service ya servía /vacaciones. No hace falta reescribir la ruta.
         - id: perfiles-route
@@ -67,6 +72,28 @@ spring:
             # ruta de fábrica. La versión en Node lo exponía bajo /docs porque
             # el documento se escribía a mano en un archivo aparte.
             - SetPath=/openapi.json
+        # Los tres servicios de Node y Go publican su contrato en
+        # /openapi.json, igual que el de Python. Faltaban aquí, así que desde el
+        # host solo se podían leer tres de los siete contratos: el desplegable
+        # del borde no los listaba y no había ruta para alcanzarlos.
+        - id: api-docs-perfiles
+          uri: ${PERFILES_URL:http://profiles-service:8083}
+          predicates:
+            - Path=/v3/api-docs/perfiles
+          filters:
+            - SetPath=/openapi.json
+        - id: api-docs-vacaciones
+          uri: ${VACACIONES_URL:http://vacations-service:8084}
+          predicates:
+            - Path=/v3/api-docs/vacaciones
+          filters:
+            - SetPath=/openapi.json
+        - id: api-docs-notificaciones
+          uri: ${NOTIFICACIONES_URL:http://notifications-service:8082}
+          predicates:
+            - Path=/v3/api-docs/notificaciones
+          filters:
+            - SetPath=/openapi.json
 
 jwt:
   # Mismo secreto simétrico con el que auth-service firma. Se inyecta por
@@ -99,6 +126,12 @@ springdoc:
         url: /v3/api-docs/empleados
       - name: 3. departments-service
         url: /v3/api-docs/departamentos
+      - name: 4. profiles-service
+        url: /v3/api-docs/perfiles
+      - name: 5. vacations-service
+        url: /v3/api-docs/vacaciones
+      - name: 6. notifications-service
+        url: /v3/api-docs/notificaciones
 
 # ── Observabilidad (Reto 8) ──────────────────────────────────────────────────
 # El gateway es el primer objetivo de Prometheus y el más valioso: al ser el
@@ -144,6 +177,12 @@ resilience4j:
         failureRateThreshold: 50
         minimumNumberOfCalls: 10
         waitDurationInOpenState: 10s
+        # Un 404 es una comunicación exitosa: el servicio respondió y dijo que
+        # ese empleado no existe. Contarlo como fallo haría que una ráfaga de
+        # ids inventados abriera el circuito y dejara sin servicio al endpoint
+        # agregado. El 404 sigue propagándose al cliente; solo no cuenta aquí.
+        ignoreExceptions:
+          - org.springframework.web.reactive.function.client.WebClientResponseException$NotFound
       profilesService:
         slidingWindowType: COUNT_BASED
         slidingWindowSize: 10

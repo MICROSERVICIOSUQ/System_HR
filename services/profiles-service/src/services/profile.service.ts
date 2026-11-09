@@ -5,6 +5,7 @@ import {
 } from '../repositories/profile.repository.ts';
 import { ProfileError } from '../errors/profile.errors.ts';
 import { EmployeeEventPublisher } from '../messaging/employee-event.publisher.ts';
+import { logger } from '../observability/logger.ts';
 import crypto from 'node:crypto';
 
 // ─── Tipos de eventos ────────────────────────────────────────────────────────
@@ -196,7 +197,11 @@ export class ProfileService {
           fechaRetiro: updated.fechaRetiro ?? new Date(),
         });
       } catch (error) {
-        console.error('[PROFILE] No se pudo publicar empleado.retirado:', error);
+        logger.error('[PROFILE] No se pudo publicar empleado.retirado', {
+          empleadoId,
+          eventId,
+          error: error instanceof Error ? error.message : String(error),
+        });
         throw new ProfileError(503, 'No se pudo publicar el evento de retiro');
       }
     }
@@ -216,15 +221,15 @@ export class ProfileService {
     const { id: eventId, type: eventType, data } = envelope;
     const empleadoId = data?.id ?? 'UNKNOWN';
 
-    console.log(
-      `[PROFILE] Mensaje recibido | UUID: ${eventId} | Evento: ${eventType} | Empleado: ${empleadoId}`
-    );
+    logger.info('[PROFILE] Mensaje recibido', { eventId, eventType, empleadoId });
 
     // Filtrar eventos no gestionados por este servicio
     if (!ALLOWED_EVENTS.includes(eventType as any)) {
-      console.log(
-        `[PROFILE] Evento ignorado | UUID: ${eventId} | Tipo '${eventType}' no es de interés para este servicio`
-      );
+      logger.info('[PROFILE] Evento ignorado: no es de interés para este servicio', {
+        eventId,
+        eventType,
+        empleadoId,
+      });
       return 'IGNORED';
     }
 
@@ -240,9 +245,11 @@ export class ProfileService {
     // ── Idempotencia: comprobar si el eventId ya fue aplicado ────────────────
     const existing = await this.repository.findByLastEventId(eventId);
     if (existing) {
-      console.warn(
-        `[PROFILE] [DUPLICADO] Evento ya procesado anteriormente | UUID: ${eventId} | Tipo: ${eventType} | Empleado: ${empleadoId}`
-      );
+      logger.warn('[PROFILE] [DUPLICADO] Evento ya procesado anteriormente', {
+        eventId,
+        eventType,
+        empleadoId,
+      });
       return 'DUPLICATE';
     }
 
@@ -264,15 +271,19 @@ export class ProfileService {
     } catch (error: any) {
       // Conflicto de UNIQUE constraint (condición de carrera entre réplicas)
       if (error?.code === 'P2002') {
-        console.warn(
-          `[PROFILE] [DUPLICADO] Conflicto UNIQUE detectado al procesar | UUID: ${eventId} | Empleado: ${empleadoId}`
-        );
+        logger.warn('[PROFILE] [DUPLICADO] Conflicto UNIQUE al procesar el evento', {
+          eventId,
+          eventType,
+          empleadoId,
+        });
         return 'DUPLICATE';
       }
-      console.error(
-        `[PROFILE] [ERROR] Excepción al procesar evento | UUID: ${eventId} | Tipo: ${eventType} | Empleado: ${empleadoId} |`,
-        error
-      );
+      logger.error('[PROFILE] [ERROR] Excepción al procesar el evento', {
+        eventId,
+        eventType,
+        empleadoId,
+        error: error instanceof Error ? error.message : String(error),
+      });
       throw error;
     }
   }
@@ -307,10 +318,12 @@ export class ProfileService {
       lastEventId: eventId,
     });
 
-    console.log(
-      `[PROFILE] [CREADO] Perfil creado | UUID: ${eventId} | Empleado: ${empleadoId} | ` +
-        `Nombre: ${data.nombre} ${data.apellido} | Email: ${data.email}`
-    );
+    logger.info('[PROFILE] [CREADO] Perfil creado', {
+      eventId,
+      empleadoId,
+      nombre: `${data.nombre} ${data.apellido}`,
+      email: data.email,
+    });
     return 'CREATED';
   }
 
@@ -324,9 +337,9 @@ export class ProfileService {
     // Verificar que el perfil base ya existe (puede llegar antes del creado en reentregas)
     const profile = await this.repository.findByEmpleadoId(empleadoId);
     if (!profile) {
-      console.warn(
-        `[PROFILE] [ACTUALIZADO] Perfil no encontrado para actualizar | UUID: ${eventId} | Empleado: ${empleadoId}. ` +
-          `Creando perfil desde evento actualizado.`
+      logger.warn(
+        '[PROFILE] [ACTUALIZADO] Perfil no encontrado: se crea desde el evento actualizado',
+        { eventId, empleadoId },
       );
       // Creación defensiva si el perfil no existe aún (reordenamiento de mensajes)
       this.validateRequiredFields(data, [
@@ -361,10 +374,11 @@ export class ProfileService {
       lastEventId: eventId,
     });
 
-    console.log(
-      `[PROFILE] [ACTUALIZADO] Perfil actualizado | UUID: ${eventId} | Empleado: ${empleadoId} | ` +
-        `Nombre: ${data.nombre} ${data.apellido}`
-    );
+    logger.info('[PROFILE] [ACTUALIZADO] Perfil actualizado', {
+      eventId,
+      empleadoId,
+      nombre: `${data.nombre} ${data.apellido}`,
+    });
     return 'UPDATED';
   }
 
@@ -375,9 +389,10 @@ export class ProfileService {
   ): Promise<ProcessingResult> {
     const profile = await this.repository.findByEmpleadoId(empleadoId);
     if (!profile) {
-      console.warn(
-        `[PROFILE] [RETIRADO] Perfil no encontrado para retirar | UUID: ${eventId} | Empleado: ${empleadoId}. Ignorando.`
-      );
+      logger.warn('[PROFILE] [RETIRADO] Perfil no encontrado: no hay nada que retirar', {
+        eventId,
+        empleadoId,
+      });
       // Retornamos IGNORED de forma segura: no hay perfil que retirar
       return 'IGNORED';
     }
@@ -391,10 +406,11 @@ export class ProfileService {
       lastEventId: eventId,
     });
 
-    console.log(
-      `[PROFILE] [RETIRADO] Perfil marcado como RETIRADO | UUID: ${eventId} | Empleado: ${empleadoId} | ` +
-        `FechaRetiro: ${fechaRetiro.toISOString()}`
-    );
+    logger.info('[PROFILE] [RETIRADO] Perfil marcado como RETIRADO y archivado', {
+      eventId,
+      empleadoId,
+      fechaRetiro: fechaRetiro.toISOString(),
+    });
     return 'RETIRED';
   }
 

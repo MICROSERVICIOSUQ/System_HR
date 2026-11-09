@@ -76,15 +76,24 @@ const sdk = new NodeSDK({
 // 100% en desarrollo a 10% en producción sin reconstruir la imagen.
 sdk.start();
 
+// Estos dos registros se escriben a mano y no con el logger de winston: este
+// módulo se carga con --import antes que cualquier otro para que la
+// instrumentación automática pueda envolver a express y a amqplib, de modo que
+// aquí todavía no debe importarse nada de la aplicación. La forma del documento
+// es la misma que emite el logger —timestamp, level, service, message, context,
+// traceId— para que una sola consulta en Loki valga también para el arranque.
 console.log(
   JSON.stringify({
     timestamp: new Date().toISOString(),
     level: 'INFO',
     service: NOMBRE_SERVICIO,
     message: 'OpenTelemetry iniciado',
-    exporter:
-      process.env.OTEL_EXPORTER_ZIPKIN_ENDPOINT ??
-      'http://zipkin:9411/api/v2/spans',
+    traceId: '',
+    context: {
+      exporter:
+        process.env.OTEL_EXPORTER_ZIPKIN_ENDPOINT ??
+        'http://zipkin:9411/api/v2/spans',
+    },
   }),
 );
 
@@ -94,7 +103,18 @@ console.log(
 const apagar = () => {
   sdk
     .shutdown()
-    .catch((error) => console.error('Error al cerrar OpenTelemetry:', error))
+    .catch((error) =>
+      console.error(
+        JSON.stringify({
+          timestamp: new Date().toISOString(),
+          level: 'ERROR',
+          service: NOMBRE_SERVICIO,
+          message: 'Error al cerrar OpenTelemetry',
+          traceId: '',
+          context: { error: error instanceof Error ? error.message : String(error) },
+        }),
+      ),
+    )
     .finally(() => process.exit(0));
 };
 

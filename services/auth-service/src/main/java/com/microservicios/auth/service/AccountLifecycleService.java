@@ -8,6 +8,8 @@ import com.microservicios.auth.model.ProcessedEvent;
 import com.microservicios.auth.model.UserAccount;
 import com.microservicios.auth.repository.ProcessedEventRepository;
 import com.microservicios.auth.repository.UserAccountRepository;
+
+import static net.logstash.logback.argument.StructuredArguments.kv;
 import com.microservicios.auth.security.JwtService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -119,7 +121,9 @@ public class AccountLifecycleService {
         String tokenActivacion = jwtService.generarResetToken(cuenta);
 
         log.info("[AUTH] Cuenta creada en PENDIENTE_ACTIVACION con rol USER | empleado='{}'",
-                empleadoId);
+                empleadoId,
+                kv("empleadoId", empleadoId), kv("estado", "PENDIENTE_ACTIVACION"),
+                kv("rol", "USER"));
         publisher.publicarUsuarioCreado(cuenta, tokenActivacion);
         return Resultado.PROCESADO;
     }
@@ -141,7 +145,9 @@ public class AccountLifecycleService {
         cuenta.desactivarPermanentemente();
         repository.save(cuenta);
 
-        log.info("[AUTH] Cuenta DESACTIVADA_PERMANENTE por retiro | empleado='{}'", empleadoId);
+        log.info("[AUTH] Cuenta DESACTIVADA_PERMANENTE por retiro | empleado='{}'", empleadoId,
+                kv("empleadoId", empleadoId), kv("estado", "DESACTIVADA_PERMANENTE"),
+                kv("motivo", "retiro"));
         publisher.publicarCuentaDesactivada(cuenta, AuthEvents.MOTIVO_RETIRO, true);
         return Resultado.PROCESADO;
     }
@@ -168,7 +174,9 @@ public class AccountLifecycleService {
         cuenta.suspenderTemporalmente();
         repository.save(cuenta);
 
-        log.info("[AUTH] Cuenta SUSPENDIDA_TEMPORAL por vacaciones | empleado='{}'", empleadoId);
+        log.info("[AUTH] Cuenta SUSPENDIDA_TEMPORAL por vacaciones | empleado='{}'", empleadoId,
+                kv("empleadoId", empleadoId), kv("estado", "SUSPENDIDA_TEMPORAL"),
+                kv("motivo", "vacaciones"));
         publisher.publicarCuentaDesactivada(cuenta, AuthEvents.MOTIVO_VACACIONES, false);
         return Resultado.PROCESADO;
     }
@@ -198,7 +206,9 @@ public class AccountLifecycleService {
         cuenta.reactivar();
         repository.save(cuenta);
 
-        log.info("[AUTH] Cuenta ACTIVA de nuevo tras vacaciones | empleado='{}'", empleadoId);
+        log.info("[AUTH] Cuenta ACTIVA de nuevo tras vacaciones | empleado='{}'", empleadoId,
+                kv("empleadoId", empleadoId), kv("estado", "ACTIVA"),
+                kv("motivo", "fin de vacaciones"));
         publisher.publicarCuentaActivada(cuenta, AuthEvents.MOTIVO_FIN_VACACIONES);
         return Resultado.PROCESADO;
     }

@@ -1,6 +1,12 @@
 jenkins:
   systemMessage: "System_HR — Integración continua del Reto 7"
   numExecutors: 2
+  # Los siete Jenkinsfile declaran 'agent { label "docker" }'. Sin esta etiqueta
+  # en el nodo integrado no hay ningún agente que la cumpla y las ejecuciones se
+  # quedan en la cola para siempre, con el mensaje "there are no nodes with the
+  # label 'docker'". El nodo integrado sí tiene Docker: la imagen trae el
+  # cliente y el entrypoint le da acceso al socket del host.
+  labelString: "docker built-in"
   securityRealm:
     local:
       allowsSignup: false
@@ -15,6 +21,14 @@ jenkins:
         env:
           - key: CI_NETWORK
             value: "${CI_NETWORK}"
+          # Los Jenkinsfile hacen 'git branch: params.BRANCH, url: env.GIT_URL'.
+          # GIT_URL solo lo exporta el plugin de Git tras un checkout completo, y
+          # estos trabajos usan checkout lightweight —se baja solo el
+          # Jenkinsfile—, así que la variable llegaba vacía y la etapa Checkout
+          # fallaba en los siete pipelines. Se define aquí, que además es el
+          # único sitio donde la URL del repositorio está configurada una vez.
+          - key: GIT_URL
+            value: "${CI_REPOSITORY_URL}"
 unclassified:
   resourceRoot:
     url: "${JENKINS_RESOURCE_URL}"
@@ -35,10 +49,25 @@ credentials:
               description: Token del análisis de System_HR
               secret: "${SONAR_TOKEN}"
 jobs:
+  # Un trabajo por Jenkinsfile. Antes solo se creaban dos —employees y
+  # vacations— aunque el repositorio tiene siete, de modo que los otros cinco
+  # pipelines existian como archivo pero no como trabajo: nadie los ejecutaba y
+  # su Quality Gate no se aplicaba nunca.
+  #
+  # La ruta se declara explicita porque api-gateway no vive bajo services/, y
+  # construirla con 'services/' + nombre dejaba su pipeline fuera.
   - script: |
-      ['employees-service', 'vacations-service'].each { service ->
-          pipelineJob(service) {
-              description('Build, pruebas, calidad, Docker y BDD de ' + service)
+      [
+          'api-gateway'          : 'api-gateway/Jenkinsfile',
+          'auth-service'         : 'services/auth-service/Jenkinsfile',
+          'departments-service'  : 'services/departments-service/Jenkinsfile',
+          'employees-service'    : 'services/employees-service/Jenkinsfile',
+          'notifications-service': 'services/notifications-service/Jenkinsfile',
+          'profiles-service'     : 'services/profiles-service/Jenkinsfile',
+          'vacations-service'    : 'services/vacations-service/Jenkinsfile',
+      ].each { nombre, rutaDelPipeline ->
+          pipelineJob(nombre) {
+              description('Build, pruebas, calidad y Docker de ' + nombre)
               definition {
                   cpsScm {
                       scm {
@@ -47,7 +76,7 @@ jobs:
                               branch('${CI_REPOSITORY_BRANCH}')
                           }
                       }
-                      scriptPath('services/' + service + '/Jenkinsfile')
+                      scriptPath(rutaDelPipeline)
                       lightweight(true)
                   }
               }

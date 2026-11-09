@@ -141,14 +141,30 @@ public class PasosOnboarding {
 
     // ── Verificación asíncrona: la cuenta y la notificación ─────────────────
 
+    /**
+     * Espera a que el alta asíncrona haya creado la cuenta y se queda con su
+     * token de activación.
+     *
+     * <p>El token se pide a auth-service, que es quien lo firma. Antes se leía
+     * del payload que notifications-service guardaba en su historial, y ese era
+     * precisamente el hallazgo de seguridad que la auditoría pedía cerrar: un
+     * token de un solo uso en texto plano en una base de datos y visible en
+     * {@code GET /notificaciones}. Al sanearlo, la suite se quedó sin forma de
+     * activar una cuenta; este es el canal legítimo.
+     *
+     * <p>Se reintenta porque el alta llega por evento: hasta que auth-service
+     * procesa {@code empleado.creado} la cuenta no existe y el endpoint
+     * responde 404. Que acabe respondiendo es, de paso, la prueba de que el
+     * evento se consumió.
+     */
     @Entonces("eventualmente el servicio de autenticación debe haber creado un usuario para el empleado")
     @Entonces("eventualmente el servicio de autenticación debe haber creado un usuario para ese correo")
     public void eventualmenteSeCreoElUsuario() throws TimeoutException {
-        String email = contexto.leer(EMPLEADO_EMAIL);
+        String empleadoId = contexto.leer(EMPLEADO_ID);
 
         String token = Espera.obtener(
-                "el auth-service debía publicar usuario.creado para " + email,
-                () -> api.tokenDeEvento("usuario.creado", email));
+                "auth-service debía haber creado la cuenta de " + empleadoId,
+                () -> api.tokenDeRestablecimiento(empleadoId));
 
         assertThat(token).isNotBlank();
         contexto.guardar(TOKEN_ACTIVACION, token);
@@ -180,14 +196,29 @@ public class PasosOnboarding {
         eventualmenteSeCreoElUsuario();
     }
 
-    @Entonces("eventualmente el servicio de notificaciones debe registrar el correo de bienvenida con su token de activación")
-    public void eventualmenteSeRegistroCorreoDeBienvenidaConToken() throws TimeoutException {
+    /**
+     * El correo de bienvenida se registra, pero sin el token dentro.
+     *
+     * <p>Las dos mitades importan. Que la notificación exista demuestra que el
+     * evento {@code usuario.creado} se consumió y que el correo se compuso; que
+     * su payload no traiga el token demuestra que el historial no guarda
+     * credenciales. Antes esta prueba afirmaba lo contrario —leía el token de
+     * ahí— porque el servicio sí lo guardaba.
+     */
+    @Entonces("eventualmente el servicio de notificaciones debe registrar el correo de bienvenida sin filtrar el token")
+    public void eventualmenteSeRegistroCorreoDeBienvenidaSinToken() throws TimeoutException {
         String email = contexto.leer(EMPLEADO_EMAIL);
-        String token = Espera.obtener(
-                "notificaciones debía registrar el correo de activación con token para " + email,
-                () -> api.tokenDeEvento("usuario.creado", email));
-        assertThat(token).isNotBlank();
-        contexto.guardar(TOKEN_ACTIVACION, token);
+
+        Espera.hasta(
+                "notificaciones debía registrar el correo de bienvenida para " + email,
+                () -> api.buscarNotificacion("usuario.creado", email) != null);
+
+        assertThat(api.notificacionSinTokenFiltrado("usuario.creado", email))
+                .as("el historial de notificaciones no debe conservar el token")
+                .isTrue();
+
+        // El token para activar se pide a quien lo firma.
+        eventualmenteSeCreoElUsuario();
     }
 
     // ── Activación y login del empleado ─────────────────────────────────────

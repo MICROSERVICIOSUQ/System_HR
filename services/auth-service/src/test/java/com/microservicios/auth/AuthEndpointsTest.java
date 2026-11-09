@@ -306,6 +306,72 @@ class AuthEndpointsTest {
         verify(publisher, never()).publicarUsuarioRecuperacion(any(), any());
     }
 
+    // ── Emisión de tokens por un administrador ──────────────────────────────
+
+    /**
+     * El canal legítimo para obtener un token de activación.
+     *
+     * <p>Lo necesitan la suite BDD y las colecciones de Postman desde que
+     * notifications-service dejó de guardar el token en su historial. Antes lo
+     * leían de {@code GET /notificaciones}, que es el sitio donde no debe estar.
+     */
+    @Test
+    void emiteUnTokenDeRestablecimientoUtilizableParaActivarLaCuenta() throws Exception {
+        String token = mapper.readTree(
+                mockMvc.perform(post("/auth/internal/tokens/restablecimiento")
+                                .header(AuthController.HEADER_USUARIO, "admin")
+                                .contentType(MediaType.APPLICATION_JSON)
+                                .content(mapper.writeValueAsString(Map.of("empleadoId", EMPLEADO))))
+                        .andExpect(status().isOk())
+                        .andExpect(jsonPath("$.empleadoId").value(EMPLEADO))
+                        .andExpect(jsonPath("$.tipo").value("RESET_PASSWORD"))
+                        .andExpect(jsonPath("$.expiraEnSegundos").isNumber())
+                        .andReturn().getResponse().getContentAsString()
+        ).get("token").asText();
+
+        // Que el token sirva es la prueba de verdad: lo mismo que haría la suite
+        // BDD a continuación.
+        mockMvc.perform(post("/auth/reset-password")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(mapper.writeValueAsString(Map.of(
+                                "token", token, "nuevaPassword", "Secreta123"))))
+                .andExpect(status().isOk());
+    }
+
+    @Test
+    void emitirTokenExigeLaIdentidadDelSolicitante() throws Exception {
+        // Sin la cabecera que propaga el gateway no se emite: un token
+        // privilegiado sin solicitante conocido no se puede auditar.
+        mockMvc.perform(post("/auth/internal/tokens/restablecimiento")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(mapper.writeValueAsString(Map.of("empleadoId", EMPLEADO))))
+                .andExpect(status().isUnauthorized());
+    }
+
+    @Test
+    void emitirTokenDeUnaCuentaInexistenteDevuelve404() throws Exception {
+        mockMvc.perform(post("/auth/internal/tokens/restablecimiento")
+                        .header(AuthController.HEADER_USUARIO, "admin")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(mapper.writeValueAsString(Map.of("empleadoId", "NO-EXISTE"))))
+                .andExpect(status().isNotFound());
+    }
+
+    @Test
+    void noSeEmiteTokenParaUnaCuentaConBajaPermanente() throws Exception {
+        lifecycle.procesar(new IncomingEvent(UUID.randomUUID().toString(),
+                AuthEvents.EMPLEADO_RETIRADO, "1.0", "2026-11-09T10:00:00Z", "test",
+                Map.of("id", EMPLEADO)));
+
+        mockMvc.perform(post("/auth/internal/tokens/restablecimiento")
+                        .header(AuthController.HEADER_USUARIO, "admin")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(mapper.writeValueAsString(Map.of("empleadoId", EMPLEADO))))
+                .andExpect(status().isUnauthorized())
+                .andExpect(jsonPath("$.message")
+                        .value(org.hamcrest.Matchers.containsString("permanente")));
+    }
+
     @Test
     void recoverPasswordConEmailDesconocidoDevuelve404() throws Exception {
         mockMvc.perform(post("/auth/recover-password")

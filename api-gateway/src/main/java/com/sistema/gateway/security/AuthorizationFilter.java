@@ -2,13 +2,14 @@ package com.sistema.gateway.security;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.cloud.gateway.filter.GatewayFilterChain;
-import org.springframework.cloud.gateway.filter.GlobalFilter;
 import org.springframework.core.Ordered;
 import org.springframework.http.HttpMethod;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Component;
 import org.springframework.web.server.ServerWebExchange;
+import org.springframework.web.server.WebFilter;
+import org.springframework.web.server.WebFilterChain;
+import static net.logstash.logback.argument.StructuredArguments.kv;
 import reactor.core.publisher.Mono;
 
 import java.util.List;
@@ -35,9 +36,13 @@ import java.util.Set;
  *
  * <p>La distinción entre 401 y 403 es deliberada: 401 significa «no sé quién eres»
  * y lo emite el filtro anterior; 403 significa «sé quién eres y no puedes».
+ *
+ * <p>Es un {@link WebFilter} por el mismo motivo que
+ * {@link JwtAuthenticationFilter}: las reglas tienen que aplicarse también a los
+ * controladores locales del gateway, no solo a las peticiones que se enrutan.
  */
 @Component
-public class AuthorizationFilter implements GlobalFilter, Ordered {
+public class AuthorizationFilter implements WebFilter, Ordered {
 
     /** Justo después de la autenticación, antes del enrutado. */
     public static final int ORDEN = JwtAuthenticationFilter.ORDEN + 1;
@@ -63,7 +68,7 @@ public class AuthorizationFilter implements GlobalFilter, Ordered {
     }
 
     @Override
-    public Mono<Void> filter(ServerWebExchange exchange, GatewayFilterChain chain) {
+    public Mono<Void> filter(ServerWebExchange exchange, WebFilterChain chain) {
         String path = exchange.getRequest().getPath().value();
         if (properties.esPublica(path)) {
             return chain.filter(exchange);
@@ -74,7 +79,8 @@ public class AuthorizationFilter implements GlobalFilter, Ordered {
         if (usuario == null) {
             // No debería ocurrir: el filtro de autenticación corre antes y corta.
             // Si ocurriera, denegar es la única respuesta segura.
-            log.error("[GATEWAY] Sin identidad en el exchange para una ruta protegida | {}", path);
+            log.error("[GATEWAY] Sin identidad en el exchange para una ruta protegida | {}", path,
+                    kv("ruta", path), kv("resultado", "401"));
             return responseWriter.escribir(exchange, HttpStatus.UNAUTHORIZED,
                     "Se requiere un token de acceso válido");
         }
@@ -85,8 +91,14 @@ public class AuthorizationFilter implements GlobalFilter, Ordered {
             return chain.filter(exchange);
         }
 
+        // Los kv van después de los argumentos de los {}: SLF4J ignora los
+        // sobrantes al formatear, así que el mensaje no cambia y el dato queda
+        // además dentro de context, donde Loki puede filtrarlo.
         log.warn("[GATEWAY] 403 | empleado='{}' | rol='{}' | {} {}",
-                usuario.empleadoId(), usuario.rol(), metodo, path);
+                usuario.empleadoId(), usuario.rol(), metodo, path,
+                kv("empleadoId", usuario.empleadoId()), kv("rol", usuario.rol()),
+                kv("metodo", String.valueOf(metodo)), kv("ruta", path),
+                kv("resultado", "403"));
         return responseWriter.escribir(exchange, HttpStatus.FORBIDDEN,
                 "El rol " + usuario.rol() + " no tiene permiso para " + metodo + " " + path);
     }

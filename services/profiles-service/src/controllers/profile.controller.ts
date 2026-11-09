@@ -2,7 +2,7 @@ import type { Request, Response, NextFunction } from 'express';
 import { ProfileService } from '../services/profile.service.ts';
 import { ProfileError } from '../errors/profile.errors.ts';
 import { presentarPerfil, presentarPerfiles } from '../mappers/profile.mapper.ts';
-import type { CampoOrdenable } from '../repositories/profile.repository.ts';
+import { CAMPOS_ORDENABLES, type CampoOrdenable } from '../repositories/profile.repository.ts';
 
 export class ProfileController {
   constructor(private readonly service = new ProfileService()) {}
@@ -167,14 +167,24 @@ export class ProfileController {
     return limit;
   }
 
+  /**
+   * Valida ?sortBy contra la lista blanca del repositorio.
+   *
+   * La lista se importa, no se copia: estaba duplicada aqui como un literal, y
+   * dos listas que hay que mantener iguales acaban siendo distintas. Ahora
+   * CAMPOS_ORDENABLES es la unica fuente, y de ella salen tambien el enum del
+   * contrato OpenAPI y el orderBy de la consulta.
+   */
   private parseSortBy(value: unknown): CampoOrdenable {
     const selected = Array.isArray(value) ? value[0] : value;
-    const allowed = ['empleadoId', 'nombre', 'apellido', 'email', 'cargo', 'departamentoId', 'fechaIngreso', 'estado', 'fechaRetiro', 'fechaCreacion', 'archivado', 'updatedAt'] as const;
     if (selected === undefined) return 'updatedAt';
-    if (!allowed.includes(String(selected) as typeof allowed[number])) {
-      throw new ProfileError(400, `sortBy no permitido. Valores: ${allowed.join(', ')}`);
+    if (!CAMPOS_ORDENABLES.includes(String(selected) as CampoOrdenable)) {
+      throw new ProfileError(
+        400,
+        `sortBy no permitido. Valores: ${CAMPOS_ORDENABLES.join(', ')}`,
+      );
     }
-    return String(selected) as typeof allowed[number];
+    return String(selected) as CampoOrdenable;
   }
 
   private parseOrder(value: unknown): 'asc' | 'desc' {

@@ -44,8 +44,11 @@ public class EmpleadoCompletoController {
                 .thenCombine(vacaciones, (partial, vacation) ->
                         new EmpleadoCompletoDTO(partial.empleado(), partial.perfil(), vacation));
 
+        // El tipo del éxito se fija a ResponseEntity<?> explícitamente: sin eso,
+        // thenApply infiere ResponseEntity<EmpleadoCompletoDTO> y el cuerpo de
+        // error de exceptionally —un Map— ya no encaja, y el módulo no compila.
         return agregado
-                .thenApply(dto -> ResponseEntity.ok().body(dto))
+                .<ResponseEntity<?>>thenApply(dto -> ResponseEntity.ok(dto))
                 .exceptionally(error -> {
                     LOG.error("No se pudo completar empleado id={} traceId={}", id, traceId, unwrap(error));
                     return errorResponse(unwrap(error), id, traceId);

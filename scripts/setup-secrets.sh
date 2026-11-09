@@ -1,4 +1,24 @@
 #!/usr/bin/env bash
+#
+# Rellena los secretos del .env que estén vacíos.
+#
+# REGLA PRINCIPAL: no se sobrescribe ningún valor que ya exista.
+#
+# La versión anterior reescribía con un valor nuevo TODAS las líneas que
+# terminaran en _DB_PASSWORD, además de RABBITMQ_PASSWORD y JWT_SECRET. Sobre un
+# entorno recién clonado eso funciona, pero sobre uno que ya se ha levantado
+# rompe el sistema entero: PostgreSQL y RabbitMQ fijan sus credenciales cuando se
+# inicializa su volumen y no vuelven a leerlas, así que cambiar la contraseña en
+# el .env deja a los siete servicios sin poder conectarse, y recuperarlo exige
+# borrar los volúmenes —y con ellos los datos—.
+#
+# Un script de arranque no puede tener como efecto secundario la pérdida de la
+# base de datos. Por eso ahora solo rellena huecos, es idempotente y se puede
+# ejecutar tantas veces como se quiera.
+#
+# Para rotar un secreto a propósito: vacíe su línea en el .env y vuelva a
+# ejecutar este script. Si es una contraseña de base de datos o de RabbitMQ,
+# tendrá que recrear también su volumen.
 
 set -euo pipefail
 
@@ -23,77 +43,89 @@ if ! command -v openssl >/dev/null 2>&1; then
     exit 1
 fi
 
-read_env_value() {
-    local key="$1"
-    sed -n "s/^${key}=//p" "${ENV_FILE}" | head -n 1
+# Claves que este script sabe rellenar, con la longitud en bytes del valor
+# aleatorio. El JWT necesita 32 bytes como mínimo por el algoritmo HS256; para
+# las demás 32 son de sobra.
+CLAVES=(
+    'JWT_SECRET:48'
+    'JENKINS_ADMIN_PASSWORD:32'
+    'SONAR_DB_PASSWORD:32'
+    'SONAR_ADMIN_PASSWORD:32'
+)
+
+valor_de() {
+    # Primera aparición de la clave, sin comillas ni espacios alrededor.
+    sed -n "s/^[[:space:]]*$1=//p" "${ENV_FILE}" | head -n 1 \
+        | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//' -e 's/^"\(.*\)"$/\1/' -e "s/^'\(.*\)'\$/\1/"
 }
 
-JWT_SECRET="$(read_env_value JWT_SECRET)"
-DB_PASSWORD="$(read_env_value DB_PASSWORD)"
-RABBITMQ_PASSWORD="$(read_env_value RABBITMQ_PASSWORD)"
-JENKINS_ADMIN_PASSWORD="$(read_env_value JENKINS_ADMIN_PASSWORD)"
-SONAR_DB_PASSWORD="$(read_env_value SONAR_DB_PASSWORD)"
-SONAR_ADMIN_PASSWORD="$(read_env_value SONAR_ADMIN_PASSWORD)"
-
-[[ -n "${JWT_SECRET}" ]] || JWT_SECRET="$(openssl rand -base64 48)"
-[[ -n "${DB_PASSWORD}" ]] || DB_PASSWORD="$(openssl rand -base64 48)"
-[[ -n "${RABBITMQ_PASSWORD}" ]] || RABBITMQ_PASSWORD="$(openssl rand -base64 48)"
-[[ -n "${JENKINS_ADMIN_PASSWORD}" ]] || JENKINS_ADMIN_PASSWORD="$(openssl rand -base64 32)"
-[[ -n "${SONAR_DB_PASSWORD}" ]] || SONAR_DB_PASSWORD="$(openssl rand -base64 32)"
-[[ -n "${SONAR_ADMIN_PASSWORD}" ]] || SONAR_ADMIN_PASSWORD="$(openssl rand -base64 32)"
-TEMP_FILE="$(mktemp "${ENV_FILE}.tmp.XXXXXX")"
-
-cleanup() {
-    rm -f -- "${TEMP_FILE}"
-}
-trap cleanup EXIT
-
-awk \
-    -v jwt_secret="${JWT_SECRET}" \
-    -v db_password="${DB_PASSWORD}" \
-    -v rabbitmq_password="${RABBITMQ_PASSWORD}" \
-    -v jenkins_admin_password="${JENKINS_ADMIN_PASSWORD}" \
-    -v sonar_db_password="${SONAR_DB_PASSWORD}" \
-    -v sonar_admin_password="${SONAR_ADMIN_PASSWORD}" '
-BEGIN {
-    found_jenkins = found_sonar_db = found_sonar_admin = 0
+clave_existe() {
+    grep -Eq "^[[:space:]]*$1=" "${ENV_FILE}"
 }
 
-function replace_value(line, key, value,    prefix) {
-    prefix = substr(line, 1, index(line, "="))
-    return prefix value
+escribir_valor() {
+    # Sustituye solo el valor, conservando el nombre y el comentario de la línea.
+    # El valor va por argumento de awk y no por el patrón de sed: un secreto en
+    # base64 contiene '/' y '+', que sed interpretaría.
+    local clave="$1" valor="$2" temporal
+    temporal="$(mktemp "${ENV_FILE}.tmp.XXXXXX")"
+
+    awk -v clave="${clave}" -v valor="${valor}" '
+        $0 ~ "^[[:space:]]*" clave "=" && !hecho {
+            print clave "=" valor
+            hecho = 1
+            next
+        }
+        { print }
+    ' "${ENV_FILE}" > "${temporal}"
+
+    mv -- "${temporal}" "${ENV_FILE}"
 }
 
-{
-    if ($0 ~ /^[[:space:]]*JWT_SECRET=/) {
-        print replace_value($0, "JWT_SECRET", jwt_secret)
-    } else if ($0 ~ /^[[:space:]]*JENKINS_ADMIN_PASSWORD=/) {
-        found_jenkins = 1
-        print replace_value($0, "JENKINS_ADMIN_PASSWORD", jenkins_admin_password)
-    } else if ($0 ~ /^[[:space:]]*SONAR_DB_PASSWORD=/) {
-        found_sonar_db = 1
-        print replace_value($0, "SONAR_DB_PASSWORD", sonar_db_password)
-    } else if ($0 ~ /^[[:space:]]*SONAR_ADMIN_PASSWORD=/) {
-        found_sonar_admin = 1
-        print replace_value($0, "SONAR_ADMIN_PASSWORD", sonar_admin_password)
-    } else if ($0 ~ /^[[:space:]]*[A-Za-z_][A-Za-z0-9_]*DB_PASSWORD=/) {
-        print replace_value($0, "DB_PASSWORD", db_password)
-    } else if ($0 ~ /^[[:space:]]*RABBITMQ_PASSWORD=/) {
-        print replace_value($0, "RABBITMQ_PASSWORD", rabbitmq_password)
-    } else {
-        print
-    }
-}
+generados=0
+conservados=0
 
-END {
-    if (!found_jenkins) print "JENKINS_ADMIN_PASSWORD=" jenkins_admin_password
-    if (!found_sonar_db) print "SONAR_DB_PASSWORD=" sonar_db_password
-    if (!found_sonar_admin) print "SONAR_ADMIN_PASSWORD=" sonar_admin_password
-}
-' "${ENV_FILE}" > "${TEMP_FILE}"
+for entrada in "${CLAVES[@]}"; do
+    clave="${entrada%%:*}"
+    longitud="${entrada##*:}"
 
-mv -- "${TEMP_FILE}" "${ENV_FILE}"
+    if ! clave_existe "${clave}"; then
+        printf '%s=%s\n' "${clave}" "$(openssl rand -base64 "${longitud}" | tr -d '\n')" >> "${ENV_FILE}"
+        printf '  %-24s generado (la clave no estaba en el archivo)\n' "${clave}"
+        generados=$((generados + 1))
+        continue
+    fi
+
+    if [[ -n "$(valor_de "${clave}")" ]]; then
+        printf '  %-24s ya tenía valor, se conserva\n' "${clave}"
+        conservados=$((conservados + 1))
+        continue
+    fi
+
+    escribir_valor "${clave}" "$(openssl rand -base64 "${longitud}" | tr -d '\n')"
+    printf '  %-24s generado\n' "${clave}"
+    generados=$((generados + 1))
+done
+
+# Las contraseñas de las bases de datos y de RabbitMQ NO se tocan, ni siquiera
+# cuando están vacías: sus valores tienen que coincidir con los que quedaron
+# grabados al inicializar cada volumen. Si alguna está vacía se avisa, porque
+# entonces el servicio no podrá conectarse, pero la decisión de cambiarla —y de
+# recrear el volumen— es de quien ejecuta el script, no del script.
+faltantes=()
+while IFS= read -r clave; do
+    [[ -n "$(valor_de "${clave}")" ]] || faltantes+=("${clave}")
+done < <(grep -Eo '^[[:space:]]*[A-Za-z_][A-Za-z0-9_]*(DB_PASSWORD|RABBITMQ_PASSWORD)=' "${ENV_FILE}" \
+         | tr -d ' ' | sed 's/=$//' | sort -u)
+
+if ((${#faltantes[@]} > 0)); then
+    printf '\nAviso: estas credenciales están vacías y NO se generan automáticamente,\n'
+    printf 'porque deben coincidir con las que ya tiene el volumen de cada servicio:\n'
+    printf '  - %s\n' "${faltantes[@]}"
+    printf 'Si las cambia, recree el volumen correspondiente.\n'
+fi
+
 chmod 600 "${ENV_FILE}"
 
-printf 'Secretos JWT, de bases de datos y de RabbitMQ configurados.\n'
+printf '\n%d secreto(s) generado(s), %d conservado(s).\n' "${generados}" "${conservados}"
 printf 'Permisos aplicados: chmod 600 %s\n' "${ENV_FILE}"

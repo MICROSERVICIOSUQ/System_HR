@@ -215,5 +215,27 @@ class AuthorizationFilterTest {
                     .as("/auth/login debe ser alcanzable sin token: es cómo se obtiene uno")
                     .isTrue();
         }
+
+        @Test
+        @DisplayName("el endpoint agregado del propio gateway tampoco se salta el filtro")
+        void endpointAgregadoExigeIdentidad() {
+            // GET /empleados/{id}/completo lo atiende un @RestController del
+            // gateway, no una ruta. Mientras los filtros fueron GlobalFilter no
+            // se ejecutaban para él, así que el expediente completo de un
+            // empleado —datos laborales, perfil y vacaciones— se servía sin
+            // token. Como WebFilter sí se ejecutan, y esta prueba lo fija.
+            Resultado r = ejecutar(HttpMethod.GET, "/empleados/" + PROPIO + "/completo", null);
+            assertThat(r.codigo()).isEqualTo(HttpStatus.UNAUTHORIZED);
+            assertThat(r.seEnruto()).isFalse();
+        }
+
+        @Test
+        @DisplayName("un USER sí puede leer el endpoint agregado")
+        void endpointAgregadoEsLecturaParaUser() {
+            assertThat(ejecutar(HttpMethod.GET, "/empleados/" + PROPIO + "/completo", user(PROPIO))
+                    .seEnruto())
+                    .as("es una lectura: la regla del rol USER la permite")
+                    .isTrue();
+        }
     }
 }

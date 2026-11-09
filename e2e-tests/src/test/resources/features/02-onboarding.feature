@@ -10,6 +10,12 @@ Característica: Onboarding de empleados
   correo. Los pasos que empiezan por "eventualmente" usan polling con reintentos,
   porque esos efectos no son inmediatos.
 
+  El token de activación viaja en el evento, pero NO se guarda en el historial de
+  notificaciones: un token de un solo uso en texto plano en una base de datos era
+  el hallazgo de seguridad que la auditoría pidió cerrar. La suite lo obtiene de
+  auth-service, que es quien lo firma, y además comprueba que el historial no lo
+  conserva.
+
   Antecedentes:
     Dado que estoy autenticado como "ADMIN"
     Y que existe un departamento para las pruebas
@@ -20,11 +26,11 @@ Característica: Onboarding de empleados
     Y el cuerpo debe contener los diez campos del modelo canónico
     Y el estado del empleado debe ser "ACTIVO"
 
-  Escenario: El registro aprovisiona una cuenta y notifica el token de activación
+  Escenario: El registro aprovisiona una cuenta y notifica sin filtrar el token
     Cuando registro un empleado con datos válidos e ID único
     Entonces la respuesta debe tener código 201
     Y eventualmente el servicio de autenticación debe haber creado un usuario para ese correo
-    Y eventualmente el servicio de notificaciones debe registrar el correo de bienvenida con su token de activación
+    Y eventualmente el servicio de notificaciones debe registrar el correo de bienvenida sin filtrar el token
     Y el token de activación recibido no debe ser una contraseña en claro
 
   Escenario: El empleado establece su contraseña y realiza su primer login

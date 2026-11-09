@@ -1,5 +1,6 @@
 """Comprueba las barreras que separan las pruebas de los datos del entorno local."""
 import json
+import os
 from pathlib import Path
 import shutil
 import subprocess
@@ -71,7 +72,13 @@ class ConfiguracionCI(unittest.TestCase):
             self.assertIn('JWT_SECRET=clave-que-ya-existia\n', first)
             self.assertIn('JENKINS_ADMIN_PASSWORD=conservar\n', first)
             self.assertIn('SONAR_ADMIN_PASSWORD=', first)
-            self.assertEqual((root / '.env').stat().st_mode & 0o777, 0o600)
+            if os.name != 'nt':
+                # os.chmod en Windows solo conmuta el bit de solo lectura: los
+                # permisos POSIX no existen, y la comprobación daba 0o666 en
+                # cualquier equipo Windows aunque el script fuera correcto.
+                # Donde importa de verdad —el contenedor del pipeline, que es
+                # Linux— sí se comprueba.
+                self.assertEqual((root / '.env').stat().st_mode & 0o777, 0o600)
 
     def test_no_se_acepta_una_integracion_omitida_por_falta_de_docker(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -91,6 +98,58 @@ class ConfiguracionCI(unittest.TestCase):
         result = subprocess.run(['sh', str(ROOT / 'ci/e2e.sh'), 'clean'], env=env, capture_output=True)
         self.assertNotEqual(result.returncode, 0)
         self.assertIn(b'solo admite proyectos hr-ci-', result.stderr)
+
+
+class SecretosDelEntorno(unittest.TestCase):
+    """La regla que protege los volúmenes ya creados.
+
+    scripts/setup-secrets.sh reescribía con un valor nuevo todas las líneas
+    *_DB_PASSWORD y RABBITMQ_PASSWORD. PostgreSQL y RabbitMQ fijan sus
+    credenciales al inicializar su volumen, así que sobre un entorno que ya se
+    había levantado eso dejaba a los siete servicios sin poder conectarse, y
+    recuperarlo exigía borrar los volúmenes con sus datos. Esta prueba fija el
+    comportamiento correcto para que no vuelva.
+    """
+
+    @unittest.skipUnless(shutil.which('bash'), 'requiere bash')
+    @unittest.skipUnless(shutil.which('openssl'), 'requiere openssl')
+    def test_setup_secrets_rellena_huecos_sin_tocar_lo_existente(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / 'scripts').mkdir()
+            shutil.copy(ROOT / 'scripts/setup-secrets.sh', root / 'scripts')
+            (root / '.env').write_text(
+                '\n'.join([
+                    'EMPLEADOS_DB_PASSWORD=postgres',
+                    'RABBITMQ_PASSWORD=admin',
+                    'JWT_SECRET=clave-que-ya-existia',
+                    'JENKINS_ADMIN_PASSWORD=',
+                    '',
+                ]),
+                encoding='utf-8',
+            )
+
+            # La ruta absoluta de bash y no el nombre: en Windows, invocar
+            # 'bash' hace que se resuelva por el PATH del sistema y termina
+            # ejecutando el relay de WSL, que no ve las rutas C:\... y falla con
+            # "execvpe(/bin/bash) failed".
+            command = [shutil.which('bash'), str(root / 'scripts/setup-secrets.sh')]
+            subprocess.run(command, check=True, capture_output=True)
+            primera = (root / '.env').read_text(encoding='utf-8')
+
+            # Lo que ya tenía valor se conserva, literal.
+            self.assertIn('EMPLEADOS_DB_PASSWORD=postgres\n', primera)
+            self.assertIn('RABBITMQ_PASSWORD=admin\n', primera)
+            self.assertIn('JWT_SECRET=clave-que-ya-existia\n', primera)
+
+            # Lo que estaba vacío se rellena, y lo que faltaba se añade.
+            self.assertNotIn('JENKINS_ADMIN_PASSWORD=\n', primera)
+            self.assertIn('SONAR_ADMIN_PASSWORD=', primera)
+            self.assertIn('SONAR_DB_PASSWORD=', primera)
+
+            # Y repetirlo no cambia nada: es seguro ejecutarlo dos veces.
+            subprocess.run(command, check=True, capture_output=True)
+            self.assertEqual(primera, (root / '.env').read_text(encoding='utf-8'))
 
 
 if __name__ == '__main__':

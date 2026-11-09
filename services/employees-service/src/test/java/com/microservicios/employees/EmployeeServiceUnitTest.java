@@ -125,17 +125,31 @@ class EmployeeServiceUnitTest {
             assertThat(guardado.getStatus()).isEqualTo(EmployeeStatus.ACTIVE);
         }
 
+        /**
+         * Con el outbox, el alta y su evento se confirman juntos o no se
+         * confirman.
+         *
+         * <p>Esta prueba afirmaba lo contrario: que un fallo al publicar NO
+         * revertía la persistencia. Era coherente con la implementación de
+         * entonces —un convertAndSend dentro de un try/catch que se tragaba la
+         * excepción— y era justo el agujero que la auditoría pidió cerrar: el
+         * empleado quedaba creado y su evento no llegaba nunca, así que no se
+         * creaba su cuenta, ni su perfil, ni su saldo de vacaciones.
+         *
+         * <p>Ahora el evento se escribe en la tabla outbox en la misma
+         * transacción, de modo que un fallo al encolarlo deshace el alta. Que el
+         * broker esté caído ya no influye aquí: el registro no habla con el
+         * broker, solo con su propia base de datos.
+         */
         @Test
-        @DisplayName("un fallo al publicar el evento no revierte la persistencia")
-        void elFalloDelBrokerNoRompeElRegistro() {
+        @DisplayName("si el evento no se puede encolar, el alta no se confirma")
+        void siElEventoNoSePuedeEncolarElAltaFalla() {
             repositorioVacioYDepartamentoValido();
-            doThrow(new RuntimeException("broker caído"))
+            doThrow(new IllegalStateException("no se pudo serializar el evento"))
                     .when(eventPublisher).publishEmployeeCreated(any());
 
-            Employee guardado = service.register(nuevo);
-
-            assertThat(guardado.getStatus()).isEqualTo(EmployeeStatus.ACTIVE);
-            verify(repository).save(nuevo);
+            assertThatThrownBy(() -> service.register(nuevo))
+                    .isInstanceOf(IllegalStateException.class);
         }
     }
 
@@ -313,19 +327,19 @@ class EmployeeServiceUnitTest {
             verify(repository, never()).delete(any(Employee.class));
         }
 
+        /** Misma inversión que en el alta: ver el comentario de Registro. */
         @Test
-        @DisplayName("un fallo al publicar no impide el retiro")
-        void elFalloDelBrokerNoImpideElRetiro() {
+        @DisplayName("si el evento no se puede encolar, el retiro no se confirma")
+        void siElEventoNoSePuedeEncolarElRetiroFalla() {
             Employee activo = empleado("E001", "juan.perez@empresa.com", "EMP-2026-001", "IT");
             activo.setStatus(EmployeeStatus.ACTIVE);
             when(repository.findById("E001")).thenReturn(Optional.of(activo));
             when(repository.save(any(Employee.class))).thenAnswer(inv -> inv.getArgument(0));
-            doThrow(new RuntimeException("broker caído"))
+            doThrow(new IllegalStateException("no se pudo serializar el evento"))
                     .when(eventPublisher).publishEmployeeRetired(any());
 
-            Employee retirado = service.retire("E001");
-
-            assertThat(retirado.getStatus()).isEqualTo(EmployeeStatus.RETIRED);
+            assertThatThrownBy(() -> service.retire("E001"))
+                    .isInstanceOf(IllegalStateException.class);
         }
     }
 

@@ -17,6 +17,7 @@ import org.springframework.orm.jpa.JpaSystemException;
 import org.springframework.retry.annotation.Backoff;
 import org.springframework.retry.annotation.Retryable;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 import org.springframework.transaction.CannotCreateTransactionException;
 
 import org.springframework.data.domain.PageRequest;
@@ -71,6 +72,13 @@ public class EmployeeService {
             maxAttempts = 3,
             backoff = @Backoff(delay = 250, multiplier = 2.0)
     )
+    /**
+     * @Transactional porque el evento se guarda en el outbox dentro de esta
+     * misma transacción: o se confirman el cambio y su evento, o ninguno de los
+     * dos. Es lo que convierte la publicación en fiable sin transacciones
+     * distribuidas, porque la tabla del outbox vive en la misma base de datos.
+     */
+    @Transactional
     public Employee register(Employee employee) {
         if (repository.existsByEmailIgnoreCase(employee.getEmail())) {
             throw new EmailAlreadyRegisteredException(employee.getEmail());
@@ -87,12 +95,10 @@ public class EmployeeService {
         employee.setStatus(EmployeeStatus.ACTIVE);
         Employee saved = repository.save(employee);
 
-        try {
-            eventPublisher.publishEmployeeCreated(saved);
-        } catch (Exception ex) {
-            // El error queda registrado en los logs por el publisher.
-            // Para mantener la consistencia de la respuesta HTTP, no se altera la respuesta de persistencia.
-        }
+        // Sin try/catch: si esto falla, la transacción se deshace y el alta no
+        // se confirma. Antes se tragaba la excepción para no alterar la
+        // respuesta HTTP, y el precio era un empleado creado sin su evento.
+        eventPublisher.publishEmployeeCreated(saved);
 
         return saved;
     }
@@ -107,6 +113,8 @@ public class EmployeeService {
             maxAttempts = 3,
             backoff = @Backoff(delay = 250, multiplier = 2.0)
     )
+    /** Transaccional por el outbox: ver {@link #register}. */
+    @Transactional
     public Employee update(String id, Employee updatedData) {
         Employee existing = findById(id);
 
@@ -160,11 +168,7 @@ public class EmployeeService {
 
         Employee saved = repository.save(existing);
 
-        try {
-            eventPublisher.publishEmployeeUpdated(saved);
-        } catch (Exception ex) {
-            // El error queda registrado en los logs por el publisher
-        }
+        eventPublisher.publishEmployeeUpdated(saved);
 
         return saved;
     }
@@ -179,6 +183,8 @@ public class EmployeeService {
             maxAttempts = 3,
             backoff = @Backoff(delay = 250, multiplier = 2.0)
     )
+    /** Transaccional por el outbox: ver {@link #register}. */
+    @Transactional
     public Employee retire(String id) {
         Employee existing = findById(id);
         if (existing.getStatus() == EmployeeStatus.RETIRED) {
@@ -192,11 +198,7 @@ public class EmployeeService {
         }
         Employee saved = repository.save(existing);
 
-        try {
-            eventPublisher.publishEmployeeRetired(saved);
-        } catch (Exception ex) {
-            // El error queda registrado en los logs por el publisher
-        }
+        eventPublisher.publishEmployeeRetired(saved);
 
         return saved;
     }

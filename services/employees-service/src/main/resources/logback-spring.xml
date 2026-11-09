@@ -59,7 +59,21 @@
                 <!-- Los argumentos con clave del log (por ejemplo
                      log.info("...", kv("employeeId", id))) aparecen como campos
                      propios, no embebidos en el mensaje. -->
-                <arguments/>
+                <!-- El campo context que exige la auditoría.
+                     nestedField lo emite SIEMPRE, también vacío ("context":{}),
+                     de modo que el documento tiene la misma forma en los siete
+                     servicios y una consulta LogQL no necesita comprobar si la
+                     clave existe. Dentro van los argumentos estructurados
+                     (StructuredArguments.kv), que se añaden DESPUÉS de los
+                     argumentos de los {} del mensaje: SLF4J ignora los
+                     sobrantes al formatear, así que el texto del mensaje no
+                     cambia y el dato queda además indexable por separado. -->
+                <nestedField>
+                    <fieldName>context</fieldName>
+                    <providers>
+                        <arguments/>
+                    </providers>
+                </nestedField>
                 <stackTrace>
                     <fieldName>stackTrace</fieldName>
                 </stackTrace>

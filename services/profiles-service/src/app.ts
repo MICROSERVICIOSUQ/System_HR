@@ -3,6 +3,8 @@ import profileRoutes from './routes/profile.routes.ts';
 import { ProfileController } from './controllers/profile.controller.ts';
 import { middlewareMetricas, handlerMetricas } from './observability/metrics.ts';
 import { comprobarSalud } from './observability/health.ts';
+import { especificacionOpenApi, paginaSwaggerUi } from './docs/openapi.ts';
+import { logger } from './observability/logger.ts';
 
 const app = express();
 const controller = new ProfileController();
@@ -27,6 +29,20 @@ app.get('/health', async (_req, res, next) => {
   }
 });
 
+// ── Contrato y Swagger UI ───────────────────────────────────────────────────
+// La auditoría marcó este servicio como el único de los siete sin documentación
+// OpenAPI. Se sirven las dos cosas antes de las rutas de perfiles para que
+// /perfiles/docs no lo capture router.get('/:empleadoId') y acabe buscando un
+// empleado llamado "docs".
+app.get(['/docs', '/perfiles/docs', '/profiles/docs'], (_req: Request, res: Response) => {
+  res.type('html').send(paginaSwaggerUi);
+});
+
+app.get(
+  ['/openapi.json', '/api-docs', '/perfiles/openapi.json', '/profiles/openapi.json'],
+  (_req: Request, res: Response) => res.json(especificacionOpenApi),
+);
+
 // Rutas de perfiles
 app.use('/profiles', profileRoutes);
 // Alias en español, igual que vacations-service sirve /vacaciones.
@@ -44,7 +60,11 @@ app.use((_req: Request, res: Response) => {
 
 // Manejador global de errores
 app.use((err: any, _req: Request, res: Response, _next: NextFunction) => {
-  console.error('[PROFILE] [ERROR] Error no controlado:', err);
+  logger.error('[PROFILE] [ERROR] Error no controlado', {
+    error: err?.message ?? String(err),
+    tipo: err?.name,
+    codigoPrisma: err?.code,
+  });
   if (err?.name === 'ProfileError') {
     return res.status(err.statusCode).json({
       status: err.statusCode,

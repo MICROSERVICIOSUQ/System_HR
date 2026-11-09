@@ -236,31 +236,56 @@ public class ApiCliente {
     }
 
     /**
-     * Token de activación o recuperación que viajó dentro de un evento.
+     * Comprueba que una notificación NO lleva el token en su payload.
      *
-     * <p>El token <strong>nunca</strong> aparece en una respuesta HTTP: se publica
-     * en {@code usuario.creado} / {@code usuario.recuperacion} y el servicio de
-     * notificaciones lo persiste en el payload. Que la suite tenga que buscarlo
-     * aquí no es un rodeo: es la prueba de que el sistema no lo expone.
+     * <p>Antes la suite leía el token de aquí, porque notifications-service lo
+     * persistía en el historial. Eso era el hallazgo de seguridad que la
+     * auditoría pedía cerrar —un token de un solo uso guardado en texto plano en
+     * una base de datos y visible en {@code GET /notificaciones}— y el servicio
+     * reconstruido en Go ya solo conserva campos públicos.
      *
-     * @return el token, o {@code null} si el evento aún no llegó
+     * <p>El método se queda, pero con el signo cambiado: ahora sirve para
+     * verificar la ausencia. Lo que antes era el canal de obtención es hoy una
+     * aserción de seguridad.
+     *
+     * @return {@code true} si la notificación existe y su payload no trae token
      */
     @SuppressWarnings("unchecked")
-    public String tokenDeEvento(String tipoEvento, String email) {
+    public boolean notificacionSinTokenFiltrado(String tipoEvento, String email) {
         Map<String, Object> notificacion = buscarNotificacion(tipoEvento, email);
         if (notificacion == null) {
-            return null;
+            return false;
         }
         Object payload = notificacion.get("payload");
         if (!(payload instanceof Map<?, ?> envelope)) {
-            return null;
+            return true;
         }
         Object data = ((Map<String, Object>) envelope).get("data");
         if (!(data instanceof Map<?, ?> datos)) {
+            return true;
+        }
+        return !((Map<String, Object>) datos).containsKey("token");
+    }
+
+    /**
+     * Pide a auth-service un token de restablecimiento para una cuenta.
+     *
+     * <p>Es el canal legítimo: lo entrega quien firma el token, no el historial
+     * de correos de otro servicio. Requiere estar autenticado como ADMIN, que es
+     * lo que el gateway exige para este POST.
+     *
+     * @return el token, o {@code null} si la cuenta todavía no existe —el alta
+     *         llega por evento y puede tardar, así que quien llama suele
+     *         reintentar
+     */
+    public String tokenDeRestablecimiento(String empleadoId) {
+        Response r = peticion()
+                .body(Map.of("empleadoId", empleadoId))
+                .when().post("/auth/internal/tokens/restablecimiento");
+        if (r.statusCode() != 200) {
             return null;
         }
-        Object token = ((Map<String, Object>) datos).get("token");
-        return token == null ? null : String.valueOf(token);
+        return r.path("token");
     }
 
     /** Motivo que viajó en un evento de cuenta ({@code VACACIONES}, {@code RETIRO}…). */

@@ -2,14 +2,15 @@ package com.sistema.gateway.security;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.cloud.gateway.filter.GatewayFilterChain;
-import org.springframework.cloud.gateway.filter.GlobalFilter;
 import org.springframework.core.Ordered;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.server.reactive.ServerHttpRequest;
 import org.springframework.stereotype.Component;
 import org.springframework.web.server.ServerWebExchange;
+import org.springframework.web.server.WebFilter;
+import org.springframework.web.server.WebFilterChain;
+import static net.logstash.logback.argument.StructuredArguments.kv;
 import reactor.core.publisher.Mono;
 
 /**
@@ -27,9 +28,19 @@ import reactor.core.publisher.Mono;
  * <p><strong>Las cabeceras de identidad que lleguen del cliente se eliminan</strong>
  * antes de validar. Sin eso, cualquiera podría enviar {@code X-Auth-Role: ADMIN} y
  * los servicios, que confían en el gateway, lo creerían.
+ *
+ * <p><strong>Es un {@link WebFilter} y no un {@code GlobalFilter}.</strong> Un
+ * {@code GlobalFilter} solo se ejecuta dentro de la cadena de <em>rutas</em> de
+ * Spring Cloud Gateway, así que no veía las peticiones que atiende un
+ * {@code @RestController} del propio gateway: en WebFlux el
+ * {@code RequestMappingHandlerMapping} (orden 0) gana al
+ * {@code RoutePredicateHandlerMapping} (orden 1), de modo que
+ * {@code GET /empleados/{id}/completo} se resolvía localmente y sin validar el
+ * token. Un {@code WebFilter} envuelve a todos los manejadores, enrutados o no,
+ * y cierra esa puerta también para cualquier controlador que se añada después.
  */
 @Component
-public class JwtAuthenticationFilter implements GlobalFilter, Ordered {
+public class JwtAuthenticationFilter implements WebFilter, Ordered {
 
     /** Se ejecuta antes del filtro de autorización y del enrutado. */
     public static final int ORDEN = -100;
@@ -50,7 +61,7 @@ public class JwtAuthenticationFilter implements GlobalFilter, Ordered {
     }
 
     @Override
-    public Mono<Void> filter(ServerWebExchange exchange, GatewayFilterChain chain) {
+    public Mono<Void> filter(ServerWebExchange exchange, WebFilterChain chain) {
         String path = exchange.getRequest().getPath().value();
 
         // Nunca se confía en una identidad que venga del cliente.
@@ -68,7 +79,9 @@ public class JwtAuthenticationFilter implements GlobalFilter, Ordered {
 
         String cabecera = limpia.getHeaders().getFirst(HttpHeaders.AUTHORIZATION);
         if (cabecera == null || !cabecera.startsWith(PREFIJO_BEARER)) {
-            log.warn("[GATEWAY] 401 sin token | {} {}", limpia.getMethod(), path);
+            log.warn("[GATEWAY] 401 sin token | {} {}", limpia.getMethod(), path,
+                    kv("metodo", String.valueOf(limpia.getMethod())), kv("ruta", path),
+                    kv("resultado", "401"), kv("causa", "sin cabecera Authorization"));
             return responseWriter.escribir(saneado, HttpStatus.UNAUTHORIZED,
                     "Se requiere un token de acceso en la cabecera Authorization: Bearer <token>");
         }
@@ -80,7 +93,9 @@ public class JwtAuthenticationFilter implements GlobalFilter, Ordered {
             usuario = validator.validar(token);
         } catch (JwtTokenValidator.TokenRechazadoException ex) {
             log.warn("[GATEWAY] 401 token rechazado | {} {} | causa='{}'",
-                    limpia.getMethod(), path, ex.getMessage());
+                    limpia.getMethod(), path, ex.getMessage(),
+                    kv("metodo", String.valueOf(limpia.getMethod())), kv("ruta", path),
+                    kv("resultado", "401"), kv("causa", ex.getMessage()));
             return responseWriter.escribir(saneado, HttpStatus.UNAUTHORIZED, ex.getMessage());
         }
 
@@ -93,7 +108,9 @@ public class JwtAuthenticationFilter implements GlobalFilter, Ordered {
         autenticado.getAttributes().put(AuthenticatedUser.ATRIBUTO, usuario);
 
         log.debug("[GATEWAY] Autenticado | empleado='{}' | rol='{}' | {} {}",
-                usuario.empleadoId(), usuario.rol(), conIdentidad.getMethod(), path);
+                usuario.empleadoId(), usuario.rol(), conIdentidad.getMethod(), path,
+                kv("empleadoId", usuario.empleadoId()), kv("rol", usuario.rol()),
+                kv("metodo", String.valueOf(conIdentidad.getMethod())), kv("ruta", path));
 
         return chain.filter(autenticado);
     }

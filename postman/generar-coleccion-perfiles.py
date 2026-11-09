@@ -228,27 +228,32 @@ pm.test('Explica el valor esperado', () => {
 ]
 
 # ── 3. Regla de propiedad (ABAC) ─────────────────────────────────────────────
-PRE_ACTIVAR = """// Activa la cuenta del empleado para obtener un token de rol USER.
+PRE_ACTIVAR = """// Pide a auth-service el token de activacion de la cuenta del empleado.
 //
-// El token de activacion no viaja en ninguna respuesta HTTP: se publica en el
-// evento usuario.creado y notifications-service lo persiste. Se recupera de ahi,
-// que es la prueba de que el sistema no lo expone.
+// Antes se leia de GET /notifications, porque notifications-service guardaba el
+// token en el payload de su historial. Eso era el hallazgo de seguridad que la
+// auditoria pidio cerrar, y el servicio reconstruido en Go ya solo conserva
+// campos publicos. Este es el canal legitimo: lo entrega quien firma el token.
 const base  = pm.environment.get('gatewayBaseUrl') || pm.variables.get('gatewayBaseUrl');
 const admin = pm.collectionVariables.get('adminToken');
-const email = pm.collectionVariables.get('empleadoEmail');
+const empleadoId = pm.collectionVariables.get('empleadoId');
 
 pm.sendRequest({
-    url: base + '/notifications?limit=50&sortBy=processedAt&order=DESC',
-    method: 'GET',
-    header: { 'Authorization': 'Bearer ' + admin, 'Accept': 'application/json' }
+    url: base + '/auth/internal/tokens/restablecimiento',
+    method: 'POST',
+    header: {
+        'Authorization': 'Bearer ' + admin,
+        'Content-Type': 'application/json',
+        'Accept': 'application/json'
+    },
+    body: { mode: 'raw', raw: JSON.stringify({ empleadoId: empleadoId }) }
 }, (err, res) => {
-    if (err) { console.log('No se pudo consultar /notifications:', err); return; }
-    const cuerpo = res.json();
-    const filas  = Array.isArray(cuerpo) ? cuerpo : (cuerpo.data || []);
-    const n = filas.find(x => x.eventType === 'usuario.creado'
-                           && String(x.email).toLowerCase() === String(email).toLowerCase());
-    if (!n) { console.log('Aun no llego usuario.creado para ' + email); return; }
-    pm.collectionVariables.set('tokenActivacion', n.payload.data.token);
+    if (err) { console.log('No se pudo pedir el token:', err); return; }
+    if (res.code !== 200) {
+        console.log('auth-service respondio ' + res.code + ': ' + res.text());
+        return;
+    }
+    pm.collectionVariables.set('tokenActivacion', res.json().token);
 });"""
 
 T_ACTIVAR = """if (!pm.collectionVariables.get('tokenActivacion')) {

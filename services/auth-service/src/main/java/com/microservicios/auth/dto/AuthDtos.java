@@ -66,6 +66,25 @@ public final class AuthDtos {
             String nuevaPassword
     ) {}
 
+    @Schema(description = "Solicitud de un token de restablecimiento, reservada a ADMIN")
+    public record TokenDeRestablecimientoRequest(
+            @NotBlank(message = "El empleadoId es obligatorio")
+            @Schema(description = "Cuenta para la que se emite el token", example = "E501")
+            String empleadoId
+    ) {}
+
+    @Schema(description = "Token de restablecimiento recién emitido")
+    public record TokenDeRestablecimientoResponse(
+            @Schema(example = "E501") String empleadoId,
+            @Schema(description = "JWT con el claim type=RESET_PASSWORD") String token,
+            @Schema(description = "Tipo del token, siempre RESET_PASSWORD") String tipo,
+            @Schema(example = "900") long expiraEnSegundos
+    ) {
+        public static TokenDeRestablecimientoResponse de(String empleadoId, String token, long ttl) {
+            return new TokenDeRestablecimientoResponse(empleadoId, token, "RESET_PASSWORD", ttl);
+        }
+    }
+
     @Schema(description = "Confirmación de una operación que no devuelve recurso")
     public record MensajeResponse(
             @Schema(example = "Contraseña establecida correctamente") String mensaje

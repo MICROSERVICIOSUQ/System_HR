@@ -86,11 +86,24 @@ public class PasosCicloDeVida {
 
     // ── Programación de períodos ────────────────────────────────────────────
 
+    /**
+     * Programa {@code dias} días de vacaciones a partir de mañana.
+     *
+     * <p><strong>fechaFin es el día de regreso, no el último día de descanso.</strong>
+     * De ahí el {@code plusDays(dias)} y no {@code plusDays(dias - 1)}: un día de
+     * vacaciones son dos fechas consecutivas. Es la semántica que el informe de
+     * auditoría dejó explícitamente a decisión del equipo —inclusiva frente a
+     * exclusiva— y que vacations-service resolvió exigiendo
+     * {@code fechaFin > fechaInicio}, con el scheduler finalizando el período
+     * cuando la fecha de regreso ya llegó. La suite seguía con la lectura
+     * inclusiva anterior, así que pedía períodos con las dos fechas iguales y
+     * recibía 400.
+     */
     @Cuando("programo un período de vacaciones de {int} días que empieza mañana")
     public void programoUnPeriodoDeDias(int dias) {
         LocalDate inicio = LocalDate.now().plusDays(1);
         guardarPeriodoSiSeCreo(
-                api.programarVacaciones(empleado(), inicio, inicio.plusDays(dias - 1L)));
+                api.programarVacaciones(empleado(), inicio, inicio.plusDays(dias)));
     }
 
     @Dado("que programo un período de vacaciones de {int} días que empieza mañana")
@@ -133,7 +146,9 @@ public class PasosCicloDeVida {
     @Dado("que programo un período de vacaciones que inicia de inmediato")
     public void programoUnPeriodoQueIniciaDeInmediato() {
         LocalDate hoy = LocalDate.now();
-        Response r = api.programarVacaciones(empleado(), hoy, hoy);
+        // Hoy con regreso mañana: el período más corto posible con la semántica
+        // de fecha de regreso. Antes se pedía hoy→hoy, que ahora es inválido.
+        Response r = api.programarVacaciones(empleado(), hoy, hoy.plusDays(1));
         assertThat(r.statusCode())
                 .as("no se pudo programar el período inmediato: %s", r.asString())
                 .isEqualTo(201);

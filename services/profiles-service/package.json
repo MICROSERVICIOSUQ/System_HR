@@ -9,7 +9,10 @@
     "start": "tsx src/server.ts",
     "db:generate": "prisma generate",
     "db:migrate": "prisma migrate deploy",
-    "test": "prisma generate && tsx --test src/tests/*.test.ts"
+    "test": "prisma generate && tsx --import ./src/tests/entorno-pruebas.ts --test --experimental-test-coverage --test-coverage-include=\"src/services/**\" --test-coverage-include=\"src/controllers/**\" --test-coverage-include=\"src/mappers/**\" --test-coverage-include=\"src/errors/**\" --test-coverage-include=\"src/docs/**\" --test-coverage-exclude=\"src/tests/**\" --test-coverage-exclude=\"src/generated/**\" --test-coverage-lines=70 --test-reporter=spec --test-reporter-destination=stdout --test-reporter=lcov --test-reporter-destination=coverage/lcov.info src/tests/*.test.ts",
+    "pretest": "node -e \"require('fs').mkdirSync('coverage',{recursive:true})\"",
+    "pretest:ci": "node -e \"require('fs').mkdirSync('coverage',{recursive:true})\"",
+    "test:ci": "prisma generate && tsx --import ./src/tests/entorno-pruebas.ts --test --experimental-test-coverage --test-coverage-include=\"src/services/**\" --test-coverage-include=\"src/controllers/**\" --test-coverage-include=\"src/mappers/**\" --test-coverage-include=\"src/errors/**\" --test-coverage-include=\"src/docs/**\" --test-coverage-exclude=\"src/tests/**\" --test-coverage-exclude=\"src/generated/**\" --test-coverage-lines=70 --test-reporter=spec --test-reporter-destination=stdout --test-reporter=lcov --test-reporter-destination=coverage/lcov.info src/tests/*.test.ts"
   },
   "dependencies": {
     "@opentelemetry/api": "^1.9.1",

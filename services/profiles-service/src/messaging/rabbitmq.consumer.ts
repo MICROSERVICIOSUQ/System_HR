@@ -1,5 +1,6 @@
 import amqplib, { Channel, ChannelModel, ConsumeMessage } from 'amqplib';
 import { rabbitConfig } from '../config/rabbitmq.ts';
+import { logger } from '../observability/logger.ts';
 import { ProfileService } from '../services/profile.service.ts';
 import { conSpanDeConsumo } from '../observability/amqp-tracing.ts';
 
@@ -16,7 +17,10 @@ export class RabbitMQConsumer {
 
     const connectWithRetry = async () => {
       try {
-        console.log(`[RABBITMQ] Conectando a ${rabbitConfig.host}:${rabbitConfig.port}...`);
+        logger.info('[RABBITMQ] Conectando', {
+          host: rabbitConfig.host,
+          puerto: rabbitConfig.port,
+        });
         this.connection = await amqplib.connect(rabbitConfig.url);
         this.channel = await this.connection.createChannel();
 
@@ -24,20 +28,20 @@ export class RabbitMQConsumer {
         await this.channel.prefetch(10);
 
         this.connection.on('error', (err) => {
-          console.error('[RABBITMQ] Error en conexión:', err.message);
+          logger.error('[RABBITMQ] Error en la conexión', { error: err.message });
         });
 
         this.connection.on('close', () => {
-          console.warn('[RABBITMQ] Conexión cerrada. Reconectando en 5 segundos...');
+          logger.warn('[RABBITMQ] Conexión cerrada, reconectando', { enSegundos: 5 });
           this.connection = null;
           this.channel = null;
           this.isConnecting = false;
           setTimeout(() => this.start(), 5000);
         });
 
-        console.log(
-          `[RABBITMQ] Conectado exitosamente. Escuchando cola: '${rabbitConfig.queueName}'`
-        );
+        logger.info('[RABBITMQ] Conectado, escuchando la cola', {
+          cola: rabbitConfig.queueName,
+        });
 
         // Consumir únicamente la cola preexistente sin modificar topología
         await this.channel.consume(
@@ -51,9 +55,10 @@ export class RabbitMQConsumer {
 
         this.isConnecting = false;
       } catch (error: any) {
-        console.error(
-          `[RABBITMQ] Fallo de conexión: ${error.message}. Reintentando en 5 segundos...`
-        );
+        logger.error('[RABBITMQ] Fallo de conexión, se reintentará', {
+          error: error.message,
+          enSegundos: 5,
+        });
         this.isConnecting = false;
         setTimeout(connectWithRetry, 5000);
       }
@@ -72,10 +77,9 @@ export class RabbitMQConsumer {
       try {
         envelope = JSON.parse(contentStr);
       } catch (parseErr) {
-        console.error(
-          '[PROFILE] [ERROR] Mensaje no contiene un JSON válido. Descartando:',
-          contentStr
-        );
+        logger.error('[PROFILE] [ERROR] El mensaje no es un JSON válido, se descarta', {
+          contenido: contentStr.slice(0, 500),
+        });
         this.channel.ack(msg);
         return;
       }
@@ -95,10 +99,9 @@ export class RabbitMQConsumer {
       // ACK siempre: procesado, duplicado o ignorado
       this.channel.ack(msg);
     } catch (error: any) {
-      console.error(
-        '[PROFILE] [ERROR] Excepción no controlada procesando mensaje:',
-        error.message
-      );
+      logger.error('[PROFILE] [ERROR] Excepción no controlada procesando el mensaje', {
+        error: error.message,
+      });
       // ACK para evitar bloqueo infinito de la cola
       this.channel.ack(msg);
     }
@@ -108,9 +111,9 @@ export class RabbitMQConsumer {
     try {
       if (this.channel) await this.channel.close();
       if (this.connection) await this.connection.close();
-      console.log('[RABBITMQ] Conexión cerrada ordenadamente.');
+      logger.info('[RABBITMQ] Conexión cerrada ordenadamente');
     } catch (err: any) {
-      console.error('[RABBITMQ] Error cerrando conexión:', err.message);
+      logger.error('[RABBITMQ] Error cerrando la conexión', { error: err.message });
     }
   }
 }

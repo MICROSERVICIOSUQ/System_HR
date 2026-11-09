@@ -1,5 +1,6 @@
 package com.microservicios.employees.messaging;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.microservicios.employees.events.EmployeeCreatedEvent;
 import com.microservicios.employees.events.EmployeeEventData;
 import com.microservicios.employees.events.EmployeeRetiredEvent;
@@ -11,9 +12,20 @@ import org.slf4j.LoggerFactory;
 import org.springframework.amqp.rabbit.core.RabbitTemplate;
 import org.springframework.stereotype.Component;
 
+import static net.logstash.logback.argument.StructuredArguments.kv;
+
 /**
- * Publicador de eventos de dominio para el ciclo de vida del empleado hacia RabbitMQ.
- * Publica exclusivamente al exchange fanout 'hr.events' sin routing key.
+ * Publicador de eventos de dominio para el ciclo de vida del empleado.
+ *
+ * <p>Publica exclusivamente al exchange fanout 'hr.events' sin routing key.
+ *
+ * <p><strong>Ya no envía al broker directamente.</strong> Los eventos se
+ * escriben en la tabla outbox dentro de la transacción del cambio de negocio y
+ * los envía después {@link PublicadorDeOutbox}. Antes se hacía un
+ * {@code convertAndSend} inmediato dentro de un try/catch que solo registraba el
+ * fallo: si RabbitMQ estaba caído en ese segundo, el empleado quedaba creado y su
+ * evento se perdía para siempre, sin que nadie lo reintentara. Ver
+ * {@link OutboxEvento} para el razonamiento completo.
  */
 @Component
 public class EmployeeEventPublisher {
@@ -21,10 +33,15 @@ public class EmployeeEventPublisher {
     private static final Logger log = LoggerFactory.getLogger(EmployeeEventPublisher.class);
 
     private final RabbitTemplate rabbitTemplate;
+    private final OutboxRepository outboxRepository;
+    private final ObjectMapper objectMapper;
 
-    
-    public EmployeeEventPublisher(RabbitTemplate rabbitTemplate) {
+    public EmployeeEventPublisher(RabbitTemplate rabbitTemplate,
+                                  OutboxRepository outboxRepository,
+                                  ObjectMapper objectMapper) {
         this.rabbitTemplate = rabbitTemplate;
+        this.outboxRepository = outboxRepository;
+        this.objectMapper = objectMapper;
     }
 
     /**
@@ -51,19 +68,45 @@ public class EmployeeEventPublisher {
         sendEvent(envelope, employee.getId());
     }
 
+    /**
+     * Escribe el evento en la tabla outbox, en la transacción de quien llama.
+     *
+     * <p>No abre transacción propia a propósito: tiene que participar en la del
+     * método de negocio para que el cambio y su evento se confirmen juntos. Si
+     * se llamara sin transacción activa, Spring Data abriría una para el
+     * {@code save} y se perdería la garantía: por eso los métodos de
+     * {@code EmployeeService} que publican eventos son {@code @Transactional}.
+     */
     private void sendEvent(EventEnvelope<EmployeeEventData> envelope, String employeeId) {
-        log.info("Evento creado para publicación: type='{}', eventId='{}', employeeId='{}', producer='{}', exchange='{}'",
-                envelope.type(), envelope.id(), employeeId, envelope.producer(), RabbitMQConfig.EXCHANGE_HR_EVENTS);
-
         try {
-            // Fanout exchange: routing key vacía
-            rabbitTemplate.convertAndSend(RabbitMQConfig.EXCHANGE_HR_EVENTS, "", envelope);
-
-            log.info("Evento publicado exitosamente: type='{}', eventId='{}', employeeId='{}'",
-                    envelope.type(), envelope.id(), employeeId);
-        } catch (Exception ex) {
-            log.error("Error al publicar evento en RabbitMQ: type='{}', eventId='{}', employeeId='{}', exchange='{}', error='{}'",
-                    envelope.type(), envelope.id(), employeeId, RabbitMQConfig.EXCHANGE_HR_EVENTS, ex.getMessage(), ex);
+            outboxRepository.save(new OutboxEvento(
+                    envelope.id(),
+                    envelope.type(),
+                    employeeId,
+                    objectMapper.writeValueAsString(envelope)));
+        } catch (com.fasterxml.jackson.core.JsonProcessingException error) {
+            // Un sobre que no se puede serializar es un error de programación,
+            // no una incidencia de entorno. Se propaga para que la transacción
+            // se deshaga: es preferible que el alta falle a que el empleado
+            // quede creado sin su evento, que es justo lo que este patrón evita.
+            throw new IllegalStateException(
+                    "No se pudo serializar el evento " + envelope.type(), error);
         }
+
+        log.info("[OUTBOX] [ENCOLADO] {} | eventId='{}' | empleado='{}'",
+                envelope.type(), envelope.id(), employeeId,
+                kv("eventType", envelope.type()), kv("eventId", envelope.id()),
+                kv("empleadoId", employeeId), kv("resultado", "encolado"));
+    }
+
+    /**
+     * Publica directamente, sin pasar por el outbox.
+     *
+     * <p>Solo la usa {@link PublicadorDeOutbox} al vaciar la cola. Se mantiene
+     * aquí para que el formato del mensaje —converter, exchange, routing key
+     * vacía— se defina en un único sitio.
+     */
+    void enviarAlBroker(EventEnvelope<EmployeeEventData> envelope) {
+        rabbitTemplate.convertAndSend(RabbitMQConfig.EXCHANGE_HR_EVENTS, "", envelope);
     }
 }

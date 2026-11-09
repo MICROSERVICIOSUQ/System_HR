@@ -24,6 +24,19 @@ pipeline {
     stages {
         stage('Checkout') {
             steps {
+                // Las etapas siguientes ejecutan contenedores que escriben en el
+                // workspace como root (coverage.xml, .pytest_cache, target/,
+                // node_modules, coverage.out). Jenkins corre como el usuario
+                // 'jenkins', de modo que el deleteDir() de la ejecucion
+                // siguiente fallaba con AccessDeniedException: el primer build
+                // de cada trabajo pasaba y el segundo ni arrancaba. Se vacia
+                // antes con un contenedor root, usando el mismo mecanismo de
+                // montaje que ya usan las demas etapas.
+                script {
+                    docker.image('alpine:3.22').inside('-u root') {
+                        sh 'rm -rf ./* ./.[!.]* 2>/dev/null || true'
+                    }
+                }
                 deleteDir()
                 git branch: params.BRANCH, url: env.GIT_URL
             }

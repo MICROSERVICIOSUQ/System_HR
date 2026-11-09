@@ -20,6 +20,19 @@ pipeline {
     stages {
         stage('Checkout') {
             steps {
+                // Las etapas siguientes ejecutan contenedores que escriben en el
+                // workspace como root (coverage.xml, .pytest_cache, target/,
+                // node_modules, coverage.out). Jenkins corre como el usuario
+                // 'jenkins', de modo que el deleteDir() de la ejecucion
+                // siguiente fallaba con AccessDeniedException: el primer build
+                // de cada trabajo pasaba y el segundo ni arrancaba. Se vacia
+                // antes con un contenedor root, usando el mismo mecanismo de
+                // montaje que ya usan las demas etapas.
+                script {
+                    docker.image('alpine:3.22').inside('-u root') {
+                        sh 'rm -rf ./* ./.[!.]* 2>/dev/null || true'
+                    }
+                }
                 deleteDir()
                 git branch: params.BRANCH, url: env.GIT_URL
             }
@@ -27,21 +40,35 @@ pipeline {
 
         stage('Build') {
             steps {
-                dir('services/employees-service') {
-                    sh 'mvn -B clean compile -DskipTests'
+                // Dentro de un contenedor de Maven, como las etapas de los
+                // servicios Node y Python. El nodo de Jenkins trae JDK pero no
+                // Maven, asi que estas tres etapas fallaban con
+                // "mvn: not found" y los tres pipelines Java no pasaban de la
+                // primera. El volumen hr-ci-m2 cachea las dependencias entre
+                // ejecuciones, igual que hr-ci-npm en los de Node.
+                script {
+                    docker.image('maven:3.9-eclipse-temurin-21').inside('-u root -v hr-ci-m2:/root/.m2') {
+                        dir('services/employees-service') {
+                            sh 'mvn -B clean compile -DskipTests'
+                        }
+                    }
                 }
             }
         }
 
         stage('Test+JaCoCo') {
             steps {
-                dir('services/employees-service') {
-                    sh '''
+                script {
+                    docker.image('maven:3.9-eclipse-temurin-21').inside('-u root -v hr-ci-m2:/root/.m2') {
+                        dir('services/employees-service') {
+                            sh '''
                         mvn -B \
                           org.jacoco:jacoco-maven-plugin:prepare-agent \
                           verify \
                           org.jacoco:jacoco-maven-plugin:report
-                    '''
+                            '''
+                        }
+                    }
                 }
             }
             post {
@@ -56,9 +83,13 @@ pipeline {
 
         stage('Sonar Scan') {
             steps {
-                dir('services/employees-service') {
-                    withSonarQubeEnv('SonarQube') {
-                        sh 'mvn -B sonar:sonar -Dsonar.projectKey=$SONAR_PROJECT_KEY -Dsonar.qualitygate.wait=false'
+                withSonarQubeEnv('SonarQube') {
+                    script {
+                        docker.image('maven:3.9-eclipse-temurin-21').inside('-u root -v hr-ci-m2:/root/.m2') {
+                            dir('services/employees-service') {
+                                sh 'mvn -B sonar:sonar -Dsonar.projectKey=$SONAR_PROJECT_KEY -Dsonar.qualitygate.wait=false'
+                            }
+                        }
                     }
                 }
             }

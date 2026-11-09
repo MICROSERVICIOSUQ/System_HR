@@ -6,6 +6,8 @@ import com.microservicios.auth.dto.AuthDtos.LoginResponse;
 import com.microservicios.auth.dto.AuthDtos.MensajeResponse;
 import com.microservicios.auth.dto.AuthDtos.RecoverPasswordRequest;
 import com.microservicios.auth.dto.AuthDtos.ResetPasswordRequest;
+import com.microservicios.auth.dto.AuthDtos.TokenDeRestablecimientoRequest;
+import com.microservicios.auth.dto.AuthDtos.TokenDeRestablecimientoResponse;
 import com.microservicios.auth.exception.AuthExceptions.IdentidadAusenteException;
 import com.microservicios.auth.exception.ErrorResponse;
 import com.microservicios.auth.service.AuthService;
@@ -134,6 +136,48 @@ public class AuthController {
         }
         service.cambiarPassword(empleadoId, peticion.passwordActual(), peticion.nuevaPassword());
         return ResponseEntity.ok(MensajeResponse.de("Contraseña cambiada correctamente"));
+    }
+
+    @PostMapping("/internal/tokens/restablecimiento")
+    @Operation(summary = "Emitir un token de restablecimiento (solo ADMIN)",
+            description = "Devuelve un token con type=RESET_PASSWORD para la cuenta indicada, "
+                    + "utilizable en POST /auth/reset-password. "
+                    + "Existe porque el token de activación viaja en el evento usuario.creado y "
+                    + "notifications-service ya no lo conserva en su historial: guardarlo en texto "
+                    + "plano era el hallazgo de seguridad que la auditoría pedía cerrar. Las pruebas "
+                    + "automatizadas y la activación asistida necesitan un canal legítimo, y este lo "
+                    + "es: el token lo entrega quien lo firma. "
+                    + "Es una operación privilegiada —equivale a poder tomar el control de una "
+                    + "cuenta— así que el gateway la reserva al rol ADMIN y cada emisión queda "
+                    + "registrada con el administrador que la solicitó.",
+            security = @SecurityRequirement(name = "BearerAuth"))
+    @ApiResponses({
+            @ApiResponse(responseCode = "200", description = "Token emitido",
+                    content = @Content(schema = @Schema(implementation = TokenDeRestablecimientoResponse.class))),
+            @ApiResponse(responseCode = "400", description = "Falta el empleadoId",
+                    content = @Content(schema = @Schema(implementation = ErrorResponse.class))),
+            @ApiResponse(responseCode = "401",
+                    description = "Sin token válido, o la cuenta tiene baja permanente",
+                    content = @Content(schema = @Schema(implementation = ErrorResponse.class))),
+            @ApiResponse(responseCode = "403", description = "El rol USER no puede emitir tokens de otras cuentas",
+                    content = @Content(schema = @Schema(implementation = ErrorResponse.class))),
+            @ApiResponse(responseCode = "404", description = "La cuenta no existe",
+                    content = @Content(schema = @Schema(implementation = ErrorResponse.class)))
+    })
+    public ResponseEntity<TokenDeRestablecimientoResponse> emitirTokenDeRestablecimiento(
+            @RequestHeader(value = HEADER_USUARIO, required = false) String solicitante,
+            @Valid @RequestBody TokenDeRestablecimientoRequest peticion) {
+
+        // La identidad del solicitante no autoriza nada aquí —de eso se encarga
+        // el gateway— pero sí se exige para que la emisión quede atribuida. Un
+        // token privilegiado emitido por "alguien" no sirve para auditar.
+        if (solicitante == null || solicitante.isBlank()) {
+            throw new IdentidadAusenteException();
+        }
+
+        var emitido = service.emitirTokenDeRestablecimiento(peticion.empleadoId(), solicitante);
+        return ResponseEntity.ok(TokenDeRestablecimientoResponse.de(
+                emitido.empleadoId(), emitido.token(), emitido.expiraEnSegundos()));
     }
 
     @io.swagger.v3.oas.annotations.Hidden
