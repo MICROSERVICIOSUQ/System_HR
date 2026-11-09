@@ -1,0 +1,628 @@
+{
+  "fecha": "2026-10-28",
+  "rama": "valentina",
+  "origen": "Copia Git local de valentina, sin publicar cambios en main",
+  "ejecuciones": [
+    {
+      "pipeline": "employees-service",
+      "build": 9,
+      "tipo": "normal",
+      "resultado": "SUCCESS",
+      "url": "http://localhost:9090/job/employees-service/9/",
+      "pruebas": {
+        "aprobadas": 116,
+        "fallidas": 0,
+        "omitidas": 0,
+        "fallos": []
+      },
+      "etapas": [
+        {
+          "nombre": "Checkout",
+          "estado": "SUCCESS"
+        },
+        {
+          "nombre": "Build",
+          "estado": "SUCCESS"
+        },
+        {
+          "nombre": "Test",
+          "estado": "SUCCESS"
+        },
+        {
+          "nombre": "SonarQube",
+          "estado": "SUCCESS"
+        },
+        {
+          "nombre": "Quality Gate",
+          "estado": "SUCCESS"
+        },
+        {
+          "nombre": "Package",
+          "estado": "SUCCESS"
+        },
+        {
+          "nombre": "E2E Tests",
+          "estado": "SUCCESS"
+        },
+        {
+          "nombre": "Declarative: Post Actions",
+          "estado": "SUCCESS"
+        }
+      ]
+    },
+    {
+      "pipeline": "employees-service",
+      "build": 10,
+      "tipo": "normal",
+      "resultado": "SUCCESS",
+      "url": "http://localhost:9090/job/employees-service/10/",
+      "pruebas": {
+        "aprobadas": 116,
+        "fallidas": 0,
+        "omitidas": 0,
+        "fallos": []
+      },
+      "etapas": [
+        {
+          "nombre": "Checkout",
+          "estado": "SUCCESS"
+        },
+        {
+          "nombre": "Build",
+          "estado": "SUCCESS"
+        },
+        {
+          "nombre": "Test",
+          "estado": "SUCCESS"
+        },
+        {
+          "nombre": "SonarQube",
+          "estado": "SUCCESS"
+        },
+        {
+          "nombre": "Quality Gate",
+          "estado": "SUCCESS"
+        },
+        {
+          "nombre": "Package",
+          "estado": "SUCCESS"
+        },
+        {
+          "nombre": "E2E Tests",
+          "estado": "SUCCESS"
+        },
+        {
+          "nombre": "Declarative: Post Actions",
+          "estado": "SUCCESS"
+        }
+      ]
+    },
+    {
+      "pipeline": "vacations-service",
+      "build": 8,
+      "tipo": "normal",
+      "resultado": "SUCCESS",
+      "url": "http://localhost:9090/job/vacations-service/8/",
+      "pruebas": {
+        "aprobadas": 103,
+        "fallidas": 0,
+        "omitidas": 0,
+        "fallos": []
+      },
+      "etapas": [
+        {
+          "nombre": "Checkout",
+          "estado": "SUCCESS"
+        },
+        {
+          "nombre": "Build",
+          "estado": "SUCCESS"
+        },
+        {
+          "nombre": "Test",
+          "estado": "SUCCESS"
+        },
+        {
+          "nombre": "SonarQube",
+          "estado": "SUCCESS"
+        },
+        {
+          "nombre": "Quality Gate",
+          "estado": "SUCCESS"
+        },
+        {
+          "nombre": "Package",
+          "estado": "SUCCESS"
+        },
+        {
+          "nombre": "E2E Tests",
+          "estado": "SUCCESS"
+        },
+        {
+          "nombre": "Declarative: Post Actions",
+          "estado": "SUCCESS"
+        }
+      ]
+    },
+    {
+      "pipeline": "vacations-service",
+      "build": 9,
+      "tipo": "normal",
+      "resultado": "SUCCESS",
+      "url": "http://localhost:9090/job/vacations-service/9/",
+      "pruebas": {
+        "aprobadas": 103,
+        "fallidas": 0,
+        "omitidas": 0,
+        "fallos": []
+      },
+      "etapas": [
+        {
+          "nombre": "Checkout",
+          "estado": "SUCCESS"
+        },
+        {
+          "nombre": "Build",
+          "estado": "SUCCESS"
+        },
+        {
+          "nombre": "Test",
+          "estado": "SUCCESS"
+        },
+        {
+          "nombre": "SonarQube",
+          "estado": "SUCCESS"
+        },
+        {
+          "nombre": "Quality Gate",
+          "estado": "SUCCESS"
+        },
+        {
+          "nombre": "Package",
+          "estado": "SUCCESS"
+        },
+        {
+          "nombre": "E2E Tests",
+          "estado": "SUCCESS"
+        },
+        {
+          "nombre": "Declarative: Post Actions",
+          "estado": "SUCCESS"
+        }
+      ]
+    },
+    {
+      "pipeline": "employees-service",
+      "build": 11,
+      "tipo": "normal",
+      "resultado": "SUCCESS",
+      "url": "http://localhost:9090/job/employees-service/11/",
+      "pruebas": {
+        "aprobadas": 116,
+        "fallidas": 0,
+        "omitidas": 0,
+        "fallos": []
+      },
+      "etapas": [
+        {
+          "nombre": "Checkout",
+          "estado": "SUCCESS"
+        },
+        {
+          "nombre": "Build",
+          "estado": "SUCCESS"
+        },
+        {
+          "nombre": "Test",
+          "estado": "SUCCESS"
+        },
+        {
+          "nombre": "SonarQube",
+          "estado": "SUCCESS"
+        },
+        {
+          "nombre": "Quality Gate",
+          "estado": "SUCCESS"
+        },
+        {
+          "nombre": "Package",
+          "estado": "SUCCESS"
+        },
+        {
+          "nombre": "E2E Tests",
+          "estado": "SUCCESS"
+        },
+        {
+          "nombre": "Declarative: Post Actions",
+          "estado": "SUCCESS"
+        }
+      ]
+    },
+    {
+      "pipeline": "vacations-service",
+      "build": 10,
+      "tipo": "normal",
+      "resultado": "SUCCESS",
+      "url": "http://localhost:9090/job/vacations-service/10/",
+      "pruebas": {
+        "aprobadas": 103,
+        "fallidas": 0,
+        "omitidas": 0,
+        "fallos": []
+      },
+      "etapas": [
+        {
+          "nombre": "Checkout",
+          "estado": "SUCCESS"
+        },
+        {
+          "nombre": "Build",
+          "estado": "SUCCESS"
+        },
+        {
+          "nombre": "Test",
+          "estado": "SUCCESS"
+        },
+        {
+          "nombre": "SonarQube",
+          "estado": "SUCCESS"
+        },
+        {
+          "nombre": "Quality Gate",
+          "estado": "SUCCESS"
+        },
+        {
+          "nombre": "Package",
+          "estado": "SUCCESS"
+        },
+        {
+          "nombre": "E2E Tests",
+          "estado": "SUCCESS"
+        },
+        {
+          "nombre": "Declarative: Post Actions",
+          "estado": "SUCCESS"
+        }
+      ]
+    },
+    {
+      "pipeline": "vacations-service",
+      "build": 11,
+      "tipo": "unitaria",
+      "resultado": "FAILURE",
+      "url": "http://localhost:9090/job/vacations-service/11/",
+      "pruebas": {
+        "aprobadas": 64,
+        "fallidas": 1,
+        "omitidas": 0,
+        "fallos": [
+          {
+            "prueba": "Fallo deliberado del reto 7",
+            "mensaje": "Jenkins debe identificar esta prueba en Test Result."
+          }
+        ]
+      },
+      "etapas": [
+        {
+          "nombre": "Checkout",
+          "estado": "SUCCESS"
+        },
+        {
+          "nombre": "Build",
+          "estado": "SUCCESS"
+        },
+        {
+          "nombre": "Test",
+          "estado": "FAILED"
+        },
+        {
+          "nombre": "SonarQube",
+          "estado": "FAILED"
+        },
+        {
+          "nombre": "Quality Gate",
+          "estado": "FAILED"
+        },
+        {
+          "nombre": "Package",
+          "estado": "FAILED"
+        },
+        {
+          "nombre": "E2E Tests",
+          "estado": "FAILED"
+        },
+        {
+          "nombre": "Declarative: Post Actions",
+          "estado": "SUCCESS"
+        }
+      ]
+    },
+    {
+      "pipeline": "vacations-service",
+      "build": 12,
+      "tipo": "docker",
+      "resultado": "FAILURE",
+      "url": "http://localhost:9090/job/vacations-service/12/",
+      "pruebas": {
+        "aprobadas": 64,
+        "fallidas": 0,
+        "omitidas": 0,
+        "fallos": []
+      },
+      "etapas": [
+        {
+          "nombre": "Checkout",
+          "estado": "SUCCESS"
+        },
+        {
+          "nombre": "Build",
+          "estado": "SUCCESS"
+        },
+        {
+          "nombre": "Test",
+          "estado": "SUCCESS"
+        },
+        {
+          "nombre": "SonarQube",
+          "estado": "SUCCESS"
+        },
+        {
+          "nombre": "Quality Gate",
+          "estado": "SUCCESS"
+        },
+        {
+          "nombre": "Package",
+          "estado": "FAILED"
+        },
+        {
+          "nombre": "E2E Tests",
+          "estado": "FAILED"
+        },
+        {
+          "nombre": "Declarative: Post Actions",
+          "estado": "SUCCESS"
+        }
+      ]
+    },
+    {
+      "pipeline": "vacations-service",
+      "build": 13,
+      "tipo": "bdd",
+      "resultado": "FAILURE",
+      "url": "http://localhost:9090/job/vacations-service/13/",
+      "pruebas": {
+        "aprobadas": 103,
+        "fallidas": 1,
+        "omitidas": 0,
+        "fallos": [
+          {
+            "prueba": "El pipeline identifica un fallo BDD",
+            "mensaje": "[cuerpo de la respuesta: {\"status\":\"ok\",\"service\":\"api-gateway\"}]  expected: 599  but was: 200"
+          }
+        ]
+      },
+      "etapas": [
+        {
+          "nombre": "Checkout",
+          "estado": "SUCCESS"
+        },
+        {
+          "nombre": "Build",
+          "estado": "SUCCESS"
+        },
+        {
+          "nombre": "Test",
+          "estado": "SUCCESS"
+        },
+        {
+          "nombre": "SonarQube",
+          "estado": "SUCCESS"
+        },
+        {
+          "nombre": "Quality Gate",
+          "estado": "SUCCESS"
+        },
+        {
+          "nombre": "Package",
+          "estado": "SUCCESS"
+        },
+        {
+          "nombre": "E2E Tests",
+          "estado": "FAILED"
+        },
+        {
+          "nombre": "Declarative: Post Actions",
+          "estado": "SUCCESS"
+        }
+      ]
+    },
+    {
+      "pipeline": "vacations-service",
+      "build": 14,
+      "tipo": "cobertura",
+      "resultado": "FAILURE",
+      "url": "http://localhost:9090/job/vacations-service/14/",
+      "pruebas": {
+        "aprobadas": 64,
+        "fallidas": 0,
+        "omitidas": 0,
+        "fallos": []
+      },
+      "etapas": [
+        {
+          "nombre": "Checkout",
+          "estado": "SUCCESS"
+        },
+        {
+          "nombre": "Build",
+          "estado": "SUCCESS"
+        },
+        {
+          "nombre": "Test",
+          "estado": "SUCCESS"
+        },
+        {
+          "nombre": "SonarQube",
+          "estado": "SUCCESS"
+        },
+        {
+          "nombre": "Quality Gate",
+          "estado": "FAILED"
+        },
+        {
+          "nombre": "Package",
+          "estado": "FAILED"
+        },
+        {
+          "nombre": "E2E Tests",
+          "estado": "FAILED"
+        },
+        {
+          "nombre": "Declarative: Post Actions",
+          "estado": "SUCCESS"
+        }
+      ]
+    },
+    {
+      "pipeline": "vacations-service",
+      "build": 15,
+      "tipo": "docker",
+      "resultado": "FAILURE",
+      "url": "http://localhost:9090/job/vacations-service/15/",
+      "pruebas": {
+        "aprobadas": 64,
+        "fallidas": 0,
+        "omitidas": 0,
+        "fallos": []
+      },
+      "etapas": [
+        {
+          "nombre": "Checkout",
+          "estado": "SUCCESS"
+        },
+        {
+          "nombre": "Build",
+          "estado": "SUCCESS"
+        },
+        {
+          "nombre": "Test",
+          "estado": "SUCCESS"
+        },
+        {
+          "nombre": "SonarQube",
+          "estado": "SUCCESS"
+        },
+        {
+          "nombre": "Quality Gate",
+          "estado": "SUCCESS"
+        },
+        {
+          "nombre": "Package",
+          "estado": "FAILED"
+        },
+        {
+          "nombre": "E2E Tests",
+          "estado": "FAILED"
+        },
+        {
+          "nombre": "Declarative: Post Actions",
+          "estado": "SUCCESS"
+        }
+      ]
+    },
+    {
+      "pipeline": "employees-service",
+      "build": 15,
+      "tipo": "verificacion-final",
+      "resultado": "SUCCESS",
+      "url": "http://localhost:9090/job/employees-service/15/",
+      "pruebas": {
+        "aprobadas": 116,
+        "fallidas": 0,
+        "omitidas": 0,
+        "fallos": []
+      },
+      "etapas": [
+        {
+          "nombre": "Checkout",
+          "estado": "SUCCESS"
+        },
+        {
+          "nombre": "Build",
+          "estado": "SUCCESS"
+        },
+        {
+          "nombre": "Test",
+          "estado": "SUCCESS"
+        },
+        {
+          "nombre": "SonarQube",
+          "estado": "SUCCESS"
+        },
+        {
+          "nombre": "Quality Gate",
+          "estado": "SUCCESS"
+        },
+        {
+          "nombre": "Package",
+          "estado": "SUCCESS"
+        },
+        {
+          "nombre": "E2E Tests",
+          "estado": "SUCCESS"
+        },
+        {
+          "nombre": "Declarative: Post Actions",
+          "estado": "SUCCESS"
+        }
+      ]
+    },
+    {
+      "pipeline": "vacations-service",
+      "build": 17,
+      "tipo": "verificacion-final",
+      "resultado": "SUCCESS",
+      "url": "http://localhost:9090/job/vacations-service/17/",
+      "pruebas": {
+        "aprobadas": 103,
+        "fallidas": 0,
+        "omitidas": 0,
+        "fallos": []
+      },
+      "etapas": [
+        {
+          "nombre": "Checkout",
+          "estado": "SUCCESS"
+        },
+        {
+          "nombre": "Build",
+          "estado": "SUCCESS"
+        },
+        {
+          "nombre": "Test",
+          "estado": "SUCCESS"
+        },
+        {
+          "nombre": "SonarQube",
+          "estado": "SUCCESS"
+        },
+        {
+          "nombre": "Quality Gate",
+          "estado": "SUCCESS"
+        },
+        {
+          "nombre": "Package",
+          "estado": "SUCCESS"
+        },
+        {
+          "nombre": "E2E Tests",
+          "estado": "SUCCESS"
+        },
+        {
+          "nombre": "Declarative: Post Actions",
+          "estado": "SUCCESS"
+        }
+      ]
+    }
+  ]
+}

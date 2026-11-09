@@ -20,6 +20,11 @@
 
     <properties>
         <java.version>21</java.version>
+        <!-- Mantiene compatibilidad con Docker Engine 29 en las pruebas de integración. -->
+        <testcontainers.version>1.21.4</testcontainers.version>
+        <coverage.check.skip>false</coverage.check.skip>
+        <sonar.coverage.exclusions>**/EmployeesApplication.java,**/config/**,**/dto/**,**/events/**,**/exception/ErrorResponse*.java</sonar.coverage.exclusions>
+
         <!-- No lo gestiona el BOM de Spring Boot, así que la versión va fija.
              La 7.4 es compatible con Logback 1.4 y 1.5, de modo que los tres
              servicios Java pueden usar la misma aunque estén en versiones
@@ -210,6 +215,7 @@
                             <goal>check</goal>
                         </goals>
                         <configuration>
+                            <skip>${coverage.check.skip}</skip>
                             <rules>
                                 <rule>
                                     <element>BUNDLE</element>

@@ -1,3 +1,4 @@
+import { health } from '../observability/health.ts';
 import type { Request, Response, NextFunction } from 'express';
 import { VacationService, ValidationError } from '../services/vacation.service.ts';
 import type { VacationBalanceSortField, VacationPeriodSortField } from '../repositories/vacation.repository.ts';
@@ -54,8 +55,9 @@ const parseSortBy = <T extends string>(
 export class VacationController {
   constructor(private readonly service = new VacationService()) {}
 
-  getHealth = (_req: Request, res: Response) => {
-    return res.json({ status: 'ok', service: 'vacations' });
+  getHealth = async (_req: Request, res: Response) => {
+    const result = await health();
+    return res.status(result.status === 'UP' ? 200 : 503).json(result);
   };
 
   // ── VacationBalance: Saldos CQRS (Read Model) ─────────────────────────────

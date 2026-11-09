@@ -2,7 +2,7 @@ import { describe, test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
   aDiaUtc,
-  finEsAnteriorAInicio,
+  finNoEsPosteriorAInicio,
   inicioEsPasado,
   periodosSolapados,
   rangosSeSolapan,
@@ -33,22 +33,22 @@ describe('aDiaUtc — normalización a día completo', () => {
   });
 });
 
-describe('finEsAnteriorAInicio — validación 1', () => {
+describe('finNoEsPosteriorAInicio — validación 1', () => {
   const casos: Array<[string, string, string, boolean]> = [
     ['fin posterior al inicio',          '2026-12-01', '2026-12-05', false],
-    ['fin igual al inicio (un día)',     '2026-12-01', '2026-12-01', false],
+    ['fin igual al inicio (inválido)',   '2026-12-01', '2026-12-01', true],
     ['fin un día antes del inicio',      '2026-12-02', '2026-12-01', true],
     ['fin un mes antes del inicio',      '2026-12-01', '2026-11-01', true],
   ];
 
   for (const [nombre, inicio, fin, esperado] of casos) {
     test(`${nombre} → ${esperado}`, () => {
-      assert.equal(finEsAnteriorAInicio(d(inicio), d(fin)), esperado);
+      assert.equal(finNoEsPosteriorAInicio(d(inicio), d(fin)), esperado);
     });
   }
 
-  test('un período de un solo día es válido', () => {
-    assert.equal(finEsAnteriorAInicio(d('2026-12-01'), d('2026-12-01')), false);
+  test('un día de vacaciones termina al día siguiente', () => {
+    assert.equal(finNoEsPosteriorAInicio(d('2026-12-01'), d('2026-12-02')), false);
   });
 });
 
@@ -75,7 +75,7 @@ describe('inicioEsPasado — validación 2', () => {
 });
 
 describe('rangosSeSolapan — validación 4, tabla de casos borde', () => {
-  // Período existente de referencia: del 10 al 20 de noviembre, inclusive.
+  // Período existente de referencia: del 10 al 20 de noviembre, con regreso el día 20.
   const EXISTE_INI = '2026-11-10';
   const EXISTE_FIN = '2026-11-20';
 
@@ -86,9 +86,9 @@ describe('rangosSeSolapan — validación 4, tabla de casos borde', () => {
     ['termina justo el día antes',                 '2026-11-05', '2026-11-09', false],
     ['empieza justo el día después',               '2026-11-21', '2026-11-25', false],
 
-    // Los bordes: un solo día compartido YA es solapamiento
-    ['termina exactamente el día en que empieza',  '2026-11-05', '2026-11-10', true],
-    ['empieza exactamente el día en que termina',  '2026-11-20', '2026-11-25', true],
+    // Los extremos se pueden tocar: fechaFin es regreso
+    ['termina exactamente el día en que empieza',  '2026-11-05', '2026-11-10', false],
+    ['empieza exactamente el día en que termina',  '2026-11-20', '2026-11-25', false],
 
     // Intersecciones parciales
     ['entra por la izquierda',                     '2026-11-05', '2026-11-15', true],
@@ -100,9 +100,9 @@ describe('rangosSeSolapan — validación 4, tabla de casos borde', () => {
     ['es idéntico al existente',                   '2026-11-10', '2026-11-20', true],
 
     // Un solo día
-    ['un día dentro del existente',                '2026-11-15', '2026-11-15', true],
-    ['un día igual al inicio del existente',       '2026-11-10', '2026-11-10', true],
-    ['un día igual al fin del existente',          '2026-11-20', '2026-11-20', true],
+    ['un día dentro del existente',                '2026-11-15', '2026-11-15', false],
+    ['un día igual al inicio del existente',       '2026-11-10', '2026-11-10', false],
+    ['un día igual al fin del existente',          '2026-11-20', '2026-11-20', false],
     ['un día justo antes del existente',           '2026-11-09', '2026-11-09', false],
     ['un día justo después del existente',         '2026-11-21', '2026-11-21', false],
   ];
@@ -127,8 +127,8 @@ describe('rangosSeSolapan — validación 4, tabla de casos borde', () => {
   });
 
   test('ignora la hora: un rango con hora solapa igual que sin ella', () => {
-    const conHora = new Date('2026-11-20T18:45:00.000Z');
-    assert.equal(rangosSeSolapan(conHora, conHora, d(EXISTE_INI), d(EXISTE_FIN)), true);
+    const conHora = new Date('2026-11-19T18:45:00.000Z');
+    assert.equal(rangosSeSolapan(conHora, d(EXISTE_FIN), d(EXISTE_INI), d(EXISTE_FIN)), true);
   });
 });
 

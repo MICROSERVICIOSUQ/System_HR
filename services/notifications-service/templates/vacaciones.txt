@@ -1,0 +1,1 @@
+Vacaciones confirmadas desde {{.fechaInicio}}. Su fecha de regreso es {{.fechaFin}}.

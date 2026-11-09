@@ -1,151 +1,44 @@
-# Servicio de Notificaciones (notifications-service)
+# Servicio de Notificaciones en Go
 
-Microservicio desarrollado con **Node.js 22**, **TypeScript**, **Express**, **Prisma** y **PostgreSQL**.
-Actúa como **consumidor asíncrono** de RabbitMQ, procesando los eventos del dominio de empleados para generar y almacenar el historial de notificaciones con garantía de **idempotencia**.
+Consume eventos de RabbitMQ y conserva un historial inmutable en PostgreSQL. Los correos se simulan con plantillas de texto: se componen en memoria y solo se registra destinatario, tipo y resultado. No hay SMTP ni endpoint de creación de notificaciones.
 
----
+## Archivos para entender el servicio
 
-## Arquitectura
+- `main.go`: configuración, conexiones, arranque y apagado.
+- `events.go`: validación, plantillas, idempotencia y payload público.
+- `database.go` y `schema.sql`: consultas y compatibilidad con la tabla anterior.
+- `rabbitmq.go`: consumidor, reintentos, ACK y propagación W3C.
+- `http.go` y `openapi.json`: consultas, salud, métricas y Swagger UI.
+- `observability.go`: logs JSON y exportación opcional a Zipkin.
+- `templates`: textos modificables de los correos simulados.
 
-El microservicio no se comunica directamente con `employees-service`. Se suscribe exclusivamente a la cola `notifications.queue`, la cual recibe mensajes enrutados automáticamente desde el exchange fanout `hr.events`.
+## Ejecución
 
-```text
-[employees-service]
-        │
-        ▼ (Fanout)
-   [hr.events] (Exchange)
-        │
-        ├──► [notifications.queue]
-        │            │
-        │            ▼ (amqplib)
-        │    [notifications-service]
-        │            │
-        │            ▼ (Prisma ORM)
-        │    [PostgreSQL: database-notificaciones]
-        │            └── Tabla: NotificationHistory (messageId UNIQUE)
-        │
-        ├──► [profiles.queue]
-        └──► [vacations.queue]
-```
+Desde la raíz: `docker compose up --build -d`. El Dockerfile compila con Go 1.25; no necesita Go instalado en Windows. Conserva el puerto interno 8082, la cola `notifications.queue`, el exchange `hr.events` y la tabla `NotificationHistory`. Al arrancar limpia los tokens de los payloads antiguos sin eliminar el historial.
 
----
+Variables: `DATABASE_URL` obligatoria, `PORT` (8082), `RABBITMQ_HOST`, `RABBITMQ_PORT`, `RABBITMQ_USER`, `RABBITMQ_PASSWORD`; opcionalmente `RABBITMQ_URL`, `TEMPLATES_DIR` y `OTEL_EXPORTER_ZIPKIN_ENDPOINT`. Las credenciales se inyectan desde Compose, no se escriben en el código. Las plantillas están embebidas en el binario; para modificarlas puede reconstruir la imagen o montar un directorio completo mediante `TEMPLATES_DIR`.
 
-## Cola y Eventos Consumidos
+## API
 
-* **Cola consumida:** `notifications.queue`
-* **Exchange de origen:** `hr.events`
-* **Eventos procesados:**
-  * `empleado.creado`
-  * `empleado.actualizado`
-  * `empleado.retirado`
-* **Eventos ignorados:** Cualquier otro tipo de evento se confirma (`ACK`) y se descarta sin registrar en base de datos.
+- `GET /notificaciones`: historial y filtro opcional `empleadoId`.
+- `GET /notificaciones/empleado/{empleadoId}`: historial del empleado.
+- `GET /notificaciones/{messageId}`: registro por ID de evento.
+- `/notifications` conserva las mismas operaciones como alias.
+- `GET /health`: checks reales de PostgreSQL y consumidor AMQP, HTTP 200/503.
+- `GET /metrics`, `/docs`, `/openapi.json`: observabilidad y documentación.
 
----
+Sin paginación se devuelve un array; con `page`, `limit`/`size`, `sortBy` u `order` se devuelve `{data, meta}`. Los detalles y modelos están en OpenAPI. El Gateway actual enruta `/notifications`; el desarrollador 4 debe incorporar el nombre `/notificaciones` y el Swagger agregado.
 
-## Garantía de Idempotencia
+## Eventos
 
-RabbitMQ garantiza entrega *at-least-once*, lo que puede ocasionar reentregas por desconexión o reintentos de red. Para asegurar que ningún evento se procese o notifique dos veces:
+Consume los seis del informe (`usuario.creado`, `usuario.recuperacion`, `vacaciones.programadas`, `cuenta.activada`, `cuenta.desactivada`, `empleado.retirado`), los de inicio/fin de vacaciones indicados por el PDF y los de creación/actualización de empleado conservados del servicio anterior. En vacaciones el empleado es `data.empleadoId`; en las otras familias es `data.id`.
 
-1. **Restricción a nivel de base de datos:** El campo `messageId` (UUID v4 del evento) posee una restricción `UNIQUE` en la tabla `NotificationHistory`.
-2. **Comprobación previa:** Antes de registrar la notificación, el servicio consulta si el `messageId` ya fue procesado:
-   * Si **existe:** Se registra una advertencia en los logs (`[DUPLICADO]`) y se envía inmediatamente el `ACK` a RabbitMQ sin volver a insertar.
-   * Si **no existe:** Se persiste el registro, se registra en los logs (`[ÉXITO]`) y se confirma el `ACK`.
+El índice único de `messageId` evita registrar y simular dos veces un evento. Los fallos transitorios se intentan tres veces y luego se reencolan sin ACK exitoso. Los mensajes inválidos se rechazan sin imprimir su contenido. No hay cola de cuarentena en la topología actual.
 
----
+## Verificación
 
-## Endpoints de la API REST
+Con Go instalado: `go test -coverprofile=reports/coverage.out ./...`, creando antes `reports`; `go tool cover -func=reports/coverage.out` muestra el porcentaje. La prueba con etiqueta `integration` necesita PostgreSQL y RabbitMQ reales.
 
-El microservicio expone un puerto interno a la red Docker (`expose: 8082`). No está publicado por el API Gateway en esta fase.
+Sin instalar Go, ejecute desde la raíz `powershell -ExecutionPolicy Bypass -File scripts/probar-desarrollador3.ps1`. El entorno está aislado y exige al menos 70 % de cobertura de Go.
 
-| Método | Ruta | Descripción |
-|---|---|---|
-| GET | `/health` | Estado del microservicio (`{"status":"ok","service":"notifications"}`) |
-| GET | `/notifications` | Lista completa del historial de notificaciones procesadas (orden descendente) |
-| GET | `/notifications?page=1&limit=10&sortBy=processedAt&order=DESC` | Lista paginada; `limit` máximo 100 |
-| GET | `/notifications/:messageId` | Consulta una notificación por el UUID del mensaje de evento (`200` o `404`) |
-
-`NotificationHistory` es append-only. No se exponen POST, PUT, PATCH ni DELETE
-para modificar o eliminar registros: la creación ocurre exclusivamente al
-consumir eventos permitidos desde RabbitMQ, y `messageId` garantiza idempotencia.
-Las mutaciones HTTP responden `405 Method Not Allowed`.
-
-La paginación acepta `page`, `limit` (o `size`), `sortBy` y `order=ASC|DESC`.
-Los valores predeterminados son `page=1`, `limit=10`, `sortBy=processedAt` y
-`order=DESC`. Los campos ordenables son `messageId`, `eventType`, `producer`,
-`employeeId`, `employeeName`, `email` y `processedAt`. Con parámetros la
-respuesta es `{data, meta:{total,page,limit,totalPages}}`; sin parámetros se
-mantiene el array histórico. Los parámetros inválidos responden 400; las
-páginas vacías o fuera de rango devuelven `data: []`.
-
----
-
-## Variables de Entorno
-
-| Variable | Descripción | Valor Docker Compose | Valor Local |
-|---|---|---|---|
-| `PORT` | Puerto HTTP del servidor Express | `8082` | `8082` |
-| `DATABASE_URL` | Cadena de conexión PostgreSQL | `postgresql://postgres:postgres@database-notificaciones:5432/gestion_notificaciones` | `postgresql://postgres:postgres@localhost:5434/gestion_notificaciones` |
-| `RABBITMQ_HOST` | Host del broker RabbitMQ | `rabbitmq` | `localhost` |
-| `RABBITMQ_PORT` | Puerto AMQP del broker | `5672` | `5672` |
-| `RABBITMQ_USER` | Usuario de RabbitMQ | `admin` | `admin` |
-| `RABBITMQ_PASSWORD` | Contraseña de RabbitMQ | `admin` | `admin` |
-
----
-
-## Cómo Probar el Consumo desde RabbitMQ
-
-### 1. Publicar un evento desde el panel de RabbitMQ
-1. Accede a **http://localhost:15672** con las credenciales `admin` / `admin`.
-2. Navega a **Exchanges** > **hr.events** > **Publish message**.
-3. Deja `Routing key` vacía.
-4. En `Payload`, pega el siguiente JSON de prueba:
-
-```json
-{
-  "id": "e1f2a3b4-c5d6-7890-abcd-ef1234567890",
-  "type": "empleado.creado",
-  "version": "1.0",
-  "occurredAt": "2026-09-27T23:00:00.000Z",
-  "producer": "employees-service",
-  "data": {
-    "id": "EMP-900",
-    "nombre": "Elena",
-    "apellido": "García",
-    "email": "elena.garcia@empresa.com",
-    "departamentoId": "IT",
-    "cargo": "DevOps Engineer",
-    "fechaIngreso": "2026-09-27",
-    "fechaRetiro": null
-  }
-}
-```
-
-5. Pulsa **Publish message**.
-6. Observa los logs del contenedor de notificaciones:
-   ```powershell
-   docker compose logs -f notifications-service
-   ```
-   Verás:
-   ```text
-   [NOTIFICATIONS] Mensaje recibido | UUID: e1f2a3b4-c5d6-7890-abcd-ef1234567890 | Tipo: empleado.creado
-   [NOTIFICATIONS] [ÉXITO] Notificación registrada | UUID: e1f2a3b4-c5d6-7890-abcd-ef1234567890 | Empleado: EMP-900 (Elena García)
-   ```
-
-### 2. Verificar la Idempotencia
-1. Vuelve a pulsar **Publish message** en RabbitMQ con el mismo payload (mismo `id`).
-2. Revisa los logs de `notifications-service`:
-   ```text
-   [NOTIFICATIONS] Mensaje recibido | UUID: e1f2a3b4-c5d6-7890-abcd-ef1234567890 | Tipo: empleado.creado
-   [NOTIFICATIONS] [DUPLICADO] Mensaje ya procesado anteriormente | UUID: e1f2a3b4-c5d6-7890-abcd-ef1234567890
-   ```
-   El mensaje se confirma con ACK sin duplicar registros en la base de datos.
-
-### 3. Consultar la API de Notificaciones
-Dentro de la red interna o ejecutando en el contenedor:
-```powershell
-# Consultar todas las notificaciones
-docker compose exec notifications-service curl -s http://localhost:8082/notifications
-
-# Consultar por messageId
-docker compose exec notifications-service curl -s http://localhost:8082/notifications/e1f2a3b4-c5d6-7890-abcd-ef1234567890
-```
+Consulte [la guía de sustentación](../../docs/GUIA-DESARROLLADOR3-SUSTENTACION.md) y [la guía del desarrollador 4](../../docs/GUIA-DESARROLLADOR4-INTEGRACION.md).

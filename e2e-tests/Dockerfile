@@ -4,7 +4,9 @@ WORKDIR /app
 
 COPY . .
 
-RUN mkdir -p reports
+# Compila la suite y conserva las dependencias en la imagen. Los escenarios
+# se ejecutan al iniciar el contenedor, cuando el sistema ya está saludable.
+RUN mkdir -p reports && mvn --batch-mode test -DskipTests
 
 ENV BASE_URL=http://api-gateway:8080
 

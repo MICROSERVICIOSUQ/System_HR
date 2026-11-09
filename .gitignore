@@ -43,9 +43,16 @@ logs/
 .DS_Store
 Thumbs.db
 Desktop.ini
-# Entorno virtual de Python (departments-service)
+# Python
 .venv/
-__pycache__/
-*.py[cod]
+**/__pycache__/
+**/*.py[cod]
 .pytest_cache/
 .coverage
+
+# Go
+**/coverage.out
+**/*.test
+
+# Respaldos y secretos locales
+secrets/

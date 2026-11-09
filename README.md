@@ -1,4 +1,6 @@
-# Sistema de Recursos Humanos — System_HR (Retos 3 a 6)
+# Sistema de Recursos Humanos — System_HR (Retos 3 a 7)
+
+> Actualización del desarrollador 3: Notificaciones migró a Go y Vacaciones usa fechaFin como regreso. Las instrucciones vigentes de esta parte están en [la instalación en otro PC](docs/GUIA-DESARROLLADOR3-OTRO-PC.md), [la guía de sustentación](docs/GUIA-DESARROLLADOR3-SUSTENTACION.md) y [la guía de integración del desarrollador 4](docs/GUIA-DESARROLLADOR4-INTEGRACION.md). Las secciones de retos anteriores conservan su contexto histórico.
 
 Sistema empresarial de gestión de empleados y departamentos basado en **Arquitectura de Microservicios**, combinando comunicación síncrona protegida mediante **Circuit Breaker** (Reto 3) con comunicación asíncrona desacoplada mediante **RabbitMQ y Arquitectura Orientada a Eventos** (Reto 4).
 
@@ -1228,6 +1230,70 @@ Las evidencias de los tres últimos puntos están en `docs/evidencias/`:
 [tres ejecuciones](docs/evidencias/reto6-bdd-ejecuciones.txt).
 Los archivos de evidencia de la suite BDD conservan las salidas originales de la
 versión de 41 escenarios; la suite vigente tiene 39.
+
+---
+
+# Reto 7 — Integración continua con Jenkins
+
+Jenkins verifica empleados (Java) y vacaciones (TypeScript) mediante pipelines
+versionados junto a cada servicio. Cada ejecución prepara el proyecto, ejecuta
+las pruebas del reto 6, publica resultados y cobertura, envía el análisis a
+SonarQube y exige una cobertura mínima del 70 %. Después construye la imagen
+Docker y ejecuta los escenarios BDD contra una copia aislada del sistema.
+
+La configuración de Jenkins, sus plugins, usuarios y jobs se encuentra en
+`jenkins/`. SonarQube se prepara automáticamente con `ci/configurar-sonar.py`.
+Los comandos de arranque son:
+
+```bash
+python3 ci/preparar-entorno.py
+docker compose up -d --build
+```
+
+Jenkins se abre en http://localhost:9091 y SonarQube en http://localhost:9000.
+El usuario inicial es `admin`; las contraseñas generadas están en `.env`, en
+`JENKINS_ADMIN_PASSWORD` y `SONAR_ADMIN_PASSWORD`. No se usa el asistente inicial
+de Jenkins: JCasC crea el administrador y los dos jobs. Antes de ejecutar un
+pipeline, sube los archivos del reto a la rama indicada por
+`CI_REPOSITORY_BRANCH` y revisa `CI_REPOSITORY_URL`.
+
+| Etapa | Reporte | Publicador | Consulta |
+|---|---|---|---|
+| Test de empleados | Surefire XML y JaCoCo XML | `junit`, `recordCoverage` | Test Result y Coverage |
+| Test de vacaciones | JUnit XML y LCOV | `junit`, `recordCoverage` | Test Result y Coverage |
+| SonarQube / Quality Gate | Métricas y cobertura | Scanner y `waitForQualityGate` | Proyecto de SonarQube y etapa de Jenkins |
+| Package | Diagnóstico Docker en HTML y texto | `publishHTML`, `archiveArtifacts` | Empaquetado Docker |
+| E2E Tests | JUnit, Cucumber JSON y HTML | `junit`, `cucumber`, `publishHTML` | Test Result y escenarios BDD en español |
+| Limpieza E2E | Logs del sistema | `archiveArtifacts` | Artefactos del build |
+
+Las publicaciones se ejecutan aunque fallen las pruebas. Un fallo de pruebas
+termina en FAILURE y evita el empaquetado; no se permite continuar con un build
+UNSTABLE. Los volúmenes de E2E se eliminan al terminar y están separados de las
+bases de datos habituales. Los jobs consultan cambios en Git cada cinco minutos
+después de su primera ejecución.
+
+La [guía del reto 7](docs/GUIA-RETO7.md) explica las etapas, el acceso, las cachés,
+las decisiones de seguridad, el alcance de cobertura y cómo interpretar los
+resultados. También describe las cuatro simulaciones disponibles en el parámetro
+`FALLO_DEMO` y cómo reunir las capturas y las tres ejecuciones consecutivas.
+
+**Validación realizada en `valentina`:** tres builds consecutivos correctos de
+cada servicio, 39 escenarios BDD por ejecución y cuatro fallos deliberados
+detectados en su etapa correspondiente. Las capturas, los números de build y
+los resultados exportados están en las
+[evidencias del reto 7](docs/evidencias/reto7/README.md). `main` no se modificó.
+Los pipelines se verificaron mediante una copia Git local de `valentina`.
+
+| Verificación | Empleados | Vacaciones |
+|---|---|---|
+| Tres builds consecutivos | #9, #10, #11 | #8, #9, #10 |
+| Pruebas de servicio aprobadas por ejecución | 77 | 64 |
+| Escenarios BDD aprobados por ejecución | 39 | 39 |
+| Cobertura combinada de SonarQube | 82,4 % | 78,9 % |
+
+Las simulaciones de prueba unitaria, Dockerfile, escenario BDD y cobertura baja
+se documentaron en los builds #11, #15, #13 y #14 de vacaciones, respectivamente.
+Después se restauraron las ejecuciones normales.
 
 ---
 

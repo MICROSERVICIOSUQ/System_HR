@@ -1,3 +1,5 @@
+import { registry, httpMetrics } from './observability/metrics.ts';
+import { log } from './observability/logger.ts';
 import express, { Request, Response, NextFunction } from 'express';
 import cors from 'cors';
 import { rateLimit } from 'express-rate-limit';
@@ -8,8 +10,6 @@ import { VacationController } from './controllers/vacation.controller.ts';
 import { ValidationError } from './services/vacation.service.ts';
 import { correlationMiddleware } from './middlewares/correlation.middleware.ts';
 import { idempotencyMiddleware } from './middlewares/idempotency.middleware.ts';
-import { middlewareMetricas, handlerMetricas } from './observability/metrics.ts';
-import { comprobarSalud } from './observability/health.ts';
 
 const app = express();
 const controller = new VacationController();
@@ -26,6 +26,10 @@ const rateLimiter = rateLimit({
     }),
 });
 
+app.get('/metrics', async (_req, res) => {
+  res.type(registry.contentType).send(await registry.metrics());
+});
+app.use(httpMetrics);
 app.use(cors());
 app.use(helmet());
 app.use(rateLimiter);
@@ -34,7 +38,7 @@ app.use(correlationMiddleware);
 app.use(idempotencyMiddleware);
 
 // ── OpenAPI / Swagger ──────────────────────────────────────────────────────────
-const openApiSpec = {
+const openApiSpec: any = {
   openapi: '3.0.3',
   info: {
     title: 'API de Vacaciones',
@@ -99,7 +103,7 @@ const openApiSpec = {
                   },
                   fechasIncoherentes: {
                     summary: 'fechaFin menor o igual a fechaInicio',
-                    value: { status: 400, error: 'Bad Request', message: 'fechaFin no puede ser anterior a fechaInicio' },
+                    value: { status: 400, error: 'Bad Request', message: 'fechaFin debe ser posterior a fechaInicio' },
                   },
                   fechaPasada: {
                     summary: 'fechaInicio anterior a hoy',
@@ -115,7 +119,7 @@ const openApiSpec = {
           },
           '404': {
             description:
-              'Empleado no encontrado en la réplica local. El controlador actual retorna 404; el requisito del reto solicita 400.',
+              'Empleado no encontrado en la réplica local.',
             content: { 'application/json': { schema: { $ref: '#/components/schemas/Error' } } },
           },
         },
@@ -138,7 +142,7 @@ const openApiSpec = {
             description: 'Lista de períodos',
             content: {
               'application/json': {
-                schema: { type: 'array', items: { $ref: '#/components/schemas/Periodo' } },
+                schema: { $ref: '#/components/schemas/PaginaPeriodos' },
               },
             },
           },
@@ -222,7 +226,7 @@ const openApiSpec = {
         properties: {
           empleadoId: { type: 'string', example: 'E401' },
           fechaInicio: { type: 'string', format: 'date', example: '2026-11-01' },
-          fechaFin: { type: 'string', format: 'date', example: '2026-11-15' },
+          fechaFin: { type: 'string', format: 'date', description: 'Día de regreso; debe ser posterior al inicio.', example: '2026-11-15' },
         },
       },
       Periodo: {
@@ -232,7 +236,7 @@ const openApiSpec = {
           empleadoId: { type: 'string' },
           fechaInicio: { type: 'string', format: 'date' },
           fechaFin: { type: 'string', format: 'date' },
-          estado: { type: 'string', enum: ['PROGRAMADA', 'EN_CURSO', 'COMPLETADA', 'CANCELADA'] },
+          estado: { type: 'string', enum: ['PROGRAMADA', 'EN_CURSO', 'FINALIZADA', 'CANCELADA'] },
           fechaCreacion: { type: 'string', format: 'date-time' },
         },
       },
@@ -255,6 +259,50 @@ const openApiSpec = {
   },
 };
 
+// Completar la documentación de las operaciones existentes.
+const idParameter = { name: 'id', in: 'path', required: true, schema: { type: 'string' } };
+const periodResponse = { description: 'Período actualizado', content: { 'application/json': { schema: { $ref: '#/components/schemas/Periodo' } } } };
+const errorResponse = { description: 'Solicitud inválida', content: { 'application/json': { schema: { $ref: '#/components/schemas/Error' } } } };
+const updateOperation = {
+  tags: ['Períodos'], summary: 'Reprogramar un período PROGRAMADA', parameters: [idParameter],
+  requestBody: { required: true, content: { 'application/json': { schema: {
+    type: 'object', minProperties: 1, properties: {
+      fechaInicio: { type: 'string', format: 'date' }, fechaFin: { type: 'string', format: 'date', description: 'Día de regreso' },
+    },
+  } } } },
+  responses: { '200': periodResponse, '400': errorResponse, '404': errorResponse },
+};
+openApiSpec.paths['/vacaciones/{id}'].put = updateOperation;
+openApiSpec.paths['/vacaciones/{id}'].patch = updateOperation;
+for (const action of ['forzar-inicio', 'forzar-fin']) {
+  openApiSpec.paths[`/vacaciones/{id}/${action}`] = { post: {
+    tags: ['Períodos'], summary: `${action}: demostración con rol ADMIN`, parameters: [idParameter],
+    responses: { '200': { description: 'Transición ejecutada', content: { 'application/json': { schema: { type: 'object', properties: {
+      message: { type: 'string' }, data: { $ref: '#/components/schemas/Periodo' },
+    } } } } }, '400': errorResponse, '404': errorResponse },
+  } };
+}
+openApiSpec.components.schemas.PaginaPeriodos = {
+  type: 'object', properties: {
+    data: { type: 'array', items: { $ref: '#/components/schemas/Periodo' } },
+    meta: { type: 'object', properties: Object.fromEntries(['total','page','limit','totalPages'].map(key => [key, { type: 'integer' }])) },
+  },
+};
+openApiSpec.paths['/vacaciones'].get.parameters.push(
+  { name: 'estado', in: 'query', schema: { type: 'string', enum: ['PROGRAMADA','EN_CURSO','FINALIZADA','CANCELADA'] } },
+  ...['page','limit','sortBy','order'].map(name => ({ name, in: 'query', schema: { type: name === 'page' || name === 'limit' ? 'integer' : 'string' } })),
+);
+openApiSpec.paths['/health'].get.responses = Object.fromEntries(['200','503'].map(code => [code, {
+  description: code === '200' ? 'Dependencias disponibles' : 'Dependencia no disponible',
+  content: { 'application/json': { schema: { type: 'object', properties: {
+    status: { type: 'string', enum: ['UP','DOWN'] }, service: { type: 'string' },
+    checks: { type: 'object', properties: { database: { type: 'string' }, messageBroker: { type: 'string' } } },
+  } } } },
+}]));
+openApiSpec.paths['/metrics'] = { get: { summary: 'Métricas Prometheus', responses: { '200': {
+  description: 'Métricas HTTP, de proceso y transiciones', content: { 'text/plain': { schema: { type: 'string' } } },
+} } } };
+
 const swaggerUiHtml = `<!doctype html>
 <html lang="es">
   <head>
@@ -275,36 +323,22 @@ const swaggerUiHtml = `<!doctype html>
   </body>
 </html>`;
 
-app.get(['/vacaciones/docs', '/vacations/docs'], (_req: Request, res: Response) => {
+app.get(['/docs', '/vacaciones/docs', '/vacations/docs'], (_req: Request, res: Response) => {
   res.type('html').send(swaggerUiHtml);
 });
 
 app.get(
-  ['/api-docs', '/vacaciones/openapi.json', '/vacations/openapi.json'],
+  ['/openapi.json', '/api-docs', '/vacaciones/openapi.json', '/vacations/openapi.json'],
   (_req: Request, res: Response) => res.json(openApiSpec)
 );
 
-// Mide todas las peticiones (Reto 8). Va antes de las rutas para que el
-// temporizador arranque cuando la peticion entra, no cuando llega al controlador.
-app.use(middlewareMetricas);
-
-// Endpoint que raspa Prometheus cada 15 s (modelo pull).
-app.get('/metrics', handlerMetricas);
-
-// Sonda de salud con verificacion real de dependencias: antes devolvia
-// {"status":"ok"} sin comprobar nada.
-app.get('/health', async (_req, res, next) => {
-  try {
-    const salud = await comprobarSalud();
-    res.status(salud.status === 'UP' ? 200 : 503).json(salud);
-  } catch (error) {
-    next(error);
-  }
-});
+// Endpoint de salud
+app.get('/health', controller.getHealth);
 
 // Rutas de períodos de vacaciones (Productor)
 // Importante: /balances debe registrarse ANTES de /:id para evitar colisión de rutas
 app.use('/vacations/balances', balanceRoutes);
+app.use('/vacaciones/balances', balanceRoutes);
 app.use('/vacations', vacationRoutes);
 app.use('/vacaciones', vacationRoutes);
 
@@ -319,7 +353,7 @@ app.use((_req: Request, res: Response) => {
 
 // Manejador global de errores
 app.use((err: any, _req: Request, res: Response, _next: NextFunction) => {
-  console.error('[VACATIONS] [ERROR] Error no controlado:', err);
+  log.error('[VACATIONS] [ERROR] Error no controlado:', err);
   if (err instanceof ValidationError) {
     return res.status(err.statusCode).json({
       status: err.statusCode,

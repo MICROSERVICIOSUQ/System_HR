@@ -1,0 +1,850 @@
+{
+  "info": {
+    "name": "Dev 3 - Sustentación Vacaciones y Notificaciones",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
+    "description": "Preparar primero una cuenta ACTIVA mediante el modo Postman del script de demo. Ejecutar en orden. Usa /notifications porque es la ruta actual del Gateway. Sin contraseñas incluidas."
+  },
+  "auth": {
+    "type": "bearer",
+    "bearer": [
+      {
+        "key": "token",
+        "value": "{{dev3AdminToken}}",
+        "type": "string"
+      }
+    ]
+  },
+  "item": [
+    {
+      "name": "01. Acceso y datos preparados",
+      "item": [
+        {
+          "name": "01 Login ADMIN y preparar fechas",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{dev3BaseUrl}}/auth/login",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"usuario\": \"{{dev3AdminEmail}}\",\n  \"password\": \"{{dev3AdminPassword}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "for (const key of ['dev3AdminEmail','dev3AdminPassword','dev3EmpleadoId','dev3EmpleadoEmail','dev3EmpleadoPassword']) {",
+                  "  if (!pm.environment.get(key)) throw new Error('Falta configurar ' + key + '. Consulte la guía.');",
+                  "}",
+                  "function fecha(offset) { const date = new Date(); date.setUTCDate(date.getUTCDate() + offset); return date.toISOString().slice(0,10); }",
+                  "for (const [name,offset] of Object.entries({Inicio:5,Fin:7,Ayer:-1,NuevoInicio:8,NuevoFin:11,CancelInicio:15,CancelFin:18})) pm.environment.set('dev3'+name,fecha(offset));",
+                  "pm.environment.unset('dev3PeriodoId'); pm.environment.unset('dev3CancelarId');"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"HTTP 200\", () => pm.response.to.have.status(200));",
+                  "if (pm.response.code === 200) pm.environment.set('dev3AdminToken',pm.response.json().token);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "02 Login del empleado ACTIVO",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{dev3BaseUrl}}/auth/login",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"usuario\": \"{{dev3EmpleadoEmail}}\",\n  \"password\": \"{{dev3EmpleadoPassword}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"HTTP 200\", () => pm.response.to.have.status(200));",
+                  "if (pm.response.code === 200) pm.environment.set('dev3UsuarioToken',pm.response.json().token);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "03 Saldo y réplica del empleado",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{dev3BaseUrl}}/vacaciones/balances/{{dev3EmpleadoId}}"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"HTTP 200\", () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "04 Bienvenida en historial sin tokens",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{dev3BaseUrl}}/notifications/empleado/{{dev3EmpleadoId}}"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"HTTP 200\", () => pm.response.to.have.status(200));",
+                  "if (pm.response.code===200) {",
+                  " const items=pm.response.json();",
+                  " pm.test('Historial sin campos token o password',()=>pm.expect(JSON.stringify(items)).not.to.match(/\"(?:token|password|nuevaPassword)\"\\s*:/i));",
+                  " const welcome=items.find(item=>item.eventType==='usuario.creado');",
+                  " if (welcome) pm.environment.set('dev3MessageId',welcome.messageId);",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "05 Notificación por ID de evento",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{dev3BaseUrl}}/notifications/{{dev3MessageId}}"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"HTTP 200\", () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "06 Consulta sin token rechazada",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{dev3BaseUrl}}/vacaciones",
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"HTTP 401\", () => pm.response.to.have.status(401));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "07 USER no puede programar vacaciones",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{dev3BaseUrl}}/vacaciones",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"empleadoId\": \"{{dev3EmpleadoId}}\",\n  \"fechaInicio\": \"{{dev3Inicio}}\",\n  \"fechaFin\": \"{{dev3Fin}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{dev3UsuarioToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"HTTP 403\", () => pm.response.to.have.status(403));"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "02. Fechas, programación y consultas",
+      "item": [
+        {
+          "name": "08 Fechas iguales rechazadas",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{dev3BaseUrl}}/vacaciones",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"empleadoId\": \"{{dev3EmpleadoId}}\",\n  \"fechaInicio\": \"{{dev3Inicio}}\",\n  \"fechaFin\": \"{{dev3Inicio}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"HTTP 400\", () => pm.response.to.have.status(400));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "09 Fechas invertidas rechazadas",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{dev3BaseUrl}}/vacaciones",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"empleadoId\": \"{{dev3EmpleadoId}}\",\n  \"fechaInicio\": \"{{dev3Fin}}\",\n  \"fechaFin\": \"{{dev3Inicio}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"HTTP 400\", () => pm.response.to.have.status(400));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "10 Inicio pasado rechazado",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{dev3BaseUrl}}/vacaciones",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"empleadoId\": \"{{dev3EmpleadoId}}\",\n  \"fechaInicio\": \"{{dev3Ayer}}\",\n  \"fechaFin\": \"{{dev3Fin}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"HTTP 400\", () => pm.response.to.have.status(400));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "11 Programar vacaciones válidas",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{dev3BaseUrl}}/vacaciones",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"empleadoId\": \"{{dev3EmpleadoId}}\",\n  \"fechaInicio\": \"{{dev3Inicio}}\",\n  \"fechaFin\": \"{{dev3Fin}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"HTTP 201\", () => pm.response.to.have.status(201));",
+                  "if (pm.response.code===201) pm.environment.set('dev3PeriodoId',pm.response.json().id);",
+                  "let attempts = 0;",
+                  "function checkHistory() {",
+                  "  pm.sendRequest({url:pm.environment.get('dev3BaseUrl')+'/notifications/empleado/'+pm.environment.get('dev3EmpleadoId'),",
+                  "    header:{Authorization:'Bearer '+pm.environment.get('dev3AdminToken')}},(error,response) => {",
+                  "    const items = !error && response.code===200 ? response.json() : [];",
+                  "    if (Array.isArray(items) && items.some(item=>item.eventType==='vacaciones.programadas')) {",
+                  "      pm.test('Confirmación de vacaciones consumida',()=>pm.expect(items.some(item=>item.eventType==='vacaciones.programadas')).to.eql(true)); return;",
+                  "    }",
+                  "    if (++attempts<60) {setTimeout(checkHistory,200);return;}",
+                  "    pm.test('Confirmación de vacaciones consumida',()=>{throw new Error('No llegó vacaciones.programadas');});",
+                  "  });",
+                  "}",
+                  "checkHistory();"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "12 Repetición solapada rechazada",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{dev3BaseUrl}}/vacaciones",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"empleadoId\": \"{{dev3EmpleadoId}}\",\n  \"fechaInicio\": \"{{dev3Inicio}}\",\n  \"fechaFin\": \"{{dev3Fin}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"HTTP 400\", () => pm.response.to.have.status(400));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "13 Consultar período",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{dev3BaseUrl}}/vacaciones/{{dev3PeriodoId}}"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"HTTP 200\", () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "14 Listar períodos por empleado",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{dev3BaseUrl}}/vacaciones?empleadoId={{dev3EmpleadoId}}"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"HTTP 200\", () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "15 Reprogramar período futuro",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{dev3BaseUrl}}/vacaciones/{{dev3PeriodoId}}",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"fechaInicio\": \"{{dev3NuevoInicio}}\",\n  \"fechaFin\": \"{{dev3NuevoFin}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"HTTP 200\", () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "03. Suspensión y regreso",
+      "item": [
+        {
+          "name": "16 Forzar inicio para demostrar",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": "{{dev3BaseUrl}}/vacaciones/{{dev3PeriodoId}}/forzar-inicio"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"HTTP 200\", () => pm.response.to.have.status(200));",
+                  "let attempts = 0;",
+                  "function checkLogin() {",
+                  "  pm.sendRequest({ url: pm.environment.get('dev3BaseUrl')+'/auth/login', method:'POST', header:{'Content-Type':'application/json'},",
+                  "    body:{mode:'raw',raw:JSON.stringify({usuario:pm.environment.get('dev3EmpleadoEmail'),password:pm.environment.get('dev3EmpleadoPassword')})}}, (error,response) => {",
+                  "    if (!error && response.code === 401) { pm.test('Estado de cuenta aplicado por eventos', () => pm.expect(response.code).to.eql(401)); return; }",
+                  "    if (++attempts < 60) { setTimeout(checkLogin,200); return; }",
+                  "    pm.test('Estado de cuenta aplicado por eventos', () => { throw new Error('No llegó el estado esperado; revisar Auth y RabbitMQ'); });",
+                  "  });",
+                  "}",
+                  "checkLogin();"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "17 Login bloqueado durante vacaciones",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{dev3BaseUrl}}/auth/login",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"usuario\": \"{{dev3EmpleadoEmail}}\",\n  \"password\": \"{{dev3EmpleadoPassword}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"HTTP 401\", () => pm.response.to.have.status(401));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "18 Historial de vacaciones y cuenta",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{dev3BaseUrl}}/notifications/empleado/{{dev3EmpleadoId}}"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"HTTP 200\", () => pm.response.to.have.status(200));",
+                  "if (pm.response.code===200) {",
+                  " const items=pm.response.json();",
+                  " pm.test('Historial sin campos token o password',()=>pm.expect(JSON.stringify(items)).not.to.match(/\"(?:token|password|nuevaPassword)\"\\s*:/i));",
+                  " const welcome=items.find(item=>item.eventType==='usuario.creado');",
+                  " if (welcome) pm.environment.set('dev3MessageId',welcome.messageId);",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "19 Forzar fin para demostrar",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": "{{dev3BaseUrl}}/vacaciones/{{dev3PeriodoId}}/forzar-fin"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"HTTP 200\", () => pm.response.to.have.status(200));",
+                  "let attempts = 0;",
+                  "function checkLogin() {",
+                  "  pm.sendRequest({ url: pm.environment.get('dev3BaseUrl')+'/auth/login', method:'POST', header:{'Content-Type':'application/json'},",
+                  "    body:{mode:'raw',raw:JSON.stringify({usuario:pm.environment.get('dev3EmpleadoEmail'),password:pm.environment.get('dev3EmpleadoPassword')})}}, (error,response) => {",
+                  "    if (!error && response.code === 200) { pm.test('Estado de cuenta aplicado por eventos', () => pm.expect(response.code).to.eql(200)); return; }",
+                  "    if (++attempts < 60) { setTimeout(checkLogin,200); return; }",
+                  "    pm.test('Estado de cuenta aplicado por eventos', () => { throw new Error('No llegó el estado esperado; revisar Auth y RabbitMQ'); });",
+                  "  });",
+                  "}",
+                  "checkLogin();"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "20 Login restablecido tras el regreso",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{dev3BaseUrl}}/auth/login",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"usuario\": \"{{dev3EmpleadoEmail}}\",\n  \"password\": \"{{dev3EmpleadoPassword}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"HTTP 200\", () => pm.response.to.have.status(200));",
+                  "if (pm.response.code === 200) pm.environment.set('dev3UsuarioToken',pm.response.json().token);"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "04. Cancelación y retiro al final",
+      "item": [
+        {
+          "name": "21 Crear otro período para cancelar",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{dev3BaseUrl}}/vacaciones",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"empleadoId\": \"{{dev3EmpleadoId}}\",\n  \"fechaInicio\": \"{{dev3CancelInicio}}\",\n  \"fechaFin\": \"{{dev3CancelFin}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"HTTP 201\", () => pm.response.to.have.status(201));",
+                  "if (pm.response.code===201) pm.environment.set('dev3CancelarId',pm.response.json().id);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "22 Cancelar período futuro",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": "{{dev3BaseUrl}}/vacaciones/{{dev3CancelarId}}"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"HTTP 200\", () => pm.response.to.have.status(200));",
+                  "if(pm.response.code===200) pm.test('Conserva el historial como CANCELADA',()=>pm.expect(pm.response.json().data.estado).to.eql('CANCELADA'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "23 Retirar empleado al terminar",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": "{{dev3BaseUrl}}/empleados/{{dev3EmpleadoId}}"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"HTTP 200\", () => pm.response.to.have.status(200));",
+                  "let attempts = 0;",
+                  "function checkLogin() {",
+                  "  pm.sendRequest({ url: pm.environment.get('dev3BaseUrl')+'/auth/login', method:'POST', header:{'Content-Type':'application/json'},",
+                  "    body:{mode:'raw',raw:JSON.stringify({usuario:pm.environment.get('dev3EmpleadoEmail'),password:pm.environment.get('dev3EmpleadoPassword')})}}, (error,response) => {",
+                  "    if (!error && response.code === 401) { pm.test('Estado de cuenta aplicado por eventos', () => pm.expect(response.code).to.eql(401)); return; }",
+                  "    if (++attempts < 60) { setTimeout(checkLogin,200); return; }",
+                  "    pm.test('Estado de cuenta aplicado por eventos', () => { throw new Error('No llegó el estado esperado; revisar Auth y RabbitMQ'); });",
+                  "  });",
+                  "}",
+                  "checkLogin();",
+                  "",
+                  "let balanceAttempts=0;",
+                  "function checkRetirement() {",
+                  " pm.sendRequest({url:pm.environment.get('dev3BaseUrl')+'/vacaciones/balances/'+pm.environment.get('dev3EmpleadoId'),header:{Authorization:'Bearer '+pm.environment.get('dev3AdminToken')}},(error,response)=>{",
+                  "  if (!error && response.code===200 && response.json().estadoEmpleado==='RETIRADO') {",
+                  "   pm.test('Retiro llegó a la réplica de Vacaciones',()=>pm.expect(response.json().estadoEmpleado).to.eql('RETIRADO'));return;",
+                  "  }",
+                  "  if (++balanceAttempts<60) {setTimeout(checkRetirement,200);return;}",
+                  "  pm.test('Retiro llegó a la réplica de Vacaciones',()=>{throw new Error('No llegó el retiro a Vacaciones');});",
+                  " });",
+                  "}",
+                  "checkRetirement();"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "24 Login rechazado tras el retiro",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{dev3BaseUrl}}/auth/login",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"usuario\": \"{{dev3EmpleadoEmail}}\",\n  \"password\": \"{{dev3EmpleadoPassword}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"HTTP 401\", () => pm.response.to.have.status(401));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "25 Vacaciones de empleado retirado rechazadas",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{dev3BaseUrl}}/vacaciones",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"empleadoId\": \"{{dev3EmpleadoId}}\",\n  \"fechaInicio\": \"{{dev3CancelInicio}}\",\n  \"fechaFin\": \"{{dev3CancelFin}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"HTTP 400\", () => pm.response.to.have.status(400));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "26 Historial final sin credenciales",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{dev3BaseUrl}}/notifications/empleado/{{dev3EmpleadoId}}"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"HTTP 200\", () => pm.response.to.have.status(200));",
+                  "if (pm.response.code===200) {",
+                  " const items=pm.response.json();",
+                  " pm.test('Historial sin campos token o password',()=>pm.expect(JSON.stringify(items)).not.to.match(/\"(?:token|password|nuevaPassword)\"\\s*:/i));",
+                  " const welcome=items.find(item=>item.eventType==='usuario.creado');",
+                  " if (welcome) pm.environment.set('dev3MessageId',welcome.messageId);",
+                  "}"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

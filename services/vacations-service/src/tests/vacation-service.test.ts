@@ -94,6 +94,18 @@ class RepositorioFake {
     return this.periodos.find((p) => p.id === id) ?? null;
   }
 
+  async updatePeriod(id: string, changes: { fechaInicio: Date; fechaFin: Date }) {
+    const period = this.periodos.find((item) => item.id === id)!;
+    Object.assign(period, changes);
+    return period;
+  }
+
+  async cancelPeriod(id: string) {
+    const period = this.periodos.find((item) => item.id === id)!;
+    period.estado = 'CANCELADA';
+    return period;
+  }
+
   async findPeriodsToStart(hasta: Date) {
     return this.periodos.filter(
       (p) => p.estado === 'PROGRAMADA' && p.fechaInicio.getTime() <= hasta.getTime()
@@ -102,7 +114,7 @@ class RepositorioFake {
 
   async findPeriodsToFinish(inicioDelDia: Date) {
     return this.periodos.filter(
-      (p) => p.estado === 'EN_CURSO' && p.fechaFin.getTime() < inicioDelDia.getTime()
+      (p) => p.estado === 'EN_CURSO' && p.fechaFin.getTime() <= inicioDelDia.getTime()
     );
   }
 
@@ -177,21 +189,27 @@ describe('VacationService.createPeriod — las cuatro validaciones', () => {
       (e: ValidationError) => {
         assert.equal(e.name, 'ValidationError');
         assert.equal(e.statusCode, 400);
-        assert.match(e.message, /no puede ser anterior a fechaInicio/);
+        assert.match(e.message, /debe ser posterior a fechaInicio/);
         return true;
       }
     );
     assert.equal(repo.periodos.length, 0, 'no debe persistir nada');
   });
 
-  test('validación 1: acepta un período de un solo día', async () => {
+  test('rechaza inicio y regreso el mismo día', async () => {
     repo.conEmpleado('E001');
-    const r = await service.createPeriod({
-      empleadoId: 'E001',
-      fechaInicio: enDias(3),
-      fechaFin: enDias(3),
-    } as any);
-    assert.equal(r.fechaInicio, r.fechaFin);
+    await assert.rejects(() => service.createPeriod({
+      empleadoId: 'E001', fechaInicio: enDias(3), fechaFin: enDias(3),
+    }), /debe ser posterior/);
+  });
+
+  test('rechaza programar para un empleado retirado', async () => {
+    repo.conEmpleado('E001', 'RETIRADO');
+    await assert.rejects(() => service.createPeriod({
+      empleadoId: 'E001', fechaInicio: enDias(3), fechaFin: enDias(4),
+    }), /empleado ACTIVO/);
+    assert.equal(repo.periodos.length, 0);
+    assert.deepEqual(publisher.publicados, []);
   });
 
   test('validación 2: rechaza fechaInicio en el pasado', async () => {
@@ -211,7 +229,7 @@ describe('VacationService.createPeriod — las cuatro validaciones', () => {
     const r = await service.createPeriod({
       empleadoId: 'E001',
       fechaInicio: hoyIso(),
-      fechaFin: hoyIso(),
+      fechaFin: enDias(1),
     } as any);
     assert.equal(r.estado, 'PROGRAMADA');
   });
@@ -231,13 +249,13 @@ describe('VacationService.createPeriod — las cuatro validaciones', () => {
   test('validación 4: rechaza el solapamiento con un período PROGRAMADA', async () => {
     repo.conEmpleado('E001').conPeriodo({
       empleadoId: 'E001',
-      fechaInicio: d('2026-12-10'),
-      fechaFin: d('2026-12-20'),
+      fechaInicio: d(enDias(10)),
+      fechaFin: d(enDias(20)),
       estado: 'PROGRAMADA',
     });
 
     await assert.rejects(
-      () => service.createPeriod({ empleadoId: 'E001', fechaInicio: '2026-12-15', fechaFin: '2026-12-25' } as any),
+      () => service.createPeriod({ empleadoId: 'E001', fechaInicio: enDias(15), fechaFin: enDias(25) } as any),
       (e: ValidationError) => {
         assert.match(e.message, /se solapa con uno existente/);
         assert.match(e.message, /PROGRAMADA/);
@@ -247,16 +265,16 @@ describe('VacationService.createPeriod — las cuatro validaciones', () => {
     assert.equal(repo.periodos.length, 1, 'no debe añadir un segundo período');
   });
 
-  test('validación 4: rechaza el solapamiento de un solo día compartido', async () => {
+  test('validación 4: rechaza un día realmente compartido', async () => {
     repo.conEmpleado('E001').conPeriodo({
       empleadoId: 'E001',
-      fechaInicio: d('2026-12-10'),
-      fechaFin: d('2026-12-20'),
+      fechaInicio: d(enDias(10)),
+      fechaFin: d(enDias(20)),
       estado: 'EN_CURSO',
     });
 
     await assert.rejects(
-      () => service.createPeriod({ empleadoId: 'E001', fechaInicio: '2026-12-20', fechaFin: '2026-12-28' } as any),
+      () => service.createPeriod({ empleadoId: 'E001', fechaInicio: enDias(19), fechaFin: enDias(28) } as any),
       (e: ValidationError) => {
         assert.match(e.message, /se solapa/);
         return true;
@@ -267,15 +285,15 @@ describe('VacationService.createPeriod — las cuatro validaciones', () => {
   test('validación 4: un período CANCELADA no bloquea las nuevas fechas', async () => {
     repo.conEmpleado('E001').conPeriodo({
       empleadoId: 'E001',
-      fechaInicio: d('2026-12-10'),
-      fechaFin: d('2026-12-20'),
+      fechaInicio: d(enDias(10)),
+      fechaFin: d(enDias(20)),
       estado: 'CANCELADA',
     });
 
     const r = await service.createPeriod({
       empleadoId: 'E001',
-      fechaInicio: '2026-12-15',
-      fechaFin: '2026-12-25',
+      fechaInicio: enDias(15),
+      fechaFin: enDias(25),
     } as any);
     assert.equal(r.estado, 'PROGRAMADA');
   });
@@ -283,15 +301,15 @@ describe('VacationService.createPeriod — las cuatro validaciones', () => {
   test('validación 4: el período de OTRO empleado no bloquea', async () => {
     repo.conEmpleado('E001').conPeriodo({
       empleadoId: 'E999',
-      fechaInicio: d('2026-12-10'),
-      fechaFin: d('2026-12-20'),
+      fechaInicio: d(enDias(10)),
+      fechaFin: d(enDias(20)),
       estado: 'PROGRAMADA',
     });
 
     const r = await service.createPeriod({
       empleadoId: 'E001',
-      fechaInicio: '2026-12-15',
-      fechaFin: '2026-12-18',
+      fechaInicio: enDias(15),
+      fechaFin: enDias(18),
     } as any);
     assert.equal(r.empleadoId, 'E001');
   });
@@ -357,7 +375,7 @@ describe('VacationService — scheduler: transiciones por paso del tiempo', () =
     assert.deepEqual(publisher.publicados, []);
   });
 
-  test('la fechaFin es inclusiva: un período que termina hoy sigue EN_CURSO', async () => {
+  test('finaliza en la fecha de regreso, incluido hoy', async () => {
     const hoy = new Date();
     hoy.setUTCHours(0, 0, 0, 0);
 
@@ -371,8 +389,8 @@ describe('VacationService — scheduler: transiciones por paso del tiempo', () =
 
     const r = await service.runSchedulerCycle();
 
-    assert.equal(r.finalizadas, 0);
-    assert.equal(repo.periodos[0].estado, 'EN_CURSO');
+    assert.equal(r.finalizadas, 1);
+    assert.equal(repo.periodos[0].estado, 'FINALIZADA');
   });
 
   test('dos ciclos seguidos no publican el evento dos veces (compare-and-set)', async () => {
@@ -451,5 +469,87 @@ describe('VacationService — endpoints de disparo manual', () => {
         return true;
       }
     );
+  });
+});
+
+
+describe('VacationService — reprogramación y cancelación', () => {
+  beforeEach(() => {
+    construir();
+    repo.conEmpleado('E001').conPeriodo({
+      id: 'p1', empleadoId: 'E001', fechaInicio: d(enDias(5)), fechaFin: d(enDias(10)),
+    });
+  });
+
+  test('reprograma un período futuro y publica las fechas nuevas', async () => {
+    const result = await service.updatePeriod('p1', { fechaInicio: enDias(12), fechaFin: enDias(15) });
+    assert.equal(result.fechaInicio, enDias(12));
+    assert.equal(result.fechaFin, enDias(15));
+    assert.equal(result.estado, 'PROGRAMADA');
+    await dejarCorrerMicrotareas();
+    assert.deepEqual(publisher.tipos(), ['vacaciones.reprogramadas']);
+  });
+
+  test('rechaza reprogramar para un empleado retirado', async () => {
+    repo.conEmpleado('E001', 'RETIRADO');
+    await assert.rejects(() => service.updatePeriod('p1', { fechaFin: enDias(12) }), /empleado ACTIVO/);
+  });
+
+  test('cambiar solo la fecha final conserva la fecha inicial' , async () => {
+    const result = await service.updatePeriod('p1', { fechaFin: enDias(12) });
+    assert.equal(result.fechaInicio, enDias(5));
+    assert.equal(result.fechaFin, enDias(12));
+  });
+
+  test('no permite reprogramar un período que ya comenzó', async () => {
+    repo.periodos[0].estado = 'EN_CURSO';
+    await assert.rejects(() => service.updatePeriod('p1', { fechaFin: enDias(12) }), /estado PROGRAMADA/);
+    assert.deepEqual(publisher.publicados, []);
+  });
+
+  test('una reprogramación necesita al menos una fecha', async () => {
+    await assert.rejects(() => service.updatePeriod('p1', {}), /Debe proporcionar/);
+  });
+
+  test('rechaza fechas invertidas o en el pasado al reprogramar', async () => {
+    await assert.rejects(() => service.updatePeriod('p1', { fechaInicio: enDias(20) }), /posterior/);
+    await assert.rejects(() => service.updatePeriod('p1', { fechaInicio: enDias(-1) }), /pasada/);
+    assert.equal(repo.periodos[0].fechaInicio.toISOString().split('T')[0], enDias(5));
+  });
+
+  test('no permite mover las vacaciones sobre otro período activo', async () => {
+    repo.conPeriodo({
+      id: 'p2', empleadoId: 'E001', fechaInicio: d(enDias(15)), fechaFin: d(enDias(20)),
+    });
+    await assert.rejects(() => service.updatePeriod('p1', { fechaFin: enDias(16) }), /se solapa/);
+    assert.deepEqual(publisher.publicados, []);
+  });
+
+  test('cancelar un período futuro conserva su historial', async () => {
+    const result = await service.deletePeriod('p1');
+    assert.equal(result.estado, 'CANCELADA');
+    assert.equal(repo.periodos.length, 1);
+    assert.equal((await service.getPeriodById('p1'))?.estado, 'CANCELADA');
+  });
+
+  test('no permite cancelar vacaciones desde el día de su inicio', async () => {
+    repo.periodos[0].fechaInicio = d(hoyIso());
+    await assert.rejects(() => service.deletePeriod('p1'), /ya ha iniciado/);
+    assert.equal(repo.periodos[0].estado, 'PROGRAMADA');
+  });
+
+  test('consultar un período inexistente devuelve null y modificarlo devuelve 404', async () => {
+    assert.equal(await service.getPeriodById('inexistente'), null);
+    for (const operation of [
+      () => service.updatePeriod('inexistente', { fechaFin: enDias(12) }),
+      () => service.deletePeriod('inexistente'),
+    ]) {
+      await assert.rejects(operation, (error: ValidationError) => error.statusCode === 404);
+    }
+  });
+
+  test('rechaza una fecha sin formato ISO antes de guardar cambios', async () => {
+    await assert.rejects(() => service.updatePeriod('p1', { fechaInicio: 'mañana' }), /formato YYYY-MM-DD/);
+    assert.deepEqual(publisher.publicados, []);
   });
 });

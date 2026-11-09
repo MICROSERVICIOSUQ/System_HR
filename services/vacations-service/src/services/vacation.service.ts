@@ -1,3 +1,6 @@
+import { conSpanRaiz } from '../observability/amqp-tracing.ts';
+import { transitions } from '../observability/metrics.ts';
+import { log } from '../observability/logger.ts';
 import {
   VacationRepository,
   EstadoFiltro,
@@ -8,8 +11,7 @@ import {
 import { RabbitMQPublisher } from '../messaging/rabbitmq.publisher.ts';
 import type { Prisma } from '../generated/prisma/client.ts';
 import type { PaginatedResponse } from '../types/pagination.ts';
-import { finEsAnteriorAInicio, inicioEsPasado } from '../domain/vacation-rules.ts';
-import { conSpanRaiz } from '../observability/amqp-tracing.ts';
+import { finNoEsPosteriorAInicio, inicioEsPasado } from '../domain/vacation-rules.ts';
 
 export interface EventEnvelope {
   id: string;
@@ -128,13 +130,10 @@ export class VacationService {
     const inicio = this.parseDate(dto.fechaInicio, 'fechaInicio');
     const fin = this.parseDate(dto.fechaFin, 'fechaFin');
 
-    // Validación 1: la fechaFin no puede ser anterior a la fechaInicio.
-    // Se admite que coincidan: un período de un solo día es legítimo, y es la
-    // estrategia que sugiere el Reto 5 para demostrar el scheduler sin esperar
-    // (fechaInicio = fechaFin = hoy, con el scheduler corriendo cada minuto).
-    if (finEsAnteriorAInicio(inicio, fin)) {
+    // fechaFin es el regreso; un día de vacaciones requiere dos fechas consecutivas.
+    if (finNoEsPosteriorAInicio(inicio, fin)) {
       throw new ValidationError(
-        `fechaFin (${dto.fechaFin}) no puede ser anterior a fechaInicio (${dto.fechaInicio})`
+        `fechaFin (${dto.fechaFin}) debe ser posterior a fechaInicio (${dto.fechaInicio})`
       );
     }
 
@@ -152,6 +151,10 @@ export class VacationService {
         `Empleado con id '${dto.empleadoId}' no encontrado. Debe existir en el sistema de vacaciones.`,
         404
       );
+    }
+
+    if (balance.estadoEmpleado !== 'ACTIVO') {
+      throw new ValidationError('Solo se pueden programar vacaciones para un empleado ACTIVO');
     }
 
     // Validación 4: no debe solaparse con períodos PROGRAMADA o EN_CURSO del mismo empleado
@@ -194,7 +197,7 @@ export class VacationService {
         fechaCreacion: result.fechaCreacion,
       }, correlationId)
       .catch((err) => {
-        console.error(
+        log.error(
           `[VACATIONS] [WARN] No se pudo publicar evento para período ${result.id}:`,
           err.message
         );
@@ -276,10 +279,10 @@ export class VacationService {
     const inicio = this.parseDate(fechaInicioInput, 'fechaInicio');
     const fin = this.parseDate(fechaFinInput, 'fechaFin');
 
-    // Misma regla que en createPeriod: se admite un período de un solo día.
-    if (finEsAnteriorAInicio(inicio, fin)) {
+    // Misma regla de fechas que al crear el período.
+    if (finNoEsPosteriorAInicio(inicio, fin)) {
       throw new ValidationError(
-        `fechaFin (${fechaFinInput}) no puede ser anterior a fechaInicio (${fechaInicioInput})`
+        `fechaFin (${fechaFinInput}) debe ser posterior a fechaInicio (${fechaInicioInput})`
       );
     }
 
@@ -287,6 +290,11 @@ export class VacationService {
     today.setUTCHours(0, 0, 0, 0);
     if (inicio < today) {
       throw new ValidationError(`fechaInicio (${fechaInicioInput}) no puede ser una fecha pasada`);
+    }
+
+    const balance = await this.repository.findByEmployeeId(existing.empleadoId);
+    if (!balance || balance.estadoEmpleado !== 'ACTIVO') {
+      throw new ValidationError('Solo se pueden reprogramar vacaciones para un empleado ACTIVO');
     }
 
     const overlaps = await this.repository.findOverlappingPeriods(
@@ -324,7 +332,7 @@ export class VacationService {
         fechaCreacion: result.fechaCreacion,
       }, correlationId)
       .catch((err) => {
-        console.error(
+        log.error(
           `[VACATIONS] [WARN] No se pudo publicar evento de reprogramación para período ${result.id}:`,
           err.message
         );
@@ -365,13 +373,13 @@ export class VacationService {
     const { id: eventId, type: eventType, data } = envelope;
     const employeeId = data?.id ?? 'UNKNOWN';
 
-    console.log(
+    log.info(
       `[VACATIONS] Mensaje recibido | UUID: ${eventId} | Evento: ${eventType} | Empleado: ${employeeId}`
     );
 
     // Filtrar eventos no gestionados por este microservicio
     if (!ALLOWED_EVENTS.includes(eventType as any)) {
-      console.log(
+      log.info(
         `[VACATIONS] Evento ignorado | UUID: ${eventId} | Tipo '${eventType}' no aplica para vacaciones`
       );
       return 'IGNORED';
@@ -405,7 +413,7 @@ export class VacationService {
         }
       }
 
-      console.error(
+      log.error(
         `[VACATIONS] [ERROR] Excepción procesando evento | UUID: ${eventId} | Evento: ${eventType} | Empleado: ${employeeId}:`,
         error
       );
@@ -433,7 +441,7 @@ export class VacationService {
       lastEventId: eventId,
     }, transaction);
 
-    console.log(
+    log.info(
       `[VACATIONS] [CREADO] Registro de vacaciones inicializado | UUID: ${eventId} | Empleado: ${employeeId} | ` +
         `Nombre: ${data.nombre} ${data.apellido} | Disponibles: 15 | Tomados: 0 | Estado: ACTIVO`
     );
@@ -451,7 +459,7 @@ export class VacationService {
     });
 
     if (!existing) {
-      console.warn(
+      log.warn(
         `[VACATIONS] [ACTUALIZADO] Empleado no encontrado previamente | UUID: ${eventId} | Empleado: ${employeeId}. ` +
           `Inicializando registro de vacaciones de forma defensiva.`
       );
@@ -478,7 +486,7 @@ export class VacationService {
       lastEventId: eventId,
     }, transaction);
 
-    console.log(
+    log.info(
       `[VACATIONS] [ACTUALIZADO] Información de empleado actualizada (días de vacaciones intactos) | ` +
         `UUID: ${eventId} | Empleado: ${employeeId} | Nombre: ${data.nombre} ${data.apellido}`
     );
@@ -497,7 +505,7 @@ export class VacationService {
     });
 
     if (!existing) {
-      console.warn(
+      log.warn(
         `[VACATIONS] [RETIRADO] Réplica de empleado no encontrada | UUID: ${eventId} | ` +
           `Empleado: ${employeeId}. Vacaciones PROGRAMADA canceladas: ${cancelled.count}.`
       );
@@ -509,7 +517,7 @@ export class VacationService {
       lastEventId: eventId,
     }, transaction);
 
-    console.log(
+    log.info(
       `[VACATIONS] [RETIRADO] Empleado marcado como RETIRADO (saldo histórico conservado) | ` +
         `UUID: ${eventId} | Empleado: ${employeeId} | Disponibles: ${existing.diasDisponibles} | ` +
         `Tomados: ${existing.diasTomados} | Vacaciones PROGRAMADA canceladas: ${cancelled.count}`
@@ -553,38 +561,18 @@ export class VacationService {
     const inicioDelDia = new Date(ahora.getTime());
     inicioDelDia.setUTCHours(0, 0, 0, 0);
 
-    // Cada transición abre su propio span RAÍZ (Reto 8).
-    //
-    // Es el caso que no cubre la instrumentación automática: aquí no hay
-    // petición HTTP entrante, así que no existe traza de la que colgar. Sin
-    // este span, el evento se publicaría sin contexto y la cadena que sigue
-    // —auth-service suspende la cuenta, notifications-service envía el correo—
-    // aparecería en Zipkin como spans sueltos, sin relación entre sí. Y es
-    // justo el flujo que más cuesta depurar, porque ocurre de madrugada.
-    //
-    // El span va por período y no por ciclo a propósito: una traza por
-    // transición es lo que se quiere consultar, no un árbol con todas las
-    // transiciones del día mezcladas.
-    let iniciadas = 0;
-    for (const period of await this.repository.findPeriodsToStart(ahora)) {
-      const transicionada = await conSpanRaiz(
-        'scheduler.vacaciones.iniciar',
-        { 'vacaciones.id': period.id, 'empleado.id': period.empleadoId },
-        () => this.startPeriod(period),
-      );
-      if (transicionada) iniciadas += 1;
-    }
-
     let finalizadas = 0;
     for (const period of await this.repository.findPeriodsToFinish(inicioDelDia)) {
-      const transicionada = await conSpanRaiz(
-        'scheduler.vacaciones.finalizar',
-        { 'vacaciones.id': period.id, 'empleado.id': period.empleadoId },
-        () => this.finishPeriod(period),
-      );
-      if (transicionada) finalizadas += 1;
+      if (await conSpanRaiz('scheduler.vacaciones.finalizar', { 'vacaciones.id': period.id }, () => this.finishPeriod(period))) finalizadas += 1;
     }
-
+    let iniciadas = 0;
+    for (const period of await this.repository.findPeriodsToStart(ahora)) {
+      if (await conSpanRaiz('scheduler.vacaciones.iniciar', { 'vacaciones.id': period.id }, () => this.startPeriod(period))) {
+        iniciadas += 1;
+        // Recuperación tras una parada: no dejar EN_CURSO un período vencido.
+        if (period.fechaFin <= inicioDelDia && await this.finishPeriod(period)) finalizadas += 1;
+      }
+    }
     return { iniciadas, finalizadas };
   }
 
@@ -633,8 +621,9 @@ export class VacationService {
       return false;
     }
 
+    transitions.inc({ state: 'EN_CURSO' });
     const result = this.mapPeriod({ ...period, estado: 'EN_CURSO' });
-    console.log(
+    log.info(
       `[VACATIONS] [SCHEDULER] Período ${result.id} EN_CURSO | empleado: ${result.empleadoId} | ${result.fechaInicio} → ${result.fechaFin}`
     );
 
@@ -648,7 +637,7 @@ export class VacationService {
         fechaCreacion: result.fechaCreacion,
       });
     } catch (err: any) {
-      console.error(
+      log.error(
         `[VACATIONS] [WARN] No se pudo publicar vacaciones.iniciadas para ${result.id}:`,
         err.message
       );
@@ -666,8 +655,9 @@ export class VacationService {
       return false;
     }
 
+    transitions.inc({ state: 'FINALIZADA' });
     const result = this.mapPeriod({ ...period, estado: 'FINALIZADA' });
-    console.log(
+    log.info(
       `[VACATIONS] [SCHEDULER] Período ${result.id} FINALIZADA | empleado: ${result.empleadoId} | fechaFin: ${result.fechaFin}`
     );
 
@@ -681,7 +671,7 @@ export class VacationService {
         fechaCreacion: result.fechaCreacion,
       });
     } catch (err: any) {
-      console.error(
+      log.error(
         `[VACATIONS] [WARN] No se pudo publicar vacaciones.finalizadas para ${result.id}:`,
         err.message
       );

@@ -1,0 +1,160 @@
+pipeline {
+    agent any
+    options {
+        skipDefaultCheckout(true)
+        disableConcurrentBuilds()
+        timeout(time: 60, unit: 'MINUTES')
+        buildDiscarder(logRotator(numToKeepStr: '15'))
+    }
+    parameters {
+        choice(name: 'FALLO_DEMO', choices: ['ninguno', 'unitaria', 'cobertura', 'docker', 'bdd'],
+            description: 'Fallo controlado del punto 5. Solo modifica este workspace.')
+    }
+    triggers { pollSCM('H/5 * * * *') }
+    stages {
+        stage('Checkout') {
+            steps {
+                deleteDir()
+                checkout scm
+                sh 'docker version >/dev/null && docker compose version && docker ps --format "{{.Names}}: {{.Status}}"'
+                script {
+                    env.CI_SERVICE = 'vacations-service'
+                    env.CI_PROJECT = "hr-ci-vacations-service-${env.BUILD_NUMBER}"
+                }
+                sh 'python3 ci/simular-fallo.py "$CI_SERVICE" "${FALLO_DEMO:-ninguno}"'
+            }
+        }
+        stage('Build') {
+            steps {
+                script {
+                    docker.image('node:22-bookworm-slim').inside('-u root -v hr-ci-npm:/root/.npm') {
+                        dir('services/vacations-service') {
+                            withEnv(['DATABASE_URL=postgresql://ci:ci@localhost:1/ci']) {
+                                sh 'npm ci --include=dev && npx prisma generate && npm run build'
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        stage('Test') {
+            steps {
+                script {
+                    docker.image('node:22-bookworm-slim').inside('-u root -v hr-ci-npm:/root/.npm') {
+                        dir('services/vacations-service') {
+                            sh 'npm run test:ci'
+                        }
+                    }
+                }
+            }
+            post {
+                always {
+                    // Publicar en post conserva el diagnóstico aunque el comando falle.
+                    junit testResults: 'services/vacations-service/reports/junit.xml', allowEmptyResults: false
+                    recordCoverage tools: [[parser: 'LCOV', pattern: 'services/vacations-service/reports/lcov.info']], sourceDirectories: [[path: 'services/vacations-service']], sourceCodeRetention: 'EVERY_BUILD', enabledForFailure: true, failOnError: true
+                    archiveArtifacts artifacts: 'services/vacations-service/reports/*', allowEmptyArchive: true
+                    script {
+                        if (currentBuild.currentResult == 'UNSTABLE') {
+                            error('Hay pruebas fallidas. Consulta Test Result antes de continuar.')
+                        }
+                    }
+                }
+            }
+        }
+        stage('SonarQube') {
+            steps {
+                script {
+                    withSonarQubeEnv('SonarQube') {
+                        withCredentials([string(credentialsId: 'sonar-token', variable: 'SONAR_TOKEN')]) {
+                            docker.image('sonarsource/sonar-scanner-cli:11').inside(
+                                "-u root --network ${env.CI_NETWORK}"
+                            ) {
+                                dir('services/vacations-service') {
+                                    // El scanner puede terminar en cero aunque omita archivos por un error de análisis.
+                                    sh '''
+                                        result=0
+                                        sonar-scanner > reports/sonar.log 2>&1 || result=$?
+                                        cat reports/sonar.log
+                                        if grep -q ' ERROR ' reports/sonar.log; then
+                                            exit 1
+                                        fi
+                                        exit "$result"
+                                    '''
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            post {
+                always {
+                    archiveArtifacts artifacts: 'services/vacations-service/reports/sonar.log', allowEmptyArchive: true
+                }
+            }
+        }
+        stage('Quality Gate') {
+            steps {
+                timeout(time: 10, unit: 'MINUTES') {
+                    script {
+                        def gate = waitForQualityGate()
+                        if (gate.status != 'OK') {
+                            error("SonarQube rechazó la calidad del servicio: ${gate.status}")
+                        }
+                    }
+                }
+            }
+        }
+        stage('Package') {
+            steps {
+                sh 'python3 ci/construir-imagen.py vacations-service $BUILD_NUMBER'
+            }
+            post {
+                always {
+                    archiveArtifacts artifacts: 'reports/docker/*', allowEmptyArchive: true
+                    publishHTML target: [reportDir: 'reports/docker', reportFiles: 'index.html',
+                        reportName: 'Empaquetado Docker', keepAll: true,
+                        alwaysLinkToLastBuild: false, allowMissing: false]
+                }
+            }
+        }
+        stage('E2E Tests') {
+            steps {
+                sh 'sh ci/e2e.sh run'
+            }
+            post {
+                always {
+                    script {
+                        // La limpieza se ejecuta incluso si la publicación del reporte falla.
+                        try {
+                            load('ci/pipeline.groovy').publicarBDD()
+                        } finally {
+                            try {
+                                sh 'sh ci/e2e.sh clean'
+                            } finally {
+                                archiveArtifacts artifacts: 'reports/e2e/system.log,e2e-tests/reports/*', allowEmptyArchive: true
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+    post {
+        success { echo 'El servicio pasó las pruebas, la revisión de calidad y los escenarios BDD.' }
+        failure { echo 'La ejecución falló. Revisa la etapa marcada y sus reportes.' }
+        always {
+            // Reintento de limpieza si hubo una interrupción en E2E.
+            script {
+                try {
+                    if (env.CI_PROJECT && fileExists('reports/e2e/compose.json')) {
+                        sh 'sh ci/e2e.sh clean'
+                    }
+                } finally {
+                    if (fileExists('ci/ajustar-permisos.sh')) {
+                        sh 'sh ci/ajustar-permisos.sh'
+                    }
+                }
+            }
+        }
+    }
+}

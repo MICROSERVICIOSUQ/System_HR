@@ -1,6 +1,7 @@
+import { cabecerasConContexto } from '../observability/amqp-tracing.ts';
+import { log } from '../observability/logger.ts';
 import amqplib, { Channel, ChannelModel } from 'amqplib';
 import { rabbitConfig } from '../config/rabbitmq.ts';
-import { cabecerasConContexto } from '../observability/amqp-tracing.ts';
 
 export interface VacacionesProgramadasEvent {
   id: string;           // UUID del VacationPeriod
@@ -22,36 +23,44 @@ export interface EventEnvelope<T> {
 }
 
 export class RabbitMQPublisher {
-  private connection: ChannelModel | null = null;
-  private channel: Channel | null = null;
+  private static connection: ChannelModel | null = null;
+  private static channel: Channel | null = null;
+  private static connecting: Promise<void> | null = null;
   private readonly exchangeName = 'hr.events';
 
   private async ensureConnected(): Promise<void> {
-    if (this.channel) return;
+    if (RabbitMQPublisher.channel) return;
+    if (!RabbitMQPublisher.connecting) {
+      RabbitMQPublisher.connecting = this.connect().finally(() => { RabbitMQPublisher.connecting = null; });
+    }
+    await RabbitMQPublisher.connecting;
+  }
+
+  private async connect(): Promise<void> {
 
     try {
-      this.connection = await amqplib.connect(rabbitConfig.url);
-      this.channel = await this.connection.createChannel();
+      RabbitMQPublisher.connection = await amqplib.connect(rabbitConfig.url);
+      RabbitMQPublisher.channel = await RabbitMQPublisher.connection.createChannel();
 
       // Verificar que el exchange existe (no lo creamos, ya existe)
-      await this.channel.checkExchange(this.exchangeName);
+      await RabbitMQPublisher.channel.checkExchange(this.exchangeName);
 
-      this.connection.on('error', (err) => {
-        console.error('[RABBITMQ-PUBLISHER] Error en conexión:', err.message);
-        this.connection = null;
-        this.channel = null;
+      RabbitMQPublisher.connection.on('error', (err) => {
+        log.error('[RABBITMQ-PUBLISHER] Error en conexión:', err.message);
+        RabbitMQPublisher.connection = null;
+        RabbitMQPublisher.channel = null;
       });
 
-      this.connection.on('close', () => {
-        console.warn('[RABBITMQ-PUBLISHER] Conexión cerrada.');
-        this.connection = null;
-        this.channel = null;
+      RabbitMQPublisher.connection.on('close', () => {
+        log.warn('[RABBITMQ-PUBLISHER] Conexión cerrada.');
+        RabbitMQPublisher.connection = null;
+        RabbitMQPublisher.channel = null;
       });
 
-      console.log('[RABBITMQ-PUBLISHER] Conectado al exchange hr.events');
+      log.info('[RABBITMQ-PUBLISHER] Conectado al exchange hr.events');
     } catch (error: any) {
-      this.connection = null;
-      this.channel = null;
+      RabbitMQPublisher.connection = null;
+      RabbitMQPublisher.channel = null;
       throw new Error(`[RABBITMQ-PUBLISHER] No se pudo conectar: ${error.message}`);
     }
   }
@@ -102,7 +111,7 @@ export class RabbitMQPublisher {
   ): Promise<void> {
     await this.ensureConnected();
 
-    if (!this.channel) {
+    if (!RabbitMQPublisher.channel) {
       throw new Error('[RABBITMQ-PUBLISHER] Canal no disponible');
     }
 
@@ -125,28 +134,26 @@ export class RabbitMQPublisher {
 
     const payload = Buffer.from(JSON.stringify(envelope));
 
-    // Publicar al exchange fanout hr.events (routing key vacía para fanout).
-    // Las cabeceras llevan el contexto de traza (traceparent, W3C): es lo que
-    // permite que el span del consumidor cuelgue de esta misma traza en lugar de
-    // aparecer como una traza suelta en Zipkin. Por HTTP esto lo hace el SDK
-    // solo; por el broker hay que inyectarlo a mano.
-    this.channel.publish(this.exchangeName, '', payload, {
+    // Publicar al exchange fanout hr.events (routing key vacía para fanout)
+    RabbitMQPublisher.channel.publish(this.exchangeName, '', payload, {
       contentType: 'application/json',
       persistent: true,
       headers: cabecerasConContexto(),
     });
 
-    console.log(
+    log.info(
       `[VACATIONS] [PUBLICADO] ${type} | VacationPeriod: ${data.id} | Empleado: ${data.empleadoId}`
     );
   }
 
   async close(): Promise<void> {
     try {
-      if (this.channel) await this.channel.close();
-      if (this.connection) await this.connection.close();
+      if (RabbitMQPublisher.channel) await RabbitMQPublisher.channel.close();
+      if (RabbitMQPublisher.connection) await RabbitMQPublisher.connection.close();
+      RabbitMQPublisher.channel = null;
+      RabbitMQPublisher.connection = null;
     } catch (err: any) {
-      console.error('[RABBITMQ-PUBLISHER] Error cerrando:', err.message);
+      log.error('[RABBITMQ-PUBLISHER] Error cerrando:', err.message);
     }
   }
 }

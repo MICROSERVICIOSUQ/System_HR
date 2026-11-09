@@ -1,12 +1,12 @@
+# syntax=docker/dockerfile:1
 # ── Etapa 1: compilación ──────────────────────────────────────────────────────
 FROM maven:3.9-eclipse-temurin-21 AS build
 WORKDIR /app
 COPY pom.xml .
-RUN mvn -B dependency:go-offline
 
 COPY src ./src
 
-RUN mvn -B clean package -DskipTests
+RUN --mount=type=cache,id=hr-ci-maven-build,target=/root/.m2,sharing=locked mvn -B clean package -DskipTests
 
 # ── Etapa 2: runtime ─────────────────────────────────────────────────────────
 FROM eclipse-temurin:21-jre-alpine
