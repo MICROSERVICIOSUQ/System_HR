@@ -1,1 +1,0 @@
-CREATE SEQUENCE IF NOT EXISTS departments_id_seq START WITH 1;

@@ -57,7 +57,12 @@ public class EmployeeController {
     }
 
     @GetMapping
-    @Operation(summary = "Listar todos los empleados", description = "Obtiene la lista de empleados registrados en el sistema, con filtros opcionales por departamento, estado, cargo y paginación.")
+    @Operation(summary = "Listar empleados y consultar la auditoría de retiros",
+            description = "Obtiene la lista de empleados con filtros opcionales por departamento, estado, "
+                    + "cargo y paginación. Si se envían 'desde' y 'hasta', la consulta se convierte en la "
+                    + "auditoría de retiros: devuelve únicamente empleados con estado RETIRADO cuya "
+                    + "fechaRetiro esté dentro del rango (ambos límites inclusivos, día completo). "
+                    + "Esta es la ruta canónica de la auditoría; GET /empleados/auditoria delega aquí.")
     @ApiResponses({
             @ApiResponse(responseCode = "200", description = "Lista de empleados obtenida exitosamente",
                     content = @Content(array = @ArraySchema(schema = @Schema(implementation = Employee.class)))),
@@ -71,6 +76,19 @@ public class EmployeeController {
             @RequestParam(required = false) String estado,
             @Parameter(description = "Filtrar por cargo (búsqueda parcial)", example = "Desarrollador")
             @RequestParam(required = false) String cargo,
+            @Parameter(description = "Auditoría: fecha inicial del rango de retiro (yyyy-MM-dd, inclusiva). "
+                    + "Si se envía, también es obligatoria 'hasta' y el estado se fuerza a RETIRADO.",
+                    example = "2026-01-01")
+            @RequestParam(required = false)
+            @DateTimeFormat(iso = DateTimeFormat.ISO.DATE)
+            LocalDate desde,
+            @Parameter(description = "Auditoría: fecha final del rango de retiro (yyyy-MM-dd, inclusiva). "
+                    + "Se expande al final del día, de modo que un retiro de esa misma fecha a cualquier "
+                    + "hora queda incluido.",
+                    example = "2026-12-31")
+            @RequestParam(required = false)
+            @DateTimeFormat(iso = DateTimeFormat.ISO.DATE)
+            LocalDate hasta,
             @Parameter(description = "Número de página (base 1)", example = "1")
             @RequestParam(required = false) Integer page,
             @Parameter(description = "Tamaño de página", example = "10")
@@ -83,7 +101,8 @@ public class EmployeeController {
             @RequestParam(required = false) String order) {
         Integer effectiveSize = (size != null) ? size : limit;
         com.microservicios.employees.model.EmployeeStatus statusEnum = parseStatus(estado);
-        return ResponseEntity.ok(service.findAll(departamentoId, statusEnum, cargo, page, effectiveSize, sortBy, order));
+        return ResponseEntity.ok(service.findAll(
+                departamentoId, statusEnum, cargo, desde, hasta, page, effectiveSize, sortBy, order));
     }
 
     private com.microservicios.employees.model.EmployeeStatus parseStatus(String estado) {
@@ -98,8 +117,12 @@ public class EmployeeController {
     }
 
     @GetMapping("/auditoria")
-    @Operation(summary = "Auditoría de empleados retirados por rango de fechas",
-            description = "Consulta únicamente empleados con estado RETIRADO cuya fechaRetiro esté dentro del rango especificado (desde y hasta inclusivos).")
+    @Operation(summary = "Auditoría de empleados retirados (alias de GET /empleados?desde=&hasta=)",
+            description = "Consulta únicamente empleados con estado RETIRADO cuya fechaRetiro esté dentro "
+                    + "del rango especificado (desde y hasta inclusivos, día completo). "
+                    + "La implementación está unificada en GET /empleados; esta ruta delega en ella y se "
+                    + "conserva por compatibilidad con los clientes existentes.")
+    @Deprecated(since = "Auditoría unificada en GET /empleados")
     @ApiResponses({
             @ApiResponse(responseCode = "200", description = "Lista de empleados retirados obtenida exitosamente",
                     content = @Content(array = @ArraySchema(schema = @Schema(implementation = Employee.class)))),

@@ -1,0 +1,32 @@
+# Exclusiones de cobertura, con el mismo criterio que en los otros servicios:
+# se mide la lógica, no el cableado.
+#
+# En employees-service JaCoCo excluye la clase Application, config/, dto/ y
+# events/. En los servicios Node se excluyen server.ts y la configuración. Aquí:
+#
+#   main.py        → construcción de la aplicación y registro de middlewares.
+#   db.py          → pool de conexiones; se ejercita en las pruebas de integración.
+#   observability/ → instrumentación; se verifica de extremo a extremo en Zipkin,
+#                    Prometheus y Grafana, no con pruebas unitarias.
+#   migrations/    → SQL versionado; lo verifica el arranque del contenedor.
+#
+# Lo que SÍ se mide: service.py (reglas de negocio), repository.py, schemas.py
+# (validación), errors.py (traducción a HTTP), router.py y clients/.
+
+[run]
+source = app
+omit =
+    app/main.py
+    app/db.py
+    app/observability/*
+    migrations/*
+    tests/*
+
+[report]
+exclude_lines =
+    pragma: no cover
+    if TYPE_CHECKING:
+    raise NotImplementedError
+    def __repr__
+show_missing = True
+skip_covered = False

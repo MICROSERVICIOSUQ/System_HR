@@ -25,6 +25,7 @@ import java.util.UUID;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
@@ -249,12 +250,60 @@ class AuthEndpointsTest {
 
     @Test
     void recoverPasswordPublicaUsuarioRecuperacion() throws Exception {
+        // La cuenta debe estar ACTIVA para poder recuperar su contraseña, así
+        // que primero se activa. Antes esta prueba pasaba sobre una cuenta en
+        // PENDIENTE_ACTIVACION, que es justo el caso que ahora se rechaza.
+        establecerPassword(PASSWORD);
+
         mockMvc.perform(post("/auth/recover-password")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(mapper.writeValueAsString(Map.of("email", EMAIL))))
                 .andExpect(status().isAccepted());
 
         verify(publisher).publicarUsuarioRecuperacion(any(), any());
+    }
+
+    /**
+     * Una cuenta sin activar no puede "recuperar" una contraseña que nunca tuvo.
+     *
+     * <p>Sin esta restricción, el endpoint público de recuperación servía como
+     * generador de tokens de activación a demanda: bastaba conocer el correo de
+     * un empleado recién registrado para pedir uno. El token de activación ya
+     * viajó en {@code usuario.creado}, y ese es su único canal de entrega.
+     */
+    @Test
+    void recoverPasswordSeRechazaSiLaCuentaNoEstaActivada() throws Exception {
+        mockMvc.perform(post("/auth/recover-password")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(mapper.writeValueAsString(Map.of("email", EMAIL))))
+                .andExpect(status().isUnauthorized())
+                .andExpect(jsonPath("$.message")
+                        .value(org.hamcrest.Matchers.containsString("aún no ha sido activada")));
+
+        verify(publisher, never()).publicarUsuarioRecuperacion(any(), any());
+    }
+
+    /**
+     * Durante las vacaciones tampoco: la cuenta está suspendida y el login la
+     * rechazaría igual, así que entregar un token sería prometer un acceso que
+     * no va a funcionar.
+     */
+    @Test
+    void recoverPasswordSeRechazaSiLaCuentaEstaSuspendidaPorVacaciones() throws Exception {
+        establecerPassword(PASSWORD);
+
+        lifecycle.procesar(new IncomingEvent(UUID.randomUUID().toString(),
+                AuthEvents.VACACIONES_INICIADAS, "1.0", "2026-11-08T10:00:00Z", "test",
+                Map.of("id", "periodo", "empleadoId", EMPLEADO)));
+
+        mockMvc.perform(post("/auth/recover-password")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(mapper.writeValueAsString(Map.of("email", EMAIL))))
+                .andExpect(status().isUnauthorized())
+                .andExpect(jsonPath("$.message")
+                        .value(org.hamcrest.Matchers.containsString("vacaciones")));
+
+        verify(publisher, never()).publicarUsuarioRecuperacion(any(), any());
     }
 
     @Test

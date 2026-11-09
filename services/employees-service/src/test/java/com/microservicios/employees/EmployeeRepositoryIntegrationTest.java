@@ -17,6 +17,7 @@ import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 
 import java.time.LocalDate;
+import java.time.LocalDateTime;
 import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -166,12 +167,17 @@ class EmployeeRepositoryIntegrationTest {
 
         Employee e = repository.findById("E001").orElseThrow();
         e.setStatus(EmployeeStatus.RETIRED);
-        e.setFechaRetiro(LocalDate.of(2026, 10, 21));
+        // Con hora: fecha_retiro es TIMESTAMP(3) desde la migración V3, y esta
+        // prueba verifica justo que PostgreSQL conserva el instante completo y no
+        // solo el día.
+        e.setFechaRetiro(LocalDateTime.of(2026, 10, 21, 16, 45, 30));
         repository.saveAndFlush(e);
 
         Employee releido = repository.findById("E001").orElseThrow();
         assertThat(releido.getStatus()).isEqualTo(EmployeeStatus.RETIRED);
-        assertThat(releido.getFechaRetiro()).isEqualTo(LocalDate.of(2026, 10, 21));
+        assertThat(releido.getFechaRetiro())
+                .as("el TIMESTAMP devuelve la hora, no la medianoche del día")
+                .isEqualTo(LocalDateTime.of(2026, 10, 21, 16, 45, 30));
         assertThat(repository.count())
                 .as("la baja es lógica: la fila sigue ahí para auditoría")
                 .isEqualTo(1);

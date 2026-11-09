@@ -321,18 +321,28 @@
       "response": []
     },
     {
-      "name": "5. Solicitar recuperación de contraseña",
+      "name": "5. Recuperacion rechazada antes de activar (401)",
       "event": [
         {
           "listen": "test",
           "script": {
             "type": "text/javascript",
             "exec": [
-              "pm.test('Status 202', () => pm.response.to.have.status(202));",
+              "// El flujo de esta coleccion cambio con la restriccion del Dev 2.",
+              "//",
+              "// Antes, este request pedia una recuperacion sobre la cuenta recien creada",
+              "// (PENDIENTE_ACTIVACION) y usaba ese token para activarla en el request 6. Eso",
+              "// convertia un endpoint publico en un generador de tokens de activacion a",
+              "// demanda: bastaba conocer el correo. Ahora recover-password exige que la cuenta",
+              "// este ACTIVA, asi que aqui se comprueba el rechazo y el request 6 toma el token",
+              "// del evento usuario.creado, que es su canal legitimo.",
+              "pm.test('Status 401: una cuenta sin activar no puede recuperar', () => {",
+              "    pm.response.to.have.status(401);",
+              "});",
               "",
-              "console.log('Se publicó usuario.recuperacion. Copie el token del log:');",
-              "console.log('  docker compose logs notifications-service | grep NOTIFICACIÓN');",
-              "console.log('Y péguelo en la variable de colección resetToken antes del request 6.');"
+              "pm.test('El mensaje orienta al token de activacion', () => {",
+              "    pm.expect(pm.response.json().message).to.include('no ha sido activada');",
+              "});"
             ]
           }
         }
@@ -364,12 +374,12 @@
             "recover-password"
           ]
         },
-        "description": "Endpoint público. Genera un token nuevo de vida corta y publica usuario.recuperacion; notifications-service simula el correo y el token aparece en su log."
+        "description": "Una cuenta en PENDIENTE_ACTIVACION no puede 'recuperar' una contrasena que nunca tuvo. Su token de activacion ya viajo en el evento usuario.creado, y ese es su unico canal de entrega. La recuperacion se reserva para cuentas ACTIVA, que es lo que comprueba el request 14.1."
       },
       "response": []
     },
     {
-      "name": "5.1 Ver el token de reset en notificaciones (ADMIN)",
+      "name": "5.1 Ver el token de activacion en notificaciones (ADMIN)",
       "request": {
         "method": "GET",
         "header": [
@@ -401,7 +411,7 @@
             }
           ]
         },
-        "description": "Hace visible el token de reset. El token NUNCA viaja en una respuesta HTTP: se publica en el evento usuario.recuperacion y notifications-service lo guarda en payload.data.token. Esta peticion lo muestra en la consola (Ctrl+Alt+C) con su header y sus claims decodificados, verifica que el header declara typ=JWT y que el claim type es RESET_PASSWORD, y lo deja en la variable resetToken. Requiere token de ADMIN: ni el atajo de laboratorio es publico."
+        "description": "Hace visible el token de activacion. Nunca viaja en una respuesta HTTP: se publica en el evento usuario.creado y notifications-service lo guarda en payload.data.token. Esta peticion lo muestra en la consola (Ctrl+Alt+C) con su header y sus claims decodificados, y lo deja en la variable resetToken. Requiere token de ADMIN: ni el atajo de laboratorio es publico."
       },
       "event": [
         {
@@ -417,10 +427,10 @@
               "",
               "// Ordenado por processedAt DESC: el primero que coincide es el mas reciente.",
               "// Sin ordenar se copiaba el token de una ejecucion anterior, ya expirado.",
-              "const n = filas.find(x => x.eventType === 'usuario.recuperacion'",
+              "const n = filas.find(x => x.eventType === 'usuario.creado'",
               "                       && String(x.email).toLowerCase() === String(email).toLowerCase());",
               "",
-              "pm.test('Existe la notificacion usuario.recuperacion del empleado', () => {",
+              "pm.test('Existe la notificacion usuario.creado del empleado', () => {",
               "    pm.expect(n, 'no llego el evento todavia; reenvie en un segundo').to.not.be.undefined;",
               "});",
               "",
@@ -437,7 +447,7 @@
               "    const claims = parte(1);",
               "",
               "    console.log('-----------------------------------------------------------');",
-              "    console.log('TOKEN DE RESET  (publicado ' + n.processedAt + ')');",
+              "    console.log('TOKEN DE ACTIVACION  (publicado ' + n.processedAt + ')');",
               "    console.log('  token:  ' + token);",
               "    console.log('  header: ' + JSON.stringify(header));",
               "    console.log('  claims: ' + JSON.stringify(claims));",
@@ -472,7 +482,7 @@
             "exec": [
               "// Trae el token del evento automaticamente: ya no hay que copiar nada a mano.",
               "// El token NO viaja en ninguna respuesta HTTP; se publica en el evento",
-              "// usuario.recuperacion y notifications-service lo guarda en payload.data.token.",
+              "// usuario.creado y notifications-service lo guarda en payload.data.token.",
               "// Por eso hay que ir a buscarlo aqui: es la prueba de que el sistema no lo expone.",
               "const base  = pm.environment.get('gatewayBaseUrl') || pm.variables.get('gatewayBaseUrl');",
               "const admin = pm.collectionVariables.get('adminToken');",
@@ -491,14 +501,14 @@
               "        const filas  = Array.isArray(cuerpo) ? cuerpo : (cuerpo.data || []);",
               "        // Ordenado DESC: el primero que coincide es el mas reciente. Sin ordenar",
               "        // se copiaba un token viejo y reset-password respondia 401.",
-              "        const n = filas.find(x => x.eventType === 'usuario.recuperacion'",
+              "        const n = filas.find(x => x.eventType === 'usuario.creado'",
               "                               && String(x.email).toLowerCase() === String(email).toLowerCase());",
-              "        if (!n) { console.log('Aun no llego usuario.recuperacion para ' + email + '. Reintente en un segundo.'); return; }",
+              "        if (!n) { console.log('Aun no llego usuario.creado para ' + email + '. Reintente en un segundo.'); return; }",
               "        const token = n.payload && n.payload.data && n.payload.data.token;",
               "        if (!token) { console.log('El evento llego sin token en payload.data.token'); return; }",
               "        pm.collectionVariables.set('resetToken', token);",
               "        console.log('--------------------------------------------------------');",
-              "        console.log('resetToken obtenido de usuario.recuperacion');",
+              "        console.log('resetToken obtenido de usuario.creado');",
               "        console.log('  publicado: ' + n.processedAt);",
               "        console.log('  token:     ' + token);",
               "        // El payload de un JWT es Base64url, no va cifrado: se puede leer.",
@@ -945,6 +955,58 @@
         "description": "Limitación documentada: responder 404 revela si un email está registrado. Lo correcto frente a enumeración sería un 202 siempre; se mantiene porque el flujo de prueba del enunciado necesita distinguir el caso."
       },
       "response": []
+    },
+    {
+      "name": "14.1 Recuperacion aceptada con la cuenta ACTIVA (202)",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "url": {
+          "raw": "{{gatewayBaseUrl}}/auth/recover-password",
+          "host": [
+            "{{gatewayBaseUrl}}"
+          ],
+          "path": [
+            "auth",
+            "recover-password"
+          ]
+        },
+        "description": "La recuperacion funciona cuando la cuenta esta ACTIVA, que es su caso de uso real: alguien que tenia contrasena y la olvido. Se ejecuta despues del request 13, cuando la cuenta ya paso por activacion y cambio de contrasena.",
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"email\": \"{{empleadoEmail}}\"\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('Status 202', () => pm.response.to.have.status(202));",
+              "",
+              "pm.test('El cuerpo NO trae el token', () => {",
+              "    // El 202 significa \"aceptado, el proceso sigue por otro canal\". Si el token",
+              "    // viniera aqui, cualquiera que conociera un correo podria pedirlo y entrar.",
+              "    pm.expect(pm.response.text()).to.not.match(/eyJ[A-Za-z0-9_-]/);",
+              "});",
+              "",
+              "console.log('Publicado usuario.recuperacion. El token se recupera igual que en el 5.1,');",
+              "console.log('cambiando el eventType a usuario.recuperacion.');"
+            ]
+          }
+        }
+      ]
     },
     {
       "name": "15. Ver el perfil del empleado (USER)",

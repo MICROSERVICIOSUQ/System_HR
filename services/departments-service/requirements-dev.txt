@@ -1,0 +1,15 @@
+# Dependencias solo de desarrollo y pruebas.
+#
+# Van aparte para que la imagen de producción no las instale: menos superficie y
+# menos peso. El Dockerfile instala requirements.txt en la etapa final y estas
+# solo cuando se ejecutan las pruebas.
+-r requirements.txt
+
+pytest==8.3.4
+pytest-cov==6.0.0
+# El borrado de un departamento consulta a employees-service de forma asíncrona,
+# así que su prueba también tiene que serlo.
+pytest-asyncio==0.25.0
+# Mueve el reporte de cobertura al formato que ya consume el resto del
+# ecosistema (XML de Cobertura, equivalente al de JaCoCo y al lcov de Node).
+httpx==0.28.1

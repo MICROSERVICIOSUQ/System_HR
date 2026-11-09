@@ -19,6 +19,7 @@ import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.mock.mockito.MockBean;
 
 import java.time.LocalDate;
+import java.time.LocalDateTime;
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -156,7 +157,19 @@ class EmployeeEventPublisherTest {
         assertThat(envelope.type()).isEqualTo("empleado.retirado");
         assertThat(envelope.producer()).isEqualTo("employees-service");
         assertThat(envelope.data().id()).isEqualTo("EMP-003");
-        assertThat(envelope.data().fechaRetiro()).isEqualTo(LocalDate.now().toString());
+
+        // El evento lleva la fecha Y hora del retiro, tomada de la entidad.
+        //
+        // Antes se comparaba con LocalDate.now().toString(), que pasaba por una
+        // coincidencia: el código usaba ese mismo reloj en lugar del valor
+        // almacenado. Al corregirlo, la prueba tiene que mirar lo que de verdad
+        // importa — que el evento informe del instante que quedó guardado.
+        String fechaRetiroEvento = envelope.data().fechaRetiro();
+        assertThat(fechaRetiroEvento)
+                .as("ISO-8601 con hora, no solo la fecha")
+                .matches("\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}.*");
+        assertThat(LocalDateTime.parse(fechaRetiroEvento).toLocalDate())
+                .isEqualTo(LocalDate.now());
     }
 
     @Test

@@ -23,11 +23,14 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
 import java.time.LocalDate;
+import java.time.LocalDateTime;
+import java.time.temporal.ChronoUnit;
 import java.util.List;
 import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.assertj.core.api.Assertions.within;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.doThrow;
@@ -240,16 +243,26 @@ class EmployeeServiceUnitTest {
             Employee retirado = service.retire("E001");
 
             assertThat(retirado.getStatus()).isEqualTo(EmployeeStatus.RETIRED);
+            // fechaRetiro es LocalDateTime desde la migración V3, así que no se
+            // puede comparar con una igualdad exacta: entre la llamada y la
+            // aserción pasan milisegundos. Se comprueba el día y que el instante
+            // sea reciente, que es lo que la regla de negocio promete.
             assertThat(retirado.getFechaRetiro())
                     .as("la baja es lógica: queda constancia de cuándo ocurrió")
+                    .isNotNull();
+            assertThat(retirado.getFechaRetiro().toLocalDate())
+                    .as("el retiro se registra con la fecha de hoy")
                     .isEqualTo(LocalDate.now());
+            assertThat(retirado.getFechaRetiro())
+                    .as("y con la hora exacta del hecho, no a medianoche")
+                    .isCloseTo(LocalDateTime.now(), within(1, ChronoUnit.MINUTES));
             verify(eventPublisher).publishEmployeeRetired(retirado);
         }
 
         @Test
         @DisplayName("un empleado ya retirado no se puede retirar de nuevo")
         void empleadoYaRetirado() {
-            LocalDate original = LocalDate.of(2026, 3, 15);
+            LocalDateTime original = LocalDateTime.of(2026, 3, 15, 9, 30, 12);
             Employee yaRetirado = empleado("E001", "juan.perez@empresa.com", "EMP-2026-001", "IT");
             yaRetirado.setStatus(EmployeeStatus.RETIRED);
             yaRetirado.setFechaRetiro(original);

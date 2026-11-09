@@ -9,11 +9,11 @@ const controller = new ProfileController();
 // GET /profiles?estado=RETIRADO  → Solo retirados
 router.get('/', controller.getAll);
 router.post('/', controller.create);
-router.put('/:employeeId', controller.update);
-router.patch('/:employeeId', controller.update);
-router.delete('/:employeeId', controller.retire);
+router.put('/:empleadoId', controller.update);
+router.patch('/:empleadoId', controller.update);
+router.delete('/:empleadoId', controller.retire);
 
-// GET /profiles/:employeeId
-router.get('/:employeeId', controller.getByEmployeeId);
+// GET /profiles/:empleadoId
+router.get('/:empleadoId', controller.getByEmpleadoId);
 
 export default router;

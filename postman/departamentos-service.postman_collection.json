@@ -6,6 +6,51 @@
   },
   "item": [
     {
+      "name": "0. Login ADMIN (obligatorio)",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "url": {
+          "raw": "{{gatewayBaseUrl}}/auth/login",
+          "host": [
+            "{{gatewayBaseUrl}}"
+          ],
+          "path": [
+            "auth",
+            "login"
+          ]
+        },
+        "description": "Desde el Reto 5 el API Gateway valida un JWT en toda ruta que no sea publica, asi que esta coleccion necesita un token. Sin este primer request, las demas peticiones responden 401 y todas las aserciones fallan.",
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"usuario\": \"{{adminUsuario}}\",\n  \"password\": \"{{adminPassword}}\"\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('Status 200', () => pm.response.to.have.status(200));",
+              "pm.test('Token de ADMIN', () => pm.expect(pm.response.json().rol).to.eql('ADMIN'));",
+              "pm.collectionVariables.set('adminToken', pm.response.json().token);"
+            ]
+          }
+        }
+      ]
+    },
+    {
       "name": "1. POST /departamentos exitoso",
       "event": [
         {
@@ -27,16 +72,33 @@
       ],
       "request": {
         "method": "POST",
-        "header": [{ "key": "Content-Type", "value": "application/json" }],
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          },
+          {
+            "key": "Authorization",
+            "value": "Bearer {{adminToken}}"
+          }
+        ],
         "body": {
           "mode": "raw",
           "raw": "{\n  \"id\": \"RRHH\",\n  \"nombre\": \"Recursos Humanos\",\n  \"descripcion\": \"Gestión del talento y nómina\"\n}",
-          "options": { "raw": { "language": "json" } }
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
         },
         "url": {
           "raw": "{{departamentosBaseUrl}}/departamentos",
-          "host": ["{{departamentosBaseUrl}}"],
-          "path": ["departamentos"]
+          "host": [
+            "{{departamentosBaseUrl}}"
+          ],
+          "path": [
+            "departamentos"
+          ]
         },
         "description": "Modelo: {id, nombre, descripcion}. El id es opcional: si se omite, el servicio genera uno secuencial (D001, D002...)."
       },
@@ -66,16 +128,33 @@
       ],
       "request": {
         "method": "POST",
-        "header": [{ "key": "Content-Type", "value": "application/json" }],
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          },
+          {
+            "key": "Authorization",
+            "value": "Bearer {{adminToken}}"
+          }
+        ],
         "body": {
           "mode": "raw",
           "raw": "{\n  \"nombre\": \"\"\n}",
-          "options": { "raw": { "language": "json" } }
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
         },
         "url": {
           "raw": "{{departamentosBaseUrl}}/departamentos",
-          "host": ["{{departamentosBaseUrl}}"],
-          "path": ["departamentos"]
+          "host": [
+            "{{departamentosBaseUrl}}"
+          ],
+          "path": [
+            "departamentos"
+          ]
         },
         "description": "nombre vacío y descripcion ausente. Antes de la corrección este caso devolvía 500."
       },
@@ -101,11 +180,21 @@
       ],
       "request": {
         "method": "GET",
-        "header": [],
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer {{adminToken}}"
+          }
+        ],
         "url": {
           "raw": "{{departamentosBaseUrl}}/departamentos/RRHH",
-          "host": ["{{departamentosBaseUrl}}"],
-          "path": ["departamentos", "RRHH"]
+          "host": [
+            "{{departamentosBaseUrl}}"
+          ],
+          "path": [
+            "departamentos",
+            "RRHH"
+          ]
         }
       },
       "response": []
@@ -130,11 +219,21 @@
       ],
       "request": {
         "method": "GET",
-        "header": [],
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer {{adminToken}}"
+          }
+        ],
         "url": {
           "raw": "{{departamentosBaseUrl}}/departamentos/NOPE",
-          "host": ["{{departamentosBaseUrl}}"],
-          "path": ["departamentos", "NOPE"]
+          "host": [
+            "{{departamentosBaseUrl}}"
+          ],
+          "path": [
+            "departamentos",
+            "NOPE"
+          ]
         }
       },
       "response": []
@@ -159,11 +258,20 @@
       ],
       "request": {
         "method": "GET",
-        "header": [],
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer {{adminToken}}"
+          }
+        ],
         "url": {
           "raw": "{{departamentosBaseUrl}}/departamentos",
-          "host": ["{{departamentosBaseUrl}}"],
-          "path": ["departamentos"]
+          "host": [
+            "{{departamentosBaseUrl}}"
+          ],
+          "path": [
+            "departamentos"
+          ]
         }
       },
       "response": []
@@ -186,16 +294,33 @@
       ],
       "request": {
         "method": "POST",
-        "header": [{ "key": "Content-Type", "value": "application/json" }],
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          },
+          {
+            "key": "Authorization",
+            "value": "Bearer {{adminToken}}"
+          }
+        ],
         "body": {
           "mode": "raw",
           "raw": "{\n  \"id\": \"RRHH\",\n  \"nombre\": \"Recursos Humanos\",\n  \"descripcion\": \"Duplicado\"\n}",
-          "options": { "raw": { "language": "json" } }
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
         },
         "url": {
           "raw": "{{departamentosBaseUrl}}/departamentos",
-          "host": ["{{departamentosBaseUrl}}"],
-          "path": ["departamentos"]
+          "host": [
+            "{{departamentosBaseUrl}}"
+          ],
+          "path": [
+            "departamentos"
+          ]
         }
       },
       "response": []
@@ -220,16 +345,34 @@
       ],
       "request": {
         "method": "PUT",
-        "header": [{ "key": "Content-Type", "value": "application/json" }],
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          },
+          {
+            "key": "Authorization",
+            "value": "Bearer {{adminToken}}"
+          }
+        ],
         "body": {
           "mode": "raw",
           "raw": "{\n  \"nombre\": \"Gestión Humana\",\n  \"descripcion\": \"Gestión integral del talento\"\n}",
-          "options": { "raw": { "language": "json" } }
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
         },
         "url": {
           "raw": "{{departamentosBaseUrl}}/departamentos/RRHH",
-          "host": ["{{departamentosBaseUrl}}"],
-          "path": ["departamentos", "RRHH"]
+          "host": [
+            "{{departamentosBaseUrl}}"
+          ],
+          "path": [
+            "departamentos",
+            "RRHH"
+          ]
         }
       },
       "response": []
@@ -254,16 +397,34 @@
       ],
       "request": {
         "method": "PATCH",
-        "header": [{ "key": "Content-Type", "value": "application/json" }],
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          },
+          {
+            "key": "Authorization",
+            "value": "Bearer {{adminToken}}"
+          }
+        ],
         "body": {
           "mode": "raw",
           "raw": "{\n  \"descripcion\": \"Gestión humana y nómina\"\n}",
-          "options": { "raw": { "language": "json" } }
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
         },
         "url": {
           "raw": "{{departamentosBaseUrl}}/departamentos/RRHH",
-          "host": ["{{departamentosBaseUrl}}"],
-          "path": ["departamentos", "RRHH"]
+          "host": [
+            "{{departamentosBaseUrl}}"
+          ],
+          "path": [
+            "departamentos",
+            "RRHH"
+          ]
         }
       },
       "response": []
@@ -283,15 +444,115 @@
       ],
       "request": {
         "method": "DELETE",
-        "header": [],
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer {{adminToken}}"
+          }
+        ],
         "url": {
           "raw": "{{departamentosBaseUrl}}/departamentos/RRHH",
-          "host": ["{{departamentosBaseUrl}}"],
-          "path": ["departamentos", "RRHH"]
+          "host": [
+            "{{departamentosBaseUrl}}"
+          ],
+          "path": [
+            "departamentos",
+            "RRHH"
+          ]
         },
         "description": "Devuelve 409 si RRHH tiene empleados asociados; solo elimina si no hay relaciones."
       },
       "response": []
+    },
+    {
+      "name": "10. El contrato OpenAPI lo genera FastAPI",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "{{gatewayBaseUrl}}/v3/api-docs/departamentos",
+          "host": [
+            "{{gatewayBaseUrl}}"
+          ],
+          "path": [
+            "v3",
+            "api-docs",
+            "departamentos"
+          ]
+        },
+        "description": "El servicio se reconstruyo en Python con FastAPI, que genera el contrato OpenAPI a partir de los mismos modelos Pydantic que validan la peticion: no hay un archivo que mantener a mano y que se desincronice del codigo, que es lo que la auditoria encontro en la version anterior.\n\nEl gateway agrega este contrato en su Swagger UI (/swagger-ui.html). La Swagger UI propia del servicio esta en /docs, pero solo es alcanzable dentro de la red de Docker porque el servicio usa expose y no ports:\n\n    docker compose exec departments-service curl -s localhost:8081/docs"
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('Status 200', () => pm.response.to.have.status(200));",
+              "",
+              "const contrato = pm.response.json();",
+              "",
+              "pm.test('El contrato lo genera FastAPI, no un archivo escrito a mano', () => {",
+              "    pm.expect(contrato.info.title).to.eql('departments-service');",
+              "    pm.expect(contrato.openapi).to.match(/^3\\./);",
+              "});",
+              "",
+              "pm.test('Describe los cinco verbos del CRUD', () => {",
+              "    pm.expect(Object.keys(contrato.paths['/departamentos'])).to.include.members(['get', 'post']);",
+              "    pm.expect(Object.keys(contrato.paths['/departamentos/{id}']))",
+              "        .to.include.members(['get', 'put', 'patch', 'delete']);",
+              "});",
+              "",
+              "console.log('OpenAPI ' + contrato.openapi + ' | ' + contrato.info.title",
+              "            + ' v' + contrato.info.version);"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "11. No se puede borrar un departamento con empleados (409)",
+      "request": {
+        "method": "DELETE",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer {{adminToken}}"
+          }
+        ],
+        "url": {
+          "raw": "{{gatewayBaseUrl}}/departamentos/IT",
+          "host": [
+            "{{gatewayBaseUrl}}"
+          ],
+          "path": [
+            "departamentos",
+            "IT"
+          ]
+        },
+        "description": "Las bases de datos estan separadas por servicio (ADR-001), asi que no hay una llave foranea que PostgreSQL pueda defender: si se borrara el departamento, los empleados quedarian apuntando a un departamentoId inexistente. Por eso el servicio consulta a employees-service antes de borrar.\n\nSi employees-service no responde, la respuesta es 503 y NO el borrado: ante la duda no se borra, porque un borrado a ciegas no se puede deshacer."
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('Status 409', () => pm.response.to.have.status(409));",
+              "",
+              "pm.test('Explica que el departamento tiene empleados', () => {",
+              "    pm.expect(pm.response.json().message).to.include('tiene empleados asociados');",
+              "});"
+            ]
+          }
+        }
+      ]
+    }
+  ],
+  "variable": [
+    {
+      "key": "adminToken",
+      "value": ""
     }
   ]
 }

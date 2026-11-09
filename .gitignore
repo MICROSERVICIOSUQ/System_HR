@@ -43,9 +43,12 @@ logs/
 .DS_Store
 Thumbs.db
 Desktop.ini
-# Caché de los scripts de CI
+# Python
+.venv/
 **/__pycache__/
-**/*.pyc
+**/*.py[cod]
+.pytest_cache/
+.coverage
 
 # Go
 **/coverage.out

@@ -11,18 +11,59 @@ datasource db {
 model EmployeeProfile {
   /// UUID interno generado por la base de datos
   id             String    @id @default(uuid())
-  /// ID del empleado (clave de negocio, UNIQUE)
-  employeeId     String    @unique
+
+  /// ID del empleado (clave de negocio, UNIQUE).
+  ///
+  /// Se llamaba `employeeId`. El modelo canónico del sistema usa nombres en
+  /// español —empleadoId, departamentoId, fechaIngreso— y este campo era el
+  /// único en inglés, lo que obligaba a traducir en cada frontera. La respuesta
+  /// de la API sigue incluyendo `employeeId` como alias para no romper clientes.
+  empleadoId     String    @unique
+
   nombre         String
   apellido       String
   email          String
   cargo          String
   departamentoId String
   fechaIngreso   DateTime
+
   /// Fecha de retiro; null mientras el empleado está ACTIVO
   fechaRetiro    DateTime?
+
   /// ACTIVO | RETIRADO
   estado         String    @default("ACTIVO")
+
+  // ── Los cinco campos canónicos del perfil ─────────────────────────────────
+  //
+  // Son datos del perfil, no del empleado: employees-service no los conoce ni
+  // los publica en sus eventos. Por eso son opcionales y los rellena el propio
+  // empleado editando su perfil (PUT /perfiles/{id}), que es la operación que
+  // la regla de propiedad del ADR-008 le autoriza sobre su propio recurso.
+
+  /// Teléfono de contacto
+  telefono       String?
+  /// Dirección de residencia
+  direccion      String?
+  /// Ciudad de residencia
+  ciudad         String?
+  /// Texto libre de presentación
+  biografia      String?
+
+  /// Cuándo se creó el perfil en el read model.
+  ///
+  /// Distinta de fechaIngreso, que es cuándo entró el empleado a la empresa.
+  /// Las dos pueden diferir: un perfil se crea al procesar empleado.creado, que
+  /// puede ocurrir meses después del ingreso si el empleado se registró tarde.
+  fechaCreacion  DateTime  @default(now())
+
+  /// Marca de archivado.
+  ///
+  /// Un perfil retirado no se borra —el historial se conserva para auditoría—
+  /// pero sí se archiva, para que las consultas corrientes no lo arrastren. Se
+  /// pone en true al procesar empleado.retirado y permite filtrar con
+  /// ?archivado=false sin tener que conocer la semántica del estado.
+  archivado      Boolean   @default(false)
+
   /// UUID del último evento aplicado (idempotencia)
   lastEventId    String    @unique
   /// Actualizado automáticamente en cada operación

@@ -13,6 +13,7 @@ import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
 
 import java.time.LocalDate;
+import java.time.LocalDateTime;
 
 @Entity
 @Table(name = "employees")
@@ -61,8 +62,14 @@ public class Employee {
     private LocalDate fechaIngreso;
 
     @Column(name = "fecha_retiro")
-    @Schema(description = "Fecha de retiro lógico (formato yyyy-MM-dd). Solo presente cuando estado=RETIRADO.", example = "2026-10-07", nullable = true)
-    private LocalDate fechaRetiro;
+    @Schema(description = "Fecha y hora del retiro lógico (ISO-8601). Solo presente cuando estado=RETIRADO.",
+            example = "2026-10-07T14:32:18.455", nullable = true)
+    // LocalDateTime y no LocalDate: el retiro es un hecho con hora, y esa hora
+    // importa. Dos empleados retirados el mismo día no son indistinguibles —
+    // para una auditoría laboral el orden en que ocurrieron puede ser relevante,
+    // y con precisión de día esa información se perdía. Además alinea el tipo
+    // con profiles-service, que ya almacenaba fechaRetiro como TIMESTAMP(3).
+    private LocalDateTime fechaRetiro;
 
     @Enumerated(EnumType.STRING)
     @Column(nullable = false)
@@ -112,9 +119,9 @@ public class Employee {
     public void setFechaIngreso(LocalDate fechaIngreso) { this.fechaIngreso = fechaIngreso; }
 
     @JsonProperty("fechaRetiro")
-    public LocalDate getFechaRetiro() { return fechaRetiro; }
+    public LocalDateTime getFechaRetiro() { return fechaRetiro; }
     @JsonProperty("fechaRetiro")
-    public void setFechaRetiro(LocalDate fechaRetiro) { this.fechaRetiro = fechaRetiro; }
+    public void setFechaRetiro(LocalDateTime fechaRetiro) { this.fechaRetiro = fechaRetiro; }
 
     @JsonProperty("estado")
     public EmployeeStatus getStatus() { return estado; }
