@@ -28,7 +28,9 @@ spring:
         - id: notificaciones-route
           uri: ${NOTIFICACIONES_URL:http://notifications-service:8082}
           predicates:
-            - Path=/notifications,/notifications/**
+            - Path=/notificaciones/**
+          filters:
+            - StripPrefix=1
         # El alias /perfiles lo sirve el propio profiles-service, igual que
         # vacations-service ya servía /vacaciones. No hace falta reescribir la ruta.
         - id: perfiles-route
@@ -132,3 +134,25 @@ management:
     tracing:
       # Nombre de red de Docker, no localhost.
       endpoint: ${ZIPKIN_ENDPOINT:http://zipkin:9411/api/v2/spans}
+
+resilience4j:
+  circuitbreaker:
+    instances:
+      employeesService:
+        slidingWindowType: COUNT_BASED
+        slidingWindowSize: 10
+        failureRateThreshold: 50
+        minimumNumberOfCalls: 10
+        waitDurationInOpenState: 10s
+      profilesService:
+        slidingWindowType: COUNT_BASED
+        slidingWindowSize: 10
+        failureRateThreshold: 50
+        minimumNumberOfCalls: 10
+        waitDurationInOpenState: 10s
+      vacationsService:
+        slidingWindowType: COUNT_BASED
+        slidingWindowSize: 10
+        failureRateThreshold: 50
+        minimumNumberOfCalls: 10
+        waitDurationInOpenState: 10s

@@ -1,0 +1,82 @@
+pipeline {
+    agent { label 'docker' }
+
+    parameters {
+        string(name: 'BRANCH', defaultValue: 'main', description: 'Rama que se construirá')
+    }
+
+    options {
+        skipDefaultCheckout(true)
+        disableConcurrentBuilds()
+        timeout(time: 30, unit: 'MINUTES')
+    }
+
+    environment {
+        SONAR_PROJECT_KEY = 'api-gateway'
+        SONAR_QUALITY_GATE = 'RRHH-70'
+        IMAGE = "system-hr/api-gateway:${BUILD_NUMBER}"
+    }
+
+    stages {
+        stage('Checkout') {
+            steps {
+                deleteDir()
+                git branch: params.BRANCH, url: env.GIT_URL
+            }
+        }
+
+        stage('Build') {
+            steps {
+                dir('api-gateway') {
+                    sh 'mvn -B clean compile -DskipTests'
+                }
+            }
+        }
+
+        stage('Test+JaCoCo') {
+            steps {
+                dir('api-gateway') {
+                    sh '''
+                        mvn -B \
+                          org.jacoco:jacoco-maven-plugin:prepare-agent \
+                          verify \
+                          org.jacoco:jacoco-maven-plugin:report
+                    '''
+                }
+            }
+            post {
+                always {
+                    junit testResults: 'api-gateway/target/surefire-reports/TEST-*.xml',
+                        allowEmptyResults: false
+                    archiveArtifacts artifacts: 'api-gateway/target/site/jacoco/**',
+                        allowEmptyArchive: false
+                }
+            }
+        }
+
+        stage('Sonar Scan') {
+            steps {
+                dir('api-gateway') {
+                    withSonarQubeEnv('SonarQube') {
+                        sh 'mvn -B sonar:sonar -Dsonar.projectKey=$SONAR_PROJECT_KEY -Dsonar.qualitygate.wait=false'
+                    }
+                }
+            }
+        }
+
+        stage('Quality Gate') {
+            steps {
+                timeout(time: 10, unit: 'MINUTES') {
+                    echo "Validando Quality Gate ${env.SONAR_QUALITY_GATE}"
+                    waitForQualityGate abortPipeline: true
+                }
+            }
+        }
+
+        stage('Docker build') {
+            steps {
+                sh 'docker build --tag "$IMAGE" api-gateway'
+            }
+        }
+    }
+}

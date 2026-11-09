@@ -1,0 +1,104 @@
+pipeline {
+    agent { label 'docker' }
+
+    parameters {
+        string(
+            name: 'BRANCH',
+            defaultValue: 'main',
+            description: 'Rama que se construirá'
+        )
+    }
+
+    options {
+        skipDefaultCheckout(true)
+        disableConcurrentBuilds()
+        timeout(time: 30, unit: 'MINUTES')
+    }
+
+    environment {
+        SONAR_PROJECT_KEY = 'departments-service'
+        SONAR_QUALITY_GATE = 'RRHH-70'
+        IMAGE = "system-hr/departments-service:${BUILD_NUMBER}"
+    }
+
+    stages {
+        stage('Checkout') {
+            steps {
+                deleteDir()
+                git branch: params.BRANCH, url: env.GIT_URL
+            }
+        }
+
+        stage('pip install -r requirements.txt') {
+            steps {
+                script {
+                    docker.image('python:3.12-slim').inside('-u root -v hr-ci-pip:/root/.cache/pip') {
+                        dir('services/departments-service') {
+                            sh '''
+                                python -m pip install --upgrade pip
+                                pip install -r requirements.txt -r requirements-dev.txt
+                            '''
+                        }
+                    }
+                }
+            }
+        }
+
+        stage('pytest con coverage') {
+            steps {
+                script {
+                    docker.image('python:3.12-slim').inside('-u root -v hr-ci-pip:/root/.cache/pip') {
+                        dir('services/departments-service') {
+                            sh '''
+                                pip install -r requirements-dev.txt
+                                pytest \
+                                  --cov=app \
+                                  --cov-report=term-missing \
+                                  --cov-report=xml:coverage.xml \
+                                  --cov-fail-under=70
+                            '''
+                        }
+                    }
+                }
+            }
+            post {
+                always {
+                    archiveArtifacts artifacts:
+                        'services/departments-service/coverage.xml',
+                        allowEmptyArchive: false
+                }
+            }
+        }
+
+        stage('Sonar Scan') {
+            steps {
+                script {
+                    withSonarQubeEnv('SonarQube') {
+                        docker.image('sonarsource/sonar-scanner-cli:11').inside(
+                            "-u root --network ${env.CI_NETWORK ?: 'system_hr_ci'}"
+                        ) {
+                            dir('services/departments-service') {
+                                sh 'sonar-scanner -Dsonar.projectKey=$SONAR_PROJECT_KEY'
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        stage('Quality Gate') {
+            steps {
+                timeout(time: 10, unit: 'MINUTES') {
+                    echo "Validando Quality Gate ${env.SONAR_QUALITY_GATE}"
+                    waitForQualityGate abortPipeline: true
+                }
+            }
+        }
+
+        stage('Docker build') {
+            steps {
+                sh 'docker build --tag "$IMAGE" services/departments-service'
+            }
+        }
+    }
+}

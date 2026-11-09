@@ -34,7 +34,8 @@ services:
       auth-service:
         condition: service_healthy
     networks:
-      - microservices-network
+      - frontend-gateway-net
+      - microservices-net
     restart: unless-stopped
 
   auth-service:
@@ -85,7 +86,8 @@ services:
       start_period: 120s
       retries: 10
     networks:
-      - microservices-network
+      - microservices-net
+      - data-broker-net
 
   departments-service:
     build:
@@ -112,7 +114,8 @@ services:
       start_period: 20s
       retries: 3
     networks:
-      - microservices-network
+      - microservices-net
+      - data-broker-net
 
   employees-service:
     build:
@@ -153,7 +156,8 @@ services:
       start_period: 120s
       retries: 10
     networks:
-      - microservices-network
+      - microservices-net
+      - data-broker-net
 
   notifications-service:
     build:
@@ -182,7 +186,8 @@ services:
       start_period: 20s
       retries: 3
     networks:
-      - microservices-network
+      - microservices-net
+      - data-broker-net
 
   profiles-service:
     build:
@@ -211,7 +216,8 @@ services:
       start_period: 20s
       retries: 3
     networks:
-      - microservices-network
+      - microservices-net
+      - data-broker-net
 
   vacations-service:
     build:
@@ -245,7 +251,8 @@ services:
       start_period: 20s
       retries: 3
     networks:
-      - microservices-network
+      - microservices-net
+      - data-broker-net
 
   bdd-tests:
     build:
@@ -275,25 +282,25 @@ services:
       notifications-service:
         condition: service_healthy
     networks:
-      - microservices-network
+      - microservices-net
 
   jenkins:
-    build: ./jenkins
+    image: jenkins/jenkins:lts-jdk21
     ports:
-      - "127.0.0.1:${JENKINS_PORT:-9091}:8080"
+      - "8081:8080"
     environment:
       JAVA_OPTS: -Djenkins.install.runSetupWizard=false
       CASC_JENKINS_CONFIG: /usr/share/jenkins/ref/casc.yaml
       SECRETS: /run/sonar
       JENKINS_ADMIN_USER: ${JENKINS_ADMIN_USER:-admin}
-      JENKINS_ADMIN_PASSWORD: ${JENKINS_ADMIN_PASSWORD:?Ejecute python3 ci/preparar-entorno.py}
+      JENKINS_ADMIN_PASSWORD: ${JENKINS_ADMIN_PASSWORD:?Ejecute scripts/setup-secrets.sh}
       JENKINS_URL: ${JENKINS_URL:-http://localhost:9091/}
       JENKINS_RESOURCE_URL: ${JENKINS_RESOURCE_URL:-http://127.0.0.1:9091/}
       CI_NETWORK: ${CI_NETWORK:-system_hr_ci}
       CI_REPOSITORY_URL: ${CI_REPOSITORY_URL:-https://github.com/MICROSERVICIOSUQ/System_HR.git}
       CI_REPOSITORY_BRANCH: ${CI_REPOSITORY_BRANCH:-valentina}
     volumes:
-      - jenkins_data:/var/jenkins_home
+      - jenkins_home:/var/jenkins_home
       - sonar_credentials:/run/sonar:ro
       - /var/run/docker.sock:/var/run/docker.sock
     depends_on:
@@ -301,17 +308,22 @@ services:
         condition: service_completed_successfully
     networks:
       - ci-network
-      - microservices-network
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f --silent http://localhost:8080/login"]
+      interval: 30s
+      timeout: 10s
+      start_period: 90s
+      retries: 5
     restart: unless-stopped
 
   sonarqube:
-    image: sonarqube:lts-community
+    image: sonarqube:10-community
     ports:
-      - "127.0.0.1:${SONAR_PORT:-9000}:9000"
+      - "9000:9000"
     environment:
       SONAR_JDBC_URL: jdbc:postgresql://sonar-db:5432/sonar
       SONAR_JDBC_USERNAME: sonar
-      SONAR_JDBC_PASSWORD: ${SONAR_DB_PASSWORD:?Ejecute python3 ci/preparar-entorno.py}
+      SONAR_JDBC_PASSWORD: ${SONAR_DB_PASSWORD:?Ejecute scripts/setup-secrets.sh}
     volumes:
       - sonarqube_data:/opt/sonarqube/data
       - sonarqube_logs:/opt/sonarqube/logs
@@ -324,16 +336,23 @@ services:
     depends_on:
       sonar-db:
         condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f --silent http://localhost:9000/api/system/status"]
+      interval: 30s
+      timeout: 10s
+      start_period: 120s
+      retries: 10
     networks:
       - ci-network
+      - data-broker-net
     restart: unless-stopped
 
   sonar-db:
-    image: postgres:16-alpine
+    image: postgres:16
     environment:
       POSTGRES_DB: sonar
       POSTGRES_USER: sonar
-      POSTGRES_PASSWORD: ${SONAR_DB_PASSWORD:?Ejecute python3 ci/preparar-entorno.py}
+      POSTGRES_PASSWORD: ${SONAR_DB_PASSWORD:?Ejecute scripts/setup-secrets.sh}
     volumes:
       - sonar_db_data:/var/lib/postgresql/data
     healthcheck:
@@ -342,7 +361,7 @@ services:
       timeout: 5s
       retries: 20
     networks:
-      - ci-network
+      - data-broker-net
     restart: unless-stopped
 
   sonar-setup:
@@ -350,7 +369,7 @@ services:
       context: .
       dockerfile: ci/Dockerfile.sonar-setup
     environment:
-      SONAR_ADMIN_PASSWORD: ${SONAR_ADMIN_PASSWORD:?Ejecute python3 ci/preparar-entorno.py}
+      SONAR_ADMIN_PASSWORD: ${SONAR_ADMIN_PASSWORD:?Ejecute scripts/setup-secrets.sh}
     volumes:
       - sonar_credentials:/run/sonar
     depends_on:
@@ -397,7 +416,7 @@ services:
       start_period: 30s
       retries: 5
     networks:
-      - microservices-network
+      - microservices-net
 
   loki:
     image: grafana/loki:3.3.2
@@ -417,7 +436,7 @@ services:
       start_period: 60s
       retries: 10
     networks:
-      - microservices-network
+      - microservices-net
 
   promtail:
     image: grafana/promtail:3.3.2
@@ -433,7 +452,7 @@ services:
       loki:
         condition: service_healthy
     networks:
-      - microservices-network
+      - microservices-net
 
   zipkin:
     image: openzipkin/zipkin:3.4
@@ -449,7 +468,7 @@ services:
       JAVA_OPTS: -Xms256m -Xmx512m
     restart: unless-stopped
     networks:
-      - microservices-network
+      - microservices-net
 
   grafana:
     image: grafana/grafana:11.5.1
@@ -483,16 +502,21 @@ services:
       prometheus:
         condition: service_healthy
     networks:
-      - microservices-network
+      - microservices-net
 
 networks:
-  microservices-network:
-    name: sistema_rrhh_network
+  frontend-gateway-net:
+    name: system_hr_frontend_gateway
+  microservices-net:
+    name: system_hr_microservices
+  data-broker-net:
+    name: system_hr_data_broker
+    internal: true
   ci-network:
     name: ${CI_NETWORK:-system_hr_ci}
 
 volumes:
-  jenkins_data:
+  jenkins_home:
   sonar_credentials:
   sonarqube_data:
   sonarqube_logs:
