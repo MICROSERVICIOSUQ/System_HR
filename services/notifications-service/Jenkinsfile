@@ -1,0 +1,97 @@
+pipeline {
+    agent { label 'docker' }
+
+    parameters {
+        string(
+            name: 'BRANCH',
+            defaultValue: 'main',
+            description: 'Rama que se construirá'
+        )
+    }
+
+    options {
+        skipDefaultCheckout(true)
+        disableConcurrentBuilds()
+        timeout(time: 30, unit: 'MINUTES')
+    }
+
+    environment {
+        SONAR_PROJECT_KEY = 'system-hr-notifications'
+        SONAR_QUALITY_GATE = 'RRHH-70'
+        IMAGE = "system-hr/notifications-service:${BUILD_NUMBER}"
+    }
+
+    stages {
+        stage('Checkout') {
+            steps {
+                deleteDir()
+                git branch: params.BRANCH, url: env.GIT_URL
+            }
+        }
+
+        stage('go test ./... -coverprofile=coverage.out') {
+            steps {
+                script {
+                    docker.image('golang:1.25-alpine').inside(
+                        '-v hr-ci-go:/go/pkg/mod'
+                    ) {
+                        dir('services/notifications-service') {
+                            sh '''
+                                go mod download
+                                go test ./... -coverprofile=coverage.out
+
+                                coverage=$(go tool cover -func=coverage.out \
+                                    | awk '/^total:/ {gsub(/%/, "", $3); print $3}')
+                                awk -v coverage="$coverage" \
+                                    'BEGIN {
+                                        if (coverage < 70) {
+                                            printf "Cobertura %.2f%% inferior al 70%%\\n", coverage
+                                            exit 1
+                                        }
+                                    }'
+                            '''
+                        }
+                    }
+                }
+            }
+            post {
+                always {
+                    archiveArtifacts artifacts:
+                        'services/notifications-service/coverage.out',
+                        allowEmptyArchive: false
+                }
+            }
+        }
+
+        stage('Sonar Scan') {
+            steps {
+                script {
+                    withSonarQubeEnv('SonarQube') {
+                        docker.image('sonarsource/sonar-scanner-cli:11').inside(
+                            "-u root --network ${env.CI_NETWORK ?: 'system_hr_ci'}"
+                        ) {
+                            dir('services/notifications-service') {
+                                sh 'sonar-scanner -Dsonar.projectKey=$SONAR_PROJECT_KEY'
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        stage('Quality Gate') {
+            steps {
+                timeout(time: 10, unit: 'MINUTES') {
+                    echo "Validando Quality Gate ${env.SONAR_QUALITY_GATE}"
+                    waitForQualityGate abortPipeline: true
+                }
+            }
+        }
+
+        stage('Docker build') {
+            steps {
+                sh 'docker build --tag "$IMAGE" services/notifications-service'
+            }
+        }
+    }
+}

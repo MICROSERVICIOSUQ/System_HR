@@ -15,7 +15,7 @@ services:
       retries: 10
       start_period: 120s
     networks:
-      - microservices-network
+      - data-broker-net
 
   database-empleados:
     image: postgres:16-alpine
@@ -33,7 +33,7 @@ services:
       retries: 10
       start_period: 10s
     networks:
-      - microservices-network
+      - data-broker-net
 
   database-perfiles:
     image: postgres:16-alpine
@@ -51,7 +51,7 @@ services:
       retries: 10
       start_period: 10s
     networks:
-      - microservices-network
+      - data-broker-net
 
   database-notificaciones:
     image: postgres:16-alpine
@@ -69,7 +69,7 @@ services:
       retries: 10
       start_period: 10s
     networks:
-      - microservices-network
+      - data-broker-net
 
   db-vacaciones:
     image: postgres:16-alpine
@@ -89,7 +89,7 @@ services:
       retries: 10
       start_period: 10s
     networks:
-      - microservices-network
+      - data-broker-net
 
   db-auth:
     image: postgres:16-alpine
@@ -109,7 +109,7 @@ services:
       retries: 10
       start_period: 10s
     networks:
-      - microservices-network
+      - data-broker-net
 
   rabbitmq:
     image: rabbitmq:3-management
@@ -142,11 +142,12 @@ services:
       # listo. Los fallos dentro del start_period no cuentan como caída.
       start_period: 120s
     networks:
-      - microservices-network
+      - data-broker-net
 
 networks:
-  microservices-network:
-    name: sistema_rrhh_network
+  data-broker-net:
+    name: system_hr_data_broker
+    internal: true
 
 volumes:
   departamentos_data:

@@ -1,0 +1,101 @@
+pipeline {
+    agent { label 'docker' }
+
+    parameters {
+        string(
+            name: 'BRANCH',
+            defaultValue: 'main',
+            description: 'Rama que se construirá'
+        )
+    }
+
+    options {
+        skipDefaultCheckout(true)
+        disableConcurrentBuilds()
+        timeout(time: 30, unit: 'MINUTES')
+    }
+
+    environment {
+        SONAR_PROJECT_KEY = 'profiles-service'
+        SONAR_QUALITY_GATE = 'RRHH-70'
+        IMAGE = "system-hr/profiles-service:${BUILD_NUMBER}"
+    }
+
+    stages {
+        stage('Checkout') {
+            steps {
+                deleteDir()
+                git branch: params.BRANCH, url: env.GIT_URL
+            }
+        }
+
+        stage('npm ci') {
+            steps {
+                script {
+                    docker.image('node:22-bookworm-slim').inside(
+                        '-u root -v hr-ci-npm:/root/.npm'
+                    ) {
+                        dir('services/profiles-service') {
+                            sh 'npm ci'
+                        }
+                    }
+                }
+            }
+        }
+
+        stage('npm test -- --coverage (LCOV)') {
+            steps {
+                script {
+                    docker.image('node:22-bookworm-slim').inside(
+                        '-u root -v hr-ci-npm:/root/.npm'
+                    ) {
+                        dir('services/profiles-service') {
+                            sh '''
+                                npm test -- --coverage
+                                test -f coverage/lcov.info
+                            '''
+                        }
+                    }
+                }
+            }
+            post {
+                always {
+                    archiveArtifacts artifacts:
+                        'services/profiles-service/coverage/lcov.info',
+                        allowEmptyArchive: false
+                }
+            }
+        }
+
+        stage('Sonar Scan') {
+            steps {
+                script {
+                    withSonarQubeEnv('SonarQube') {
+                        docker.image('sonarsource/sonar-scanner-cli:11').inside(
+                            "-u root --network ${env.CI_NETWORK ?: 'system_hr_ci'}"
+                        ) {
+                            dir('services/profiles-service') {
+                                sh 'sonar-scanner -Dsonar.projectKey=$SONAR_PROJECT_KEY'
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        stage('Quality Gate') {
+            steps {
+                timeout(time: 10, unit: 'MINUTES') {
+                    echo "Validando Quality Gate ${env.SONAR_QUALITY_GATE}"
+                    waitForQualityGate abortPipeline: true
+                }
+            }
+        }
+
+        stage('Docker build') {
+            steps {
+                sh 'docker build --tag "$IMAGE" services/profiles-service'
+            }
+        }
+    }
+}
