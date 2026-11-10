@@ -1,0 +1,4057 @@
+{
+  "info": {
+    "name": "System_HR — Flujo completo",
+    "description": "Recorrido completo del sistema de recursos humanos, en el orden en el que\nocurren las cosas: del catálogo de departamentos a la baja del empleado.\n\n**Cómo ejecutarla.** Selecciona el entorno `system-hr-flujo-completo` y usa el\nCollection Runner con las carpetas en orden. Las peticiones comparten estado\n—tokens, identificadores, el período de vacaciones— así que no están pensadas\npara ejecutarse aisladas.\n\n**Se puede repetir.** Cada ejecución genera sus propios identificadores y\ncorreos a partir del reloj, de modo que no choca con los datos que dejó la\nanterior.\n\n**Espera los efectos asíncronos.** El alta de un empleado desencadena una cadena\npor RabbitMQ: la cuenta, el perfil, el saldo de vacaciones y el correo llegan\ndespués de la respuesta HTTP. Donde eso importa, la petición lleva un script\nprevio que consulta hasta que la condición se cumple, con un tope de 30 segundos.\nNo hay pausas fijas: una pausa fija o sobra o no alcanza.\n\n**Todo entra por el gateway.** Los servicios de negocio no publican puertos al\nhost, así que `{{gatewayBaseUrl}}` es la única dirección que hace falta.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "item": [
+    {
+      "name": "00 Preparación",
+      "description": "Autenticación del administrador y datos propios de esta ejecución. Todo lo demás depende de estos dos pasos.",
+      "item": [
+        {
+          "name": "00.1 Iniciar sesión como administrador y guardar su token",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Responde 200 con un Access JWT', () => {",
+                  "    pm.response.to.have.status(200);",
+                  "    const b = pm.response.json();",
+                  "    pm.expect(b.tipo).to.eql('Bearer');",
+                  "    pm.expect(b.rol).to.eql('ADMIN');",
+                  "    pm.expect(b.token.split('.')).to.have.lengthOf(3);",
+                  "});",
+                  "",
+                  "const cuerpo = pm.response.json();",
+                  "pm.collectionVariables.set('tokenAdmin', cuerpo.token);",
+                  "",
+                  "// El payload de un JWT es Base64url, no va cifrado: se puede leer.",
+                  "const claims = JSON.parse(atob(cuerpo.token.split('.')[1].replace(/-/g, '+').replace(/_/g, '/')));",
+                  "pm.test('El token declara el rol y el sujeto, y caduca', () => {",
+                  "    pm.expect(claims.role).to.eql('ADMIN');",
+                  "    pm.expect(claims.sub).to.eql(cuerpo.empleadoId);",
+                  "    pm.expect(claims.exp).to.be.a('number');",
+                  "});",
+                  "",
+                  "// ── Identificadores únicos de esta ejecución ───────────────────────────────",
+                  "const sufijo = String(Date.now()).slice(-9);",
+                  "pm.collectionVariables.set('sufijo', sufijo);",
+                  "pm.collectionVariables.set('departamentoId', 'DF' + sufijo.slice(-4));",
+                  "pm.collectionVariables.set('empleadoId', 'EF' + sufijo.slice(-5));",
+                  "pm.collectionVariables.set('empleadoEmail', 'flujo.' + sufijo + '@empresa.com');",
+                  "pm.collectionVariables.set('empleadoNumero', 'EMP-F-' + sufijo);",
+                  "pm.collectionVariables.set('companeroId', 'EC' + sufijo.slice(-5));",
+                  "pm.collectionVariables.set('companeroEmail', 'companero.' + sufijo + '@empresa.com');",
+                  "pm.collectionVariables.set('companeroNumero', 'EMP-C-' + sufijo);",
+                  "console.log('Datos de esta ejecución: departamento ' + pm.collectionVariables.get('departamentoId')",
+                  "            + ', empleado ' + pm.collectionVariables.get('empleadoId'));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"usuario\": \"{{adminUsuario}}\",\n  \"password\": \"{{adminPassword}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{gatewayBaseUrl}}/auth/login",
+              "host": [
+                "{{gatewayBaseUrl}}"
+              ],
+              "path": [
+                "auth",
+                "login"
+              ]
+            },
+            "description": "Único endpoint público que entrega un Access JWT. El administrador semilla lo crea auth-service al arrancar. Aquí se generan además los identificadores de esta ejecución, para que la colección pueda repetirse sobre la misma base de datos."
+          }
+        },
+        {
+          "name": "00.2 Rechazar unas credenciales incorrectas",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Responde 401 sin revelar el motivo exacto', () => {",
+                  "    pm.response.to.have.status(401);",
+                  "    pm.expect(pm.response.json().message).to.include('Credenciales');",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"usuario\": \"{{adminUsuario}}\",\n  \"password\": \"esta-no-es\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{gatewayBaseUrl}}/auth/login",
+              "host": [
+                "{{gatewayBaseUrl}}"
+              ],
+              "path": [
+                "auth",
+                "login"
+              ]
+            },
+            "description": "La contraparte del paso anterior: una contraseña equivocada no distingue entre \"no existe\" y \"no coincide\", para no revelar qué correos están registrados."
+          }
+        }
+      ]
+    },
+    {
+      "name": "01 Catálogo de departamentos",
+      "description": "CRUD completo del catálogo organizacional, en Python con FastAPI. Es la fuente de verdad que employees-service consulta antes de dar de alta a cualquier empleado.",
+      "item": [
+        {
+          "name": "01.1 Crear un departamento",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Responde 201 con el departamento creado', () => {",
+                  "    pm.response.to.have.status(201);",
+                  "    const d = pm.response.json();",
+                  "    pm.expect(d.id).to.eql(pm.collectionVariables.get('departamentoId'));",
+                  "    pm.expect(d.nombre).to.include('Ingeniería');",
+                  "});",
+                  "",
+                  "pm.test('Las fechas salen en ISO-8601 con sufijo Z', () => {",
+                  "    const d = pm.response.json();",
+                  "    pm.expect(d.createdAt).to.match(/Z$/);",
+                  "    pm.expect(d.updatedAt).to.match(/Z$/);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"id\": \"{{departamentoId}}\",\n  \"nombre\": \"Ingeniería {{sufijo}}\",\n  \"descripcion\": \"Departamento creado por la colección de flujo completo\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{gatewayBaseUrl}}/departamentos",
+              "host": [
+                "{{gatewayBaseUrl}}"
+              ],
+              "path": [
+                "departamentos"
+              ]
+            },
+            "description": "El identificador se puede enviar o dejar que lo genere la secuencia de PostgreSQL. Aquí se envía para poder referenciarlo después."
+          }
+        },
+        {
+          "name": "01.2 Rechazar un departamento con el mismo identificador",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Responde 409 por conflicto', () => pm.response.to.have.status(409));",
+                  "pm.test('El mensaje explica que el departamento ya existe', () => {",
+                  "    pm.expect(pm.response.json().message).to.include('Ya existe');",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"id\": \"{{departamentoId}}\",\n  \"nombre\": \"Duplicado\",\n  \"descripcion\": \"Intento de duplicar el identificador\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{gatewayBaseUrl}}/departamentos",
+              "host": [
+                "{{gatewayBaseUrl}}"
+              ],
+              "path": [
+                "departamentos"
+              ]
+            },
+            "description": "La unicidad se comprueba en dos capas: una consulta previa y la restricción UNIQUE de la base de datos. El cuerpo va completo a propósito: con un campo obligatorio ausente respondería 400 por la validación y el conflicto nunca se llegaría a comprobar."
+          }
+        },
+        {
+          "name": "01.3 Rechazar un departamento sin nombre",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Responde 400 con el detalle del campo', () => {",
+                  "    pm.response.to.have.status(400);",
+                  "    const b = pm.response.json();",
+                  "    pm.expect(b.status).to.eql('error');",
+                  "    pm.expect(b.errors[0].field).to.eql('nombre');",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"descripcion\": \"Sin nombre\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{gatewayBaseUrl}}/departamentos",
+              "host": [
+                "{{gatewayBaseUrl}}"
+              ],
+              "path": [
+                "departamentos"
+              ]
+            },
+            "description": "La validación la genera el propio modelo Pydantic, el mismo del que sale el contrato OpenAPI. Responde 400, no el 422 de FastAPI, para no cambiar el contrato que ya usaban los clientes."
+          }
+        },
+        {
+          "name": "01.4 Consultar un departamento por su identificador",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Responde 200 con el departamento', () => {",
+                  "    pm.response.to.have.status(200);",
+                  "    pm.expect(pm.response.json().id).to.eql(pm.collectionVariables.get('departamentoId'));",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{gatewayBaseUrl}}/departamentos/{{departamentoId}}",
+              "host": [
+                "{{gatewayBaseUrl}}"
+              ],
+              "path": [
+                "departamentos",
+                "{{departamentoId}}"
+              ]
+            },
+            "description": "Lectura directa del catálogo."
+          }
+        },
+        {
+          "name": "01.5 Consultar un departamento inexistente",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Responde 404 con un mensaje explícito', () => {",
+                  "    pm.response.to.have.status(404);",
+                  "    pm.expect(pm.response.json().message).to.include('no existe');",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{gatewayBaseUrl}}/departamentos/NO-EXISTE",
+              "host": [
+                "{{gatewayBaseUrl}}"
+              ],
+              "path": [
+                "departamentos",
+                "NO-EXISTE"
+              ]
+            },
+            "description": "Un 404 aquí es información, no un fallo: employees-service lo usa para distinguir \"el departamento no existe\" de \"no pude preguntar\"."
+          }
+        },
+        {
+          "name": "01.6 Listar todos los departamentos",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Responde 200 con un array', () => {",
+                  "    pm.response.to.have.status(200);",
+                  "    pm.expect(pm.response.json()).to.be.an('array');",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{gatewayBaseUrl}}/departamentos",
+              "host": [
+                "{{gatewayBaseUrl}}"
+              ],
+              "path": [
+                "departamentos"
+              ]
+            },
+            "description": "Sin parámetros devuelve un array. La forma importa: employees-service comprueba la longitud de esta lista para saber si un departamento tiene empleados."
+          }
+        },
+        {
+          "name": "01.7 Listar departamentos paginados y ordenados por nombre",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Responde 200 con data y meta', () => {",
+                  "    pm.response.to.have.status(200);",
+                  "    const b = pm.response.json();",
+                  "    pm.expect(b.data).to.be.an('array');",
+                  "    pm.expect(b.meta).to.have.all.keys('total', 'page', 'limit', 'totalPages');",
+                  "    pm.expect(b.data.length).to.be.at.most(5);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{gatewayBaseUrl}}/departamentos?page=1&limit=5&sortBy=nombre&order=ASC",
+              "host": [
+                "{{gatewayBaseUrl}}"
+              ],
+              "path": [
+                "departamentos?page=1&limit=5&sortBy=nombre&order=ASC"
+              ]
+            },
+            "description": "Con cualquier parámetro de paginación la respuesta cambia de forma: pasa a ser un objeto con data y meta."
+          }
+        },
+        {
+          "name": "01.8 Actualizar el nombre y la descripción del departamento",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Responde 200 con el cambio aplicado', () => {",
+                  "    pm.response.to.have.status(200);",
+                  "    pm.expect(pm.response.json().nombre).to.include('Plataforma');",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"nombre\": \"Ingeniería y Plataforma {{sufijo}}\",\n  \"descripcion\": \"Nombre actualizado por la colección\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{gatewayBaseUrl}}/departamentos/{{departamentoId}}",
+              "host": [
+                "{{gatewayBaseUrl}}"
+              ],
+              "path": [
+                "departamentos",
+                "{{departamentoId}}"
+              ]
+            },
+            "description": "PUT y PATCH se comportan igual: aplican solo los campos enviados."
+          }
+        }
+      ]
+    },
+    {
+      "name": "02 Alta de empleados",
+      "description": "El registro de un empleado valida su departamento por HTTP contra el catálogo y publica \"empleado.creado\". Ese evento desencadena toda la cadena que se comprueba en las carpetas siguientes.",
+      "item": [
+        {
+          "name": "02.1 Registrar un empleado",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Responde 201 con el empleado activo', () => {",
+                  "    pm.response.to.have.status(201);",
+                  "    const e = pm.response.json();",
+                  "    pm.expect(e.id).to.eql(pm.collectionVariables.get('empleadoId'));",
+                  "    pm.expect(e.estado).to.eql('ACTIVO');",
+                  "    pm.expect(e.fechaRetiro).to.be.null;",
+                  "});",
+                  "",
+                  "pm.test('Devuelve los campos del modelo canónico', () => {",
+                  "    const e = pm.response.json();",
+                  "    ['id', 'nombre', 'apellido', 'email', 'numeroEmpleado', 'cargo', 'area',",
+                  "     'departamentoId', 'fechaIngreso', 'estado'].forEach(c =>",
+                  "        pm.expect(e, 'falta ' + c).to.have.property(c));",
+                  "});",
+                  "",
+                  "pm.test('employeeId es un alias de id, conservado por compatibilidad', () => {",
+                  "    const e = pm.response.json();",
+                  "    pm.expect(e.employeeId).to.eql(e.id);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"id\": \"{{empleadoId}}\",\n  \"nombre\": \"Laura\",\n  \"apellido\": \"Méndez\",\n  \"email\": \"{{empleadoEmail}}\",\n  \"numeroEmpleado\": \"{{empleadoNumero}}\",\n  \"cargo\": \"Desarrolladora\",\n  \"area\": \"Tecnología\",\n  \"departamentoId\": \"{{departamentoId}}\",\n  \"fechaIngreso\": \"2026-04-15\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{gatewayBaseUrl}}/empleados",
+              "host": [
+                "{{gatewayBaseUrl}}"
+              ],
+              "path": [
+                "empleados"
+              ]
+            },
+            "description": "Antes de guardar, employees-service comprueba el email, el número de empleado y el identificador, y después valida el departamento contra departments-service a través de un circuit breaker. El evento se escribe en la misma transacción que el empleado (patrón outbox), así que no puede guardarse uno sin el otro."
+          }
+        },
+        {
+          "name": "02.2 Registrar un segundo empleado para las pruebas de permisos",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Responde 201', () => pm.response.to.have.status(201));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"id\": \"{{companeroId}}\",\n  \"nombre\": \"Andrés\",\n  \"apellido\": \"Gómez\",\n  \"email\": \"{{companeroEmail}}\",\n  \"numeroEmpleado\": \"{{companeroNumero}}\",\n  \"cargo\": \"Analista\",\n  \"area\": \"Tecnología\",\n  \"departamentoId\": \"{{departamentoId}}\",\n  \"fechaIngreso\": \"2026-05-02\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{gatewayBaseUrl}}/empleados",
+              "host": [
+                "{{gatewayBaseUrl}}"
+              ],
+              "path": [
+                "empleados"
+              ]
+            },
+            "description": "Hace falta un empleado ajeno para demostrar que un usuario no puede tocar el perfil de otro."
+          }
+        },
+        {
+          "name": "02.3 Rechazar un empleado con un email ya registrado",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Responde 400 nombrando el email', () => {",
+                  "    pm.response.to.have.status(400);",
+                  "    pm.expect(pm.response.json().message).to.include(pm.collectionVariables.get('empleadoEmail'));",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"id\": \"OTRO-{{sufijo}}\",\n  \"nombre\": \"Copia\",\n  \"apellido\": \"Email\",\n  \"email\": \"{{empleadoEmail}}\",\n  \"numeroEmpleado\": \"EMP-X-{{sufijo}}\",\n  \"cargo\": \"Analista\",\n  \"area\": \"Tecnología\",\n  \"departamentoId\": \"{{departamentoId}}\",\n  \"fechaIngreso\": \"2026-04-15\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{gatewayBaseUrl}}/empleados",
+              "host": [
+                "{{gatewayBaseUrl}}"
+              ],
+              "path": [
+                "empleados"
+              ]
+            },
+            "description": "El email es único en todo el sistema."
+          }
+        },
+        {
+          "name": "02.4 Rechazar un empleado con un número ya registrado",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Responde 400 nombrando el número', () => {",
+                  "    pm.response.to.have.status(400);",
+                  "    pm.expect(pm.response.json().message).to.include(pm.collectionVariables.get('empleadoNumero'));",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"id\": \"OTRO2-{{sufijo}}\",\n  \"nombre\": \"Copia\",\n  \"apellido\": \"Numero\",\n  \"email\": \"otro.{{sufijo}}@empresa.com\",\n  \"numeroEmpleado\": \"{{empleadoNumero}}\",\n  \"cargo\": \"Analista\",\n  \"area\": \"Tecnología\",\n  \"departamentoId\": \"{{departamentoId}}\",\n  \"fechaIngreso\": \"2026-04-15\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{gatewayBaseUrl}}/empleados",
+              "host": [
+                "{{gatewayBaseUrl}}"
+              ],
+              "path": [
+                "empleados"
+              ]
+            },
+            "description": "El número de empleado también es único."
+          }
+        },
+        {
+          "name": "02.5 Rechazar un empleado con un departamento inexistente",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Responde 400, no 503', () => pm.response.to.have.status(400));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"id\": \"OTRO3-{{sufijo}}\",\n  \"nombre\": \"Sin\",\n  \"apellido\": \"Departamento\",\n  \"email\": \"sindepto.{{sufijo}}@empresa.com\",\n  \"numeroEmpleado\": \"EMP-SD-{{sufijo}}\",\n  \"cargo\": \"Analista\",\n  \"area\": \"Tecnología\",\n  \"departamentoId\": \"NO-EXISTE\",\n  \"fechaIngreso\": \"2026-04-15\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{gatewayBaseUrl}}/empleados",
+              "host": [
+                "{{gatewayBaseUrl}}"
+              ],
+              "path": [
+                "empleados"
+              ]
+            },
+            "description": "El 404 del catálogo se traduce aquí en 400: es una regla de negocio incumplida, no una caída del servicio. La diferencia importa, porque una caída sí abriría el circuito."
+          }
+        },
+        {
+          "name": "02.6 Consultar el empleado por su identificador",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Responde 200 con los datos guardados', () => {",
+                  "    pm.response.to.have.status(200);",
+                  "    const e = pm.response.json();",
+                  "    pm.expect(e.nombre).to.eql('Laura');",
+                  "    pm.expect(e.estado).to.eql('ACTIVO');",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{gatewayBaseUrl}}/empleados/{{empleadoId}}",
+              "host": [
+                "{{gatewayBaseUrl}}"
+              ],
+              "path": [
+                "empleados",
+                "{{empleadoId}}"
+              ]
+            },
+            "description": "Lectura directa."
+          }
+        },
+        {
+          "name": "02.7 Listar empleados filtrando por departamento y paginando",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Responde 200 y solo trae empleados del departamento', () => {",
+                  "    pm.response.to.have.status(200);",
+                  "    const b = pm.response.json();",
+                  "    const filas = Array.isArray(b) ? b : b.data;",
+                  "    pm.expect(filas.length).to.be.at.least(2);",
+                  "    filas.forEach(e => pm.expect(e.departamentoId).to.eql(pm.collectionVariables.get('departamentoId')));",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{gatewayBaseUrl}}/empleados?departamentoId={{departamentoId}}&page=1&size=10&sortBy=fechaIngreso&order=ASC",
+              "host": [
+                "{{gatewayBaseUrl}}"
+              ],
+              "path": [
+                "empleados?departamentoId={{departamentoId}}&page=1&size=10&sortBy=fechaIngreso&order=ASC"
+              ]
+            },
+            "description": "Los filtros se combinan: departamento, estado, cargo y paginación."
+          }
+        },
+        {
+          "name": "02.8 Actualizar el cargo del empleado",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Responde 200 con el cargo nuevo', () => {",
+                  "    pm.response.to.have.status(200);",
+                  "    pm.expect(pm.response.json().cargo).to.eql('Líder técnica');",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"cargo\": \"Líder técnica\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{gatewayBaseUrl}}/empleados/{{empleadoId}}",
+              "host": [
+                "{{gatewayBaseUrl}}"
+              ],
+              "path": [
+                "empleados",
+                "{{empleadoId}}"
+              ]
+            },
+            "description": "Publica \"empleado.actualizado\", que el read model de perfiles aplica."
+          }
+        },
+        {
+          "name": "02.9 Consultar el estado del circuit breaker hacia departamentos",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Responde 200 con el estado del circuito', () => {",
+                  "    pm.response.to.have.status(200);",
+                  "    const b = pm.response.json();",
+                  "    pm.expect(JSON.stringify(b)).to.include('CLOSED');",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{gatewayBaseUrl}}/empleados/circuit-breaker",
+              "host": [
+                "{{gatewayBaseUrl}}"
+              ],
+              "path": [
+                "empleados",
+                "circuit-breaker"
+              ]
+            },
+            "description": "Expone el estado y los contadores del circuito que protege la llamada al catálogo. En operación normal está CLOSED."
+          }
+        }
+      ]
+    },
+    {
+      "name": "03 Activación de la cuenta",
+      "description": "auth-service crea la cuenta al consumir \"empleado.creado\", en estado PENDIENTE_ACTIVACION y con un token de activación que viaja en el evento \"usuario.creado\". El token no se guarda en el historial de notificaciones: se pide a quien lo firma.",
+      "item": [
+        {
+          "name": "03.1 Rechazar la recuperación de una cuenta sin activar",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Espera a que auth-service haya creado la cuenta del empleado.",
+                  "//",
+                  "// Es un efecto asíncrono: viaja por RabbitMQ y el publicador lo envía en su",
+                  "// siguiente ciclo. Se comprueba una condición real, con un tope de 30 s.",
+                  "const base  = pm.environment.get('gatewayBaseUrl') || pm.variables.get('gatewayBaseUrl');",
+                  "const admin = pm.collectionVariables.get('tokenAdmin');",
+                  "",
+                  "(() => {",
+                  "  let intentos = 0;",
+                  "  function comprobar() {",
+                  "    pm.sendRequest({",
+                  "      url: base + '/auth/internal/tokens/restablecimiento',",
+                  "      method: 'POST',",
+                  "      header: { Authorization: 'Bearer ' + admin, 'Content-Type': 'application/json' },",
+                  "      body: { mode: 'raw', raw: JSON.stringify({ empleadoId: pm.collectionVariables.get('empleadoId') }) }",
+                  "    }",
+                  "    , (error, res) => {",
+                  "      let listo = false;",
+                  "      try { listo = !error && (res.code === 200); } catch (_) {}",
+                  "      if (listo) {  return; }",
+                  "      if (++intentos < 60) { setTimeout(comprobar, 500); return; }",
+                  "      console.log('No se cumplió la condición esperada en 30 s: auth-service haya creado la cuenta del empleado');",
+                  "    });",
+                  "  }",
+                  "  comprobar();",
+                  "})();"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Responde 401 por el estado de la cuenta', () => pm.response.to.have.status(401));",
+                  "pm.test('El mensaje indica que la cuenta aún no se activó', () => {",
+                  "    pm.expect(pm.response.json().message).to.include('no ha sido activada');",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"{{empleadoEmail}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{gatewayBaseUrl}}/auth/recover-password",
+              "host": [
+                "{{gatewayBaseUrl}}"
+              ],
+              "path": [
+                "auth",
+                "recover-password"
+              ]
+            },
+            "description": "La recuperación solo se concede a cuentas ACTIVA. Permitirla sobre una cuenta recién creada convertiría un endpoint público en un generador de tokens de activación a demanda: bastaría conocer el correo. El mensaje orienta al dueño hacia el camino correcto."
+          }
+        },
+        {
+          "name": "03.2 Emitir el token de activación (reservado al administrador)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Responde 200 con un token de restablecimiento', () => {",
+                  "    pm.response.to.have.status(200);",
+                  "    const b = pm.response.json();",
+                  "    pm.expect(b.empleadoId).to.eql(pm.collectionVariables.get('empleadoId'));",
+                  "    pm.expect(b.tipo).to.eql('RESET_PASSWORD');",
+                  "    pm.expect(b.expiraEnSegundos).to.be.a('number');",
+                  "});",
+                  "",
+                  "const token = pm.response.json().token;",
+                  "pm.collectionVariables.set('tokenActivacion', token);",
+                  "",
+                  "const cabecera = JSON.parse(atob(token.split('.')[0].replace(/-/g, '+').replace(/_/g, '/')));",
+                  "const claims = JSON.parse(atob(token.split('.')[1].replace(/-/g, '+').replace(/_/g, '/')));",
+                  "pm.test('La cabecera declara typ=JWT y alg=HS256', () => {",
+                  "    pm.expect(cabecera.typ).to.eql('JWT');",
+                  "    pm.expect(cabecera.alg).to.eql('HS256');",
+                  "});",
+                  "pm.test('El claim type lo marca como RESET_PASSWORD y no trae rol', () => {",
+                  "    pm.expect(claims.type).to.eql('RESET_PASSWORD');",
+                  "    pm.expect(claims.role).to.be.undefined;",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"empleadoId\": \"{{empleadoId}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{gatewayBaseUrl}}/auth/internal/tokens/restablecimiento",
+              "host": [
+                "{{gatewayBaseUrl}}"
+              ],
+              "path": [
+                "auth",
+                "internal",
+                "tokens",
+                "restablecimiento"
+              ]
+            },
+            "description": "Canal legítimo para obtener un token de restablecimiento: lo entrega quien lo firma. Es una operación privilegiada —equivale a poder tomar el control de una cuenta— así que el gateway la reserva al rol ADMIN y auth-service registra quién la pidió."
+          }
+        },
+        {
+          "name": "03.3 Rechazar una contraseña que no cumple la política",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Responde 400', () => pm.response.to.have.status(400));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"token\": \"{{tokenActivacion}}\",\n  \"nuevaPassword\": \"corta\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{gatewayBaseUrl}}/auth/reset-password",
+              "host": [
+                "{{gatewayBaseUrl}}"
+              ],
+              "path": [
+                "auth",
+                "reset-password"
+              ]
+            },
+            "description": "La política exige al menos ocho caracteres, con letras y dígitos."
+          }
+        },
+        {
+          "name": "03.4 Establecer la contraseña con el token de activación",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Responde 200 y confirma el establecimiento', () => {",
+                  "    pm.response.to.have.status(200);",
+                  "    pm.expect(pm.response.json().mensaje).to.include('Contraseña');",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"token\": \"{{tokenActivacion}}\",\n  \"nuevaPassword\": \"{{empleadoPassword}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{gatewayBaseUrl}}/auth/reset-password",
+              "host": [
+                "{{gatewayBaseUrl}}"
+              ],
+              "path": [
+                "auth",
+                "reset-password"
+              ]
+            },
+            "description": "Es el \"establecimiento inicial de contraseña\": la cuenta pasa a ACTIVA y auth-service publica \"cuenta.activada\". El endpoint es público a propósito, porque la autorización la aporta el token de un solo propósito que viaja en el cuerpo."
+          }
+        },
+        {
+          "name": "03.5 Iniciar sesión como el empleado y guardar su token",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Responde 200 con un token de rol USER', () => {",
+                  "    pm.response.to.have.status(200);",
+                  "    const b = pm.response.json();",
+                  "    pm.expect(b.rol).to.eql('USER');",
+                  "    pm.expect(b.empleadoId).to.eql(pm.collectionVariables.get('empleadoId'));",
+                  "});",
+                  "",
+                  "pm.collectionVariables.set('tokenUsuario', pm.response.json().token);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"usuario\": \"{{empleadoEmail}}\",\n  \"password\": \"{{empleadoPassword}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{gatewayBaseUrl}}/auth/login",
+              "host": [
+                "{{gatewayBaseUrl}}"
+              ],
+              "path": [
+                "auth",
+                "login"
+              ]
+            },
+            "description": "Primer acceso del empleado. El token que recibe lleva rol USER, que es de solo lectura salvo sobre sus propios recursos."
+          }
+        },
+        {
+          "name": "03.6 Cambiar su propia contraseña",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Responde 200', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenUsuario}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"passwordActual\": \"{{empleadoPassword}}\",\n  \"nuevaPassword\": \"{{empleadoPasswordNueva}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{gatewayBaseUrl}}/auth/change-password",
+              "host": [
+                "{{gatewayBaseUrl}}"
+              ],
+              "path": [
+                "auth",
+                "change-password"
+              ]
+            },
+            "description": "Una de las dos escrituras que el rol USER tiene permitidas. La identidad se toma del claim sub del token, nunca del cuerpo: nadie puede cambiar la contraseña de otro por esta vía."
+          }
+        },
+        {
+          "name": "03.7 Rechazar el acceso con la contraseña anterior",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Responde 401', () => pm.response.to.have.status(401));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"usuario\": \"{{empleadoEmail}}\",\n  \"password\": \"{{empleadoPassword}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{gatewayBaseUrl}}/auth/login",
+              "host": [
+                "{{gatewayBaseUrl}}"
+              ],
+              "path": [
+                "auth",
+                "login"
+              ]
+            },
+            "description": "Comprueba que el cambio tuvo efecto real sobre el hash almacenado."
+          }
+        },
+        {
+          "name": "03.8 Iniciar sesión con la contraseña nueva",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Responde 200', () => pm.response.to.have.status(200));",
+                  "pm.collectionVariables.set('tokenUsuario', pm.response.json().token);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"usuario\": \"{{empleadoEmail}}\",\n  \"password\": \"{{empleadoPasswordNueva}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{gatewayBaseUrl}}/auth/login",
+              "host": [
+                "{{gatewayBaseUrl}}"
+              ],
+              "path": [
+                "auth",
+                "login"
+              ]
+            },
+            "description": "Y que la nueva sí funciona. Se guarda el token otra vez porque el anterior sigue siendo válido pero conviene usar el más reciente."
+          }
+        },
+        {
+          "name": "03.9 Solicitar la recuperación de una cuenta ya activa",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Responde 202, la entrega es asíncrona', () => pm.response.to.have.status(202));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"{{empleadoEmail}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{gatewayBaseUrl}}/auth/recover-password",
+              "host": [
+                "{{gatewayBaseUrl}}"
+              ],
+              "path": [
+                "auth",
+                "recover-password"
+              ]
+            },
+            "description": "Ahora sí procede: la cuenta está ACTIVA. Responde 202 porque la entrega del correo es asíncrona."
+          }
+        },
+        {
+          "name": "03.10 Rechazar la recuperación de un correo desconocido",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Responde 404', () => pm.response.to.have.status(404));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"nadie.{{sufijo}}@empresa.com\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{gatewayBaseUrl}}/auth/recover-password",
+              "host": [
+                "{{gatewayBaseUrl}}"
+              ],
+              "path": [
+                "auth",
+                "recover-password"
+              ]
+            },
+            "description": "Un correo que no existe devuelve 404."
+          }
+        }
+      ]
+    },
+    {
+      "name": "04 Perfil del empleado",
+      "description": "profiles-service es un read model: no crea perfiles por iniciativa propia, los proyecta desde los eventos de empleados. Sobre esa proyección el propio empleado completa sus datos personales.",
+      "item": [
+        {
+          "name": "04.1 Consultar el perfil creado por el evento",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Espera a que el perfil exista, proyectado desde el evento.",
+                  "//",
+                  "// Es un efecto asíncrono: viaja por RabbitMQ y el publicador lo envía en su",
+                  "// siguiente ciclo. Se comprueba una condición real, con un tope de 30 s.",
+                  "const base  = pm.environment.get('gatewayBaseUrl') || pm.variables.get('gatewayBaseUrl');",
+                  "const admin = pm.collectionVariables.get('tokenAdmin');",
+                  "",
+                  "(() => {",
+                  "  let intentos = 0;",
+                  "  function comprobar() {",
+                  "    pm.sendRequest({",
+                  "      url: base + '/perfiles/' + pm.collectionVariables.get('empleadoId'),",
+                  "      method: 'GET',",
+                  "      header: { Authorization: 'Bearer ' + admin, Accept: 'application/json' }",
+                  "    }",
+                  "    , (error, res) => {",
+                  "      let listo = false;",
+                  "      try { listo = !error && (res.code === 200); } catch (_) {}",
+                  "      if (listo) {  return; }",
+                  "      if (++intentos < 60) { setTimeout(comprobar, 500); return; }",
+                  "      console.log('No se cumplió la condición esperada en 30 s: el perfil exista, proyectado desde el evento');",
+                  "    });",
+                  "  }",
+                  "  comprobar();",
+                  "})();"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Responde 200 con el perfil proyectado', () => {",
+                  "    pm.response.to.have.status(200);",
+                  "    const p = pm.response.json();",
+                  "    pm.expect(p.empleadoId).to.eql(pm.collectionVariables.get('empleadoId'));",
+                  "    pm.expect(p.employeeId).to.eql(p.empleadoId);",
+                  "    pm.expect(p.estado).to.eql('ACTIVO');",
+                  "});",
+                  "",
+                  "pm.test('Trae los cinco campos propios del perfil', () => {",
+                  "    const p = pm.response.json();",
+                  "    ['telefono', 'direccion', 'ciudad', 'biografia', 'fechaCreacion'].forEach(c =>",
+                  "        pm.expect(p, 'falta ' + c).to.have.property(c));",
+                  "});",
+                  "",
+                  "pm.test('Un perfil nuevo no está archivado', () => {",
+                  "    pm.expect(pm.response.json().archivado).to.eql(false);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{gatewayBaseUrl}}/perfiles/{{empleadoId}}",
+              "host": [
+                "{{gatewayBaseUrl}}"
+              ],
+              "path": [
+                "perfiles",
+                "{{empleadoId}}"
+              ]
+            },
+            "description": "El perfil nació de \"empleado.creado\", sin que nadie lo pidiera. empleadoId es el nombre canónico del campo; employeeId se conserva como alias para no romper a los clientes que ya lo leían."
+          }
+        },
+        {
+          "name": "04.2 Completar los datos personales del perfil",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Responde 200 con los cuatro campos guardados', () => {",
+                  "    pm.response.to.have.status(200);",
+                  "    const p = pm.response.json();",
+                  "    pm.expect(p.telefono).to.eql('+57 300 000 0000');",
+                  "    pm.expect(p.direccion).to.eql('Calle 10 # 5-20');",
+                  "    pm.expect(p.ciudad).to.eql('Armenia');",
+                  "    pm.expect(p.biografia).to.include('backend');",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenUsuario}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"telefono\": \"+57 300 000 0000\",\n  \"direccion\": \"Calle 10 # 5-20\",\n  \"ciudad\": \"Armenia\",\n  \"biografia\": \"Desarrolladora backend.\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{gatewayBaseUrl}}/perfiles/{{empleadoId}}",
+              "host": [
+                "{{gatewayBaseUrl}}"
+              ],
+              "path": [
+                "perfiles",
+                "{{empleadoId}}"
+              ]
+            },
+            "description": "Los cuatro campos de contacto son datos del perfil, no del empleado: employees-service no los conoce ni los publica. Por eso son opcionales y los rellena su dueño."
+          }
+        },
+        {
+          "name": "04.3 Listar únicamente los perfiles vigentes",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Responde 200 y ninguno viene archivado', () => {",
+                  "    pm.response.to.have.status(200);",
+                  "    const b = pm.response.json();",
+                  "    const filas = Array.isArray(b) ? b : b.data;",
+                  "    filas.forEach(p => pm.expect(p.archivado).to.eql(false));",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{gatewayBaseUrl}}/perfiles?archivado=false&page=1&limit=10&sortBy=fechaCreacion&order=DESC",
+              "host": [
+                "{{gatewayBaseUrl}}"
+              ],
+              "path": [
+                "perfiles?archivado=false&page=1&limit=10&sortBy=fechaCreacion&order=DESC"
+              ]
+            },
+            "description": "El filtro de archivado es una dimensión aparte del estado: hoy coinciden, pero un perfil podría archivarse por otro motivo sin estar retirado."
+          }
+        },
+        {
+          "name": "04.4 Rechazar un valor no booleano en el filtro de archivado",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Responde 400', () => pm.response.to.have.status(400));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{gatewayBaseUrl}}/perfiles?archivado=quizas",
+              "host": [
+                "{{gatewayBaseUrl}}"
+              ],
+              "path": [
+                "perfiles?archivado=quizas"
+              ]
+            },
+            "description": "Un filtro mal escrito que se ignorara en silencio devolvería una lista que parece correcta y no lo es."
+          }
+        },
+        {
+          "name": "04.5 Un empleado no puede editar el perfil de otro",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Responde 403, no 401', () => {",
+                  "    pm.response.to.have.status(403);",
+                  "});",
+                  "pm.test('El mensaje explica que falta el permiso', () => {",
+                  "    pm.expect(pm.response.json().message).to.include('no tiene permiso');",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenUsuario}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"ciudad\": \"Intento sobre un perfil ajeno\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{gatewayBaseUrl}}/perfiles/{{companeroId}}",
+              "host": [
+                "{{gatewayBaseUrl}}"
+              ],
+              "path": [
+                "perfiles",
+                "{{companeroId}}"
+              ]
+            },
+            "description": "Autorización por propiedad del recurso: el permiso no depende solo del rol, sino de quién es dueño del dato. El gateway lo resuelve sin llegar al servicio."
+          }
+        },
+        {
+          "name": "04.6 Un empleado sí puede leer el perfil de otro",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Espera a que el perfil del compañero exista.",
+                  "//",
+                  "// Es un efecto asíncrono: viaja por RabbitMQ y el publicador lo envía en su",
+                  "// siguiente ciclo. Se comprueba una condición real, con un tope de 30 s.",
+                  "const base  = pm.environment.get('gatewayBaseUrl') || pm.variables.get('gatewayBaseUrl');",
+                  "const admin = pm.collectionVariables.get('tokenAdmin');",
+                  "",
+                  "(() => {",
+                  "  let intentos = 0;",
+                  "  function comprobar() {",
+                  "    pm.sendRequest({",
+                  "      url: base + '/perfiles/' + pm.collectionVariables.get('companeroId'),",
+                  "      method: 'GET',",
+                  "      header: { Authorization: 'Bearer ' + admin, Accept: 'application/json' }",
+                  "    }",
+                  "    , (error, res) => {",
+                  "      let listo = false;",
+                  "      try { listo = !error && (res.code === 200); } catch (_) {}",
+                  "      if (listo) {  return; }",
+                  "      if (++intentos < 60) { setTimeout(comprobar, 500); return; }",
+                  "      console.log('No se cumplió la condición esperada en 30 s: el perfil del compañero exista');",
+                  "    });",
+                  "  }",
+                  "  comprobar();",
+                  "})();"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Responde 200', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenUsuario}}"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{gatewayBaseUrl}}/perfiles/{{companeroId}}",
+              "host": [
+                "{{gatewayBaseUrl}}"
+              ],
+              "path": [
+                "perfiles",
+                "{{companeroId}}"
+              ]
+            },
+            "description": "El rol USER es de solo lectura sobre el resto del sistema: leer sí, escribir no."
+          }
+        }
+      ]
+    },
+    {
+      "name": "05 Vacaciones y suspensión de la cuenta",
+      "description": "El saldo de vacaciones también se proyecta desde los eventos de empleados. Programar un período no afecta a la cuenta; lo que la suspende es el inicio del período, que publica \"vacaciones.iniciadas\".",
+      "item": [
+        {
+          "name": "05.1 Consultar el saldo de vacaciones creado por el evento",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Espera a que el saldo de vacaciones exista.",
+                  "//",
+                  "// Es un efecto asíncrono: viaja por RabbitMQ y el publicador lo envía en su",
+                  "// siguiente ciclo. Se comprueba una condición real, con un tope de 30 s.",
+                  "const base  = pm.environment.get('gatewayBaseUrl') || pm.variables.get('gatewayBaseUrl');",
+                  "const admin = pm.collectionVariables.get('tokenAdmin');",
+                  "",
+                  "(() => {",
+                  "  let intentos = 0;",
+                  "  function comprobar() {",
+                  "    pm.sendRequest({",
+                  "      url: base + '/vacaciones/balances/' + pm.collectionVariables.get('empleadoId'),",
+                  "      method: 'GET',",
+                  "      header: { Authorization: 'Bearer ' + admin, Accept: 'application/json' }",
+                  "    }",
+                  "    , (error, res) => {",
+                  "      let listo = false;",
+                  "      try { listo = !error && (res.code === 200); } catch (_) {}",
+                  "      if (listo) {  return; }",
+                  "      if (++intentos < 60) { setTimeout(comprobar, 500); return; }",
+                  "      console.log('No se cumplió la condición esperada en 30 s: el saldo de vacaciones exista');",
+                  "    });",
+                  "  }",
+                  "  comprobar();",
+                  "})();"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Responde 200 con el saldo inicial', () => {",
+                  "    pm.response.to.have.status(200);",
+                  "    const b = pm.response.json();",
+                  "    pm.expect(b.diasDisponibles).to.be.a('number');",
+                  "    pm.expect(b.estadoEmpleado).to.eql('ACTIVO');",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{gatewayBaseUrl}}/vacaciones/balances/{{empleadoId}}",
+              "host": [
+                "{{gatewayBaseUrl}}"
+              ],
+              "path": [
+                "vacaciones",
+                "balances",
+                "{{empleadoId}}"
+              ]
+            },
+            "description": "Réplica local del empleado con su saldo. Sin ella no se puede programar nada: es la comprobación de que el evento llegó."
+          }
+        },
+        {
+          "name": "05.2 Rechazar un período cuya fecha de fin no es posterior al inicio",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Responde 400', () => pm.response.to.have.status(400));",
+                  "pm.test('El mensaje explica la regla', () => {",
+                  "    pm.expect(pm.response.json().message).to.include('posterior a fechaInicio');",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"empleadoId\": \"{{empleadoId}}\",\n  \"fechaInicio\": \"2027-06-10\",\n  \"fechaFin\": \"2027-06-10\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{gatewayBaseUrl}}/vacaciones",
+              "host": [
+                "{{gatewayBaseUrl}}"
+              ],
+              "path": [
+                "vacaciones"
+              ]
+            },
+            "description": "fechaFin es el día de REGRESO, no el último día de descanso: un día de vacaciones son dos fechas consecutivas. Es una decisión de negocio explícita del servicio."
+          }
+        },
+        {
+          "name": "05.3 Rechazar un período que empieza en el pasado",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Responde 400', () => pm.response.to.have.status(400));",
+                  "pm.test('El mensaje habla de una fecha pasada', () => {",
+                  "    pm.expect(pm.response.json().message).to.include('pasada');",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"empleadoId\": \"{{empleadoId}}\",\n  \"fechaInicio\": \"2020-01-10\",\n  \"fechaFin\": \"2020-01-15\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{gatewayBaseUrl}}/vacaciones",
+              "host": [
+                "{{gatewayBaseUrl}}"
+              ],
+              "path": [
+                "vacaciones"
+              ]
+            },
+            "description": "No se programan vacaciones hacia atrás."
+          }
+        },
+        {
+          "name": "05.4 Programar un período de vacaciones",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Responde 201 con el período PROGRAMADA', () => {",
+                  "    pm.response.to.have.status(201);",
+                  "    const p = pm.response.json();",
+                  "    pm.expect(p.estado).to.eql('PROGRAMADA');",
+                  "    pm.expect(p.empleadoId).to.eql(pm.collectionVariables.get('empleadoId'));",
+                  "});",
+                  "",
+                  "pm.collectionVariables.set('periodoId', pm.response.json().id);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"empleadoId\": \"{{empleadoId}}\",\n  \"fechaInicio\": \"2027-07-05\",\n  \"fechaFin\": \"2027-07-13\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{gatewayBaseUrl}}/vacaciones",
+              "host": [
+                "{{gatewayBaseUrl}}"
+              ],
+              "path": [
+                "vacaciones"
+              ]
+            },
+            "description": "Cinco validaciones antes de guardar: rango, fecha no pasada, empleado existente, empleado ACTIVO y sin solapamiento. El período y su evento se guardan en la misma transacción."
+          }
+        },
+        {
+          "name": "05.5 Rechazar un período que se solapa con el anterior",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Responde 400 nombrando el solapamiento', () => {",
+                  "    pm.response.to.have.status(400);",
+                  "    pm.expect(pm.response.json().message).to.include('solapa');",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"empleadoId\": \"{{empleadoId}}\",\n  \"fechaInicio\": \"2027-07-08\",\n  \"fechaFin\": \"2027-07-20\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{gatewayBaseUrl}}/vacaciones",
+              "host": [
+                "{{gatewayBaseUrl}}"
+              ],
+              "path": [
+                "vacaciones"
+              ]
+            },
+            "description": "Dos períodos activos del mismo empleado no pueden cruzarse."
+          }
+        },
+        {
+          "name": "05.6 Consultar el período programado",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Responde 200 con el período', () => {",
+                  "    pm.response.to.have.status(200);",
+                  "    pm.expect(pm.response.json().id).to.eql(pm.collectionVariables.get('periodoId'));",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{gatewayBaseUrl}}/vacaciones/{{periodoId}}",
+              "host": [
+                "{{gatewayBaseUrl}}"
+              ],
+              "path": [
+                "vacaciones",
+                "{{periodoId}}"
+              ]
+            },
+            "description": "Lectura del período por su identificador."
+          }
+        },
+        {
+          "name": "05.7 Reprogramar las fechas del período",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Responde 200 con las fechas nuevas', () => {",
+                  "    pm.response.to.have.status(200);",
+                  "    pm.expect(pm.response.json().fechaInicio).to.include('2027-07-12');",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"fechaInicio\": \"2027-07-12\",\n  \"fechaFin\": \"2027-07-20\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{gatewayBaseUrl}}/vacaciones/{{periodoId}}",
+              "host": [
+                "{{gatewayBaseUrl}}"
+              ],
+              "path": [
+                "vacaciones",
+                "{{periodoId}}"
+              ]
+            },
+            "description": "Mientras está PROGRAMADA se puede mover, con las mismas validaciones."
+          }
+        },
+        {
+          "name": "05.8 Programar un período que empieza hoy",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Fechas calculadas: hoy y el regreso mañana. Es el período más corto",
+                  "// posible con la semántica de fecha de regreso.",
+                  "const hoy = new Date();",
+                  "const manana = new Date(hoy.getTime() + 24 * 60 * 60 * 1000);",
+                  "const iso = (d) => d.toISOString().slice(0, 10);",
+                  "pm.collectionVariables.set('hoyISO', iso(hoy));",
+                  "pm.collectionVariables.set('mananaISO', iso(manana));"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Responde 201', () => pm.response.to.have.status(201));",
+                  "pm.collectionVariables.set('periodoInmediatoId', pm.response.json().id);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"empleadoId\": \"{{empleadoId}}\",\n  \"fechaInicio\": \"{{hoyISO}}\",\n  \"fechaFin\": \"{{mananaISO}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{gatewayBaseUrl}}/vacaciones",
+              "host": [
+                "{{gatewayBaseUrl}}"
+              ],
+              "path": [
+                "vacaciones"
+              ]
+            },
+            "description": "Para demostrar la suspensión de la cuenta hace falta un período que el scheduler pueda iniciar ya. Se programa para el empleado que sí tiene contraseña establecida: la suspensión se comprueba con un inicio de sesión, y sin contraseña el servicio rechazaría por credenciales antes de mirar el estado de la cuenta. La fecha se calcula en el script, no se escribe a mano."
+          }
+        },
+        {
+          "name": "05.9 Forzar el inicio del período sin esperar al scheduler",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Responde 200 y el período queda EN_CURSO', () => {",
+                  "    pm.response.to.have.status(200);",
+                  "    const b = pm.response.json();",
+                  "    pm.expect(JSON.stringify(b)).to.include('EN_CURSO');",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{gatewayBaseUrl}}/vacaciones/{{periodoInmediatoId}}/forzar-inicio",
+              "host": [
+                "{{gatewayBaseUrl}}"
+              ],
+              "path": [
+                "vacaciones",
+                "{{periodoInmediatoId}}",
+                "forzar-inicio"
+              ]
+            },
+            "description": "El scheduler corre cada hora; este endpoint dispara su misma lógica a demanda para poder demostrar el flujo en una sustentación. Publica \"vacaciones.iniciadas\", que auth-service convierte en una suspensión."
+          }
+        },
+        {
+          "name": "05.10 Comprobar que la cuenta quedó suspendida durante las vacaciones",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Espera a que auth-service suspenda la cuenta por el inicio de las vacaciones.",
+                  "//",
+                  "// Es un efecto asíncrono: viaja por RabbitMQ y el publicador lo envía en su",
+                  "// siguiente ciclo. Se comprueba una condición real, con un tope de 30 s.",
+                  "const base  = pm.environment.get('gatewayBaseUrl') || pm.variables.get('gatewayBaseUrl');",
+                  "const admin = pm.collectionVariables.get('tokenAdmin');",
+                  "",
+                  "(() => {",
+                  "  let intentos = 0;",
+                  "  function comprobar() {",
+                  "    pm.sendRequest({",
+                  "      url: base + '/auth/login',",
+                  "      method: 'POST',",
+                  "      header: { 'Content-Type': 'application/json' },",
+                  "      body: { mode: 'raw', raw: JSON.stringify({ usuario: pm.collectionVariables.get('empleadoEmail'), password: pm.collectionVariables.get('empleadoPasswordNueva') }) }",
+                  "    }",
+                  "    , (error, res) => {",
+                  "      let listo = false;",
+                  "      try { listo = !error && (res.code === 401 && String(res.text()).indexOf('vacaciones') >= 0); } catch (_) {}",
+                  "      if (listo) {  return; }",
+                  "      if (++intentos < 60) { setTimeout(comprobar, 500); return; }",
+                  "      console.log('No se cumplió la condición esperada en 30 s: auth-service suspenda la cuenta por el inicio de las vacaciones');",
+                  "    });",
+                  "  }",
+                  "  comprobar();",
+                  "})();"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Responde 401 por el estado de la cuenta', () => pm.response.to.have.status(401));",
+                  "pm.test('El mensaje menciona las vacaciones, no las credenciales', () => {",
+                  "    pm.expect(pm.response.json().message).to.include('vacaciones');",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"usuario\": \"{{empleadoEmail}}\",\n  \"password\": \"{{empleadoPasswordNueva}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{gatewayBaseUrl}}/auth/login",
+              "host": [
+                "{{gatewayBaseUrl}}"
+              ],
+              "path": [
+                "auth",
+                "login"
+              ]
+            },
+            "description": "La suspensión es temporal y la provoca el evento, no una llamada directa: auth-service pone la cuenta en SUSPENDIDA_TEMPORAL. Las credenciales son las correctas, así que el 401 solo puede venir del estado de la cuenta, y el mensaje lo confirma."
+          }
+        },
+        {
+          "name": "05.11 Forzar el fin del período",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Responde 200 y el período queda FINALIZADA', () => {",
+                  "    pm.response.to.have.status(200);",
+                  "    pm.expect(JSON.stringify(pm.response.json())).to.include('FINALIZADA');",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{gatewayBaseUrl}}/vacaciones/{{periodoInmediatoId}}/forzar-fin",
+              "host": [
+                "{{gatewayBaseUrl}}"
+              ],
+              "path": [
+                "vacaciones",
+                "{{periodoInmediatoId}}",
+                "forzar-fin"
+              ]
+            },
+            "description": "Publica \"vacaciones.finalizadas\" y la cuenta vuelve a ACTIVA. El período queda FINALIZADA."
+          }
+        },
+        {
+          "name": "05.12 Comprobar que la cuenta volvió a estar activa",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Espera a que auth-service devuelva la cuenta a ACTIVA al terminar el período.",
+                  "//",
+                  "// Es un efecto asíncrono: viaja por RabbitMQ y el publicador lo envía en su",
+                  "// siguiente ciclo. Se comprueba una condición real, con un tope de 30 s.",
+                  "const base  = pm.environment.get('gatewayBaseUrl') || pm.variables.get('gatewayBaseUrl');",
+                  "const admin = pm.collectionVariables.get('tokenAdmin');",
+                  "",
+                  "(() => {",
+                  "  let intentos = 0;",
+                  "  function comprobar() {",
+                  "    pm.sendRequest({",
+                  "      url: base + '/auth/login',",
+                  "      method: 'POST',",
+                  "      header: { 'Content-Type': 'application/json' },",
+                  "      body: { mode: 'raw', raw: JSON.stringify({ usuario: pm.collectionVariables.get('empleadoEmail'), password: pm.collectionVariables.get('empleadoPasswordNueva') }) }",
+                  "    }",
+                  "    , (error, res) => {",
+                  "      let listo = false;",
+                  "      try { listo = !error && (res.code === 200); } catch (_) {}",
+                  "      if (listo) {  return; }",
+                  "      if (++intentos < 60) { setTimeout(comprobar, 500); return; }",
+                  "      console.log('No se cumplió la condición esperada en 30 s: auth-service devuelva la cuenta a ACTIVA al terminar el período');",
+                  "    });",
+                  "  }",
+                  "  comprobar();",
+                  "})();"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Responde 200: la cuenta volvió a estar activa', () => {",
+                  "    pm.response.to.have.status(200);",
+                  "    pm.expect(pm.response.json().rol).to.eql('USER');",
+                  "});",
+                  "",
+                  "// El token se renueva porque el resto del recorrido sigue usando esta identidad.",
+                  "pm.collectionVariables.set('tokenUsuario', pm.response.json().token);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"usuario\": \"{{empleadoEmail}}\",\n  \"password\": \"{{empleadoPasswordNueva}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{gatewayBaseUrl}}/auth/login",
+              "host": [
+                "{{gatewayBaseUrl}}"
+              ],
+              "path": [
+                "auth",
+                "login"
+              ]
+            },
+            "description": "La reactivación también llega por evento. Solo se reactiva lo que se suspendió por vacaciones: una baja permanente no se revierte por este camino, y eso se comprueba al final del recorrido."
+          }
+        },
+        {
+          "name": "05.13 Cancelar el período programado",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Responde 200 o 204', () => {",
+                  "    pm.expect(pm.response.code).to.be.oneOf([200, 204]);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "DELETE",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{gatewayBaseUrl}}/vacaciones/{{periodoId}}",
+              "host": [
+                "{{gatewayBaseUrl}}"
+              ],
+              "path": [
+                "vacaciones",
+                "{{periodoId}}"
+              ]
+            },
+            "description": "Cancela el período que seguía PROGRAMADA y devuelve los días al saldo."
+          }
+        }
+      ]
+    },
+    {
+      "name": "06 Historial de notificaciones",
+      "description": "notifications-service consume los seis eventos del catálogo y simula el correo. Guarda un historial consultable, pero sin credenciales dentro.",
+      "item": [
+        {
+          "name": "06.1 Listar el historial de notificaciones",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Espera a que exista alguna notificación del empleado.",
+                  "//",
+                  "// Es un efecto asíncrono: viaja por RabbitMQ y el publicador lo envía en su",
+                  "// siguiente ciclo. Se comprueba una condición real, con un tope de 30 s.",
+                  "const base  = pm.environment.get('gatewayBaseUrl') || pm.variables.get('gatewayBaseUrl');",
+                  "const admin = pm.collectionVariables.get('tokenAdmin');",
+                  "",
+                  "(() => {",
+                  "  let intentos = 0;",
+                  "  function comprobar() {",
+                  "    pm.sendRequest({",
+                  "      url: base + '/notificaciones/empleado/' + pm.collectionVariables.get('empleadoId'),",
+                  "      method: 'GET',",
+                  "      header: { Authorization: 'Bearer ' + admin, Accept: 'application/json' }",
+                  "    }",
+                  "    , (error, res) => {",
+                  "      let listo = false;",
+                  "      try { listo = !error && (res.code === 200); } catch (_) {}",
+                  "      if (listo) {  return; }",
+                  "      if (++intentos < 60) { setTimeout(comprobar, 500); return; }",
+                  "      console.log('No se cumplió la condición esperada en 30 s: exista alguna notificación del empleado');",
+                  "    });",
+                  "  }",
+                  "  comprobar();",
+                  "})();"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Responde 200 con el historial', () => {",
+                  "    pm.response.to.have.status(200);",
+                  "    const b = pm.response.json();",
+                  "    const filas = Array.isArray(b) ? b : b.data;",
+                  "    pm.expect(filas).to.be.an('array');",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{gatewayBaseUrl}}/notificaciones?size=20",
+              "host": [
+                "{{gatewayBaseUrl}}"
+              ],
+              "path": [
+                "notificaciones?size=20"
+              ]
+            },
+            "description": "Historial completo, paginado y ordenado por fecha de proceso."
+          }
+        },
+        {
+          "name": "06.2 Filtrar el historial por empleado",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Responde 200 con notificaciones del empleado', () => {",
+                  "    pm.response.to.have.status(200);",
+                  "    const b = pm.response.json();",
+                  "    const filas = Array.isArray(b) ? b : b.data;",
+                  "    pm.expect(filas.length).to.be.at.least(1);",
+                  "});",
+                  "",
+                  "pm.test('Están los correos de la cadena de alta', () => {",
+                  "    const b = pm.response.json();",
+                  "    const filas = Array.isArray(b) ? b : b.data;",
+                  "    const tipos = filas.map(f => f.eventType);",
+                  "    pm.expect(tipos).to.include('usuario.creado');",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{gatewayBaseUrl}}/notificaciones/empleado/{{empleadoId}}",
+              "host": [
+                "{{gatewayBaseUrl}}"
+              ],
+              "path": [
+                "notificaciones",
+                "empleado",
+                "{{empleadoId}}"
+              ]
+            },
+            "description": "Las notificaciones del empleado que esta ejecución dio de alta: su correo de bienvenida y el de recuperación."
+          }
+        },
+        {
+          "name": "06.3 Comprobar que el historial no conserva los tokens",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const b = pm.response.json();",
+                  "const filas = Array.isArray(b) ? b : b.data;",
+                  "const creado = filas.find(f => f.eventType === 'usuario.creado');",
+                  "",
+                  "pm.test('Existe el correo de bienvenida', () => pm.expect(creado).to.not.be.undefined);",
+                  "",
+                  "pm.test('Su payload no guarda el token', () => {",
+                  "    const datos = (creado && creado.payload && creado.payload.data) || {};",
+                  "    pm.expect(datos).to.not.have.property('token');",
+                  "});",
+                  "",
+                  "pm.test('Pero sí conserva los datos públicos del empleado', () => {",
+                  "    const datos = (creado && creado.payload && creado.payload.data) || {};",
+                  "    pm.expect(datos).to.have.property('id');",
+                  "    pm.expect(datos).to.have.property('email');",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{gatewayBaseUrl}}/notificaciones/empleado/{{empleadoId}}",
+              "host": [
+                "{{gatewayBaseUrl}}"
+              ],
+              "path": [
+                "notificaciones",
+                "empleado",
+                "{{empleadoId}}"
+              ]
+            },
+            "description": "El token de activación viaja en el evento, pero el historial guarda solo campos públicos: un token de un solo uso en texto plano dentro de una base de datos consultable por API era un hallazgo de seguridad. Esta es la aserción que lo mantiene cerrado."
+          }
+        },
+        {
+          "name": "06.4 Rechazar una escritura sobre el historial",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Responde 405', () => pm.response.to.have.status(405));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"intento\": \"escribir en el historial\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{gatewayBaseUrl}}/notificaciones",
+              "host": [
+                "{{gatewayBaseUrl}}"
+              ],
+              "path": [
+                "notificaciones"
+              ]
+            },
+            "description": "El historial es de solo consulta: lo escribe el consumidor de eventos, no un cliente HTTP."
+          }
+        }
+      ]
+    },
+    {
+      "name": "07 Vista agregada del empleado",
+      "description": "Un endpoint del propio gateway que compone en una respuesta lo que viven tres servicios distintos, con resiliencia por dependencia.",
+      "item": [
+        {
+          "name": "07.1 Consultar el expediente completo del empleado",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Responde 200 con los tres bloques', () => {",
+                  "    pm.response.to.have.status(200);",
+                  "    const b = pm.response.json();",
+                  "    pm.expect(b.empleado, 'empleado').to.be.an('object');",
+                  "    pm.expect(b.perfil, 'perfil').to.be.an('object');",
+                  "    pm.expect(b.vacaciones, 'vacaciones').to.be.an('object');",
+                  "});",
+                  "",
+                  "pm.test('Los tres hablan del mismo empleado', () => {",
+                  "    const b = pm.response.json();",
+                  "    const id = pm.collectionVariables.get('empleadoId');",
+                  "    pm.expect(b.empleado.id).to.eql(id);",
+                  "    pm.expect(b.perfil.empleadoId).to.eql(id);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{gatewayBaseUrl}}/empleados/{{empleadoId}}/completo",
+              "host": [
+                "{{gatewayBaseUrl}}"
+              ],
+              "path": [
+                "empleados",
+                "{{empleadoId}}",
+                "completo"
+              ]
+            },
+            "description": "Agrega empleado, perfil y vacaciones en paralelo. El empleado es obligatorio; el perfil y el saldo son opcionales y degradan a null si su servicio no responde, con un circuit breaker por dependencia."
+          }
+        },
+        {
+          "name": "07.2 Consultar el expediente de un empleado inexistente",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Responde 404', () => pm.response.to.have.status(404));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{gatewayBaseUrl}}/empleados/NO-EXISTE-{{sufijo}}/completo",
+              "host": [
+                "{{gatewayBaseUrl}}"
+              ],
+              "path": [
+                "empleados",
+                "NO-EXISTE-{{sufijo}}",
+                "completo"
+              ]
+            },
+            "description": "Sin empleado no hay nada que agregar: responde 404, no 503. Un 404 del servicio de empleados es una respuesta correcta, no una caída."
+          }
+        },
+        {
+          "name": "07.3 Rechazar el expediente completo sin token",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Responde 401', () => pm.response.to.have.status(401));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{gatewayBaseUrl}}/empleados/{{empleadoId}}/completo",
+              "host": [
+                "{{gatewayBaseUrl}}"
+              ],
+              "path": [
+                "empleados",
+                "{{empleadoId}}",
+                "completo"
+              ]
+            },
+            "description": "Aunque lo atiende un controlador del propio gateway, pasa por los mismos filtros de seguridad que las rutas que se reenvían."
+          }
+        }
+      ]
+    },
+    {
+      "name": "08 Seguridad y control de acceso",
+      "description": "La validación del JWT y las reglas de rol viven solo en el gateway: es el único componente publicado al host, y los servicios de negocio confían en él porque no son alcanzables desde fuera.",
+      "item": [
+        {
+          "name": "08.1 Rechazar una petición sin token",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Responde 401', () => pm.response.to.have.status(401));",
+                  "pm.test('Explica qué cabecera falta', () => {",
+                  "    pm.expect(pm.response.json().message).to.include('Authorization');",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{gatewayBaseUrl}}/empleados",
+              "host": [
+                "{{gatewayBaseUrl}}"
+              ],
+              "path": [
+                "empleados"
+              ]
+            },
+            "description": "Toda ruta que no sea pública exige un Access JWT."
+          }
+        },
+        {
+          "name": "08.2 Rechazar un token malformado",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Responde 401', () => pm.response.to.have.status(401));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer esto-no-es-un-jwt"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{gatewayBaseUrl}}/empleados",
+              "host": [
+                "{{gatewayBaseUrl}}"
+              ],
+              "path": [
+                "empleados"
+              ]
+            },
+            "description": "Cualquier cosa que no sea un JWT verificable se rechaza antes de llegar al servicio."
+          }
+        },
+        {
+          "name": "08.3 Rechazar las cabeceras de identidad enviadas por el cliente",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Responde 401: las cabeceras no otorgan identidad', () => {",
+                  "    pm.response.to.have.status(401);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              },
+              {
+                "key": "X-Auth-User",
+                "value": "admin"
+              },
+              {
+                "key": "X-Auth-Role",
+                "value": "ADMIN"
+              }
+            ],
+            "url": {
+              "raw": "{{gatewayBaseUrl}}/empleados",
+              "host": [
+                "{{gatewayBaseUrl}}"
+              ],
+              "path": [
+                "empleados"
+              ]
+            },
+            "description": "El gateway propaga la identidad a los servicios en X-Auth-User y X-Auth-Role. Si aceptara esas cabeceras del cliente, cualquiera podría declararse ADMIN: se eliminan antes de validar."
+          }
+        },
+        {
+          "name": "08.4 Un empleado no puede crear departamentos",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Responde 403', () => pm.response.to.have.status(403));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenUsuario}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"nombre\": \"Intento de un USER\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{gatewayBaseUrl}}/departamentos",
+              "host": [
+                "{{gatewayBaseUrl}}"
+              ],
+              "path": [
+                "departamentos"
+              ]
+            },
+            "description": "El rol USER es de solo lectura fuera de sus propios recursos."
+          }
+        },
+        {
+          "name": "08.5 Un empleado no puede retirar a nadie",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Responde 403', () => pm.response.to.have.status(403));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "DELETE",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenUsuario}}"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{gatewayBaseUrl}}/empleados/{{companeroId}}",
+              "host": [
+                "{{gatewayBaseUrl}}"
+              ],
+              "path": [
+                "empleados",
+                "{{companeroId}}"
+              ]
+            },
+            "description": "Tampoco las bajas: son operaciones de administración."
+          }
+        },
+        {
+          "name": "08.6 Un token de restablecimiento no sirve como token de acceso",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Responde 401 por el tipo de token', () => pm.response.to.have.status(401));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenActivacion}}"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{gatewayBaseUrl}}/empleados",
+              "host": [
+                "{{gatewayBaseUrl}}"
+              ],
+              "path": [
+                "empleados"
+              ]
+            },
+            "description": "Los dos tipos de token se firman con el mismo secreto, así que la firma no los distingue: lo hace el claim type. Sin esa comprobación, un token de activación abriría la API."
+          }
+        }
+      ]
+    },
+    {
+      "name": "09 Observabilidad y contratos",
+      "description": "Salud, métricas y documentación. Las tres rutas son públicas a propósito: las usan Docker, Prometheus y quien lea la API.",
+      "item": [
+        {
+          "name": "09.1 Comprobar la salud del gateway",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Responde 200 y se identifica', () => {",
+                  "    pm.response.to.have.status(200);",
+                  "    pm.expect(pm.response.json().service).to.eql('api-gateway');",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{gatewayBaseUrl}}/health",
+              "host": [
+                "{{gatewayBaseUrl}}"
+              ],
+              "path": [
+                "health"
+              ]
+            },
+            "description": "Sonda propia del borde, sin token. Es la que Docker consulta para decidir si el contenedor está sano."
+          }
+        },
+        {
+          "name": "09.2 Comprobar la salud de empleados a través del gateway",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Responde 200 y el servicio se identifica', () => {",
+                  "    pm.response.to.have.status(200);",
+                  "    const b = pm.response.json();",
+                  "    pm.expect(b.service).to.eql('empleados');",
+                  "    pm.expect(b.status).to.eql('ok');",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{gatewayBaseUrl}}/empleados/health",
+              "host": [
+                "{{gatewayBaseUrl}}"
+              ],
+              "path": [
+                "empleados",
+                "health"
+              ]
+            },
+            "description": "Sonda ligera, sin token y sin consultar dependencias: responde si el servicio atiende peticiones. La sonda detallada —con un check por dependencia y 503 si alguna falla— vive en la raíz del servicio, que no está enrutada al exterior: la consulta Docker desde dentro del contenedor, que es quien decide si reiniciarlo."
+          }
+        },
+        {
+          "name": "09.3 Consultar las métricas del gateway en formato Prometheus",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Responde 200 en texto de Prometheus', () => {",
+                  "    pm.response.to.have.status(200);",
+                  "    pm.expect(pm.response.text()).to.include('# HELP');",
+                  "    pm.expect(pm.response.text()).to.include('# TYPE');",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "text/plain"
+              }
+            ],
+            "url": {
+              "raw": "{{gatewayBaseUrl}}/metrics",
+              "host": [
+                "{{gatewayBaseUrl}}"
+              ],
+              "path": [
+                "metrics"
+              ]
+            },
+            "description": "Alias común a los siete servicios. Los tres servicios Java conservan además su ruta anterior, /actuator/prometheus, para no romper a quien ya la usaba. La respuesta es texto, no JSON: pedir solo JSON en la cabecera Accept devuelve 406, y por eso esta petición declara text/plain."
+          }
+        },
+        {
+          "name": "09.4 Consultar el contrato OpenAPI de empleados",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Responde 200 con un contrato OpenAPI', () => {",
+                  "    pm.response.to.have.status(200);",
+                  "    const d = pm.response.json();",
+                  "    pm.expect(d.openapi || d.swagger).to.be.a('string');",
+                  "    pm.expect(d.paths).to.be.an('object');",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{gatewayBaseUrl}}/v3/api-docs/empleados",
+              "host": [
+                "{{gatewayBaseUrl}}"
+              ],
+              "path": [
+                "v3",
+                "api-docs",
+                "empleados"
+              ]
+            },
+            "description": "El gateway agrega los contratos de los seis servicios con API pública bajo /v3/api-docs/<servicio>, y los presenta juntos en su Swagger UI."
+          }
+        },
+        {
+          "name": "09.5 Consultar el contrato OpenAPI de perfiles",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Responde 200 y describe el recurso perfil', () => {",
+                  "    pm.response.to.have.status(200);",
+                  "    const d = pm.response.json();",
+                  "    pm.expect(Object.keys(d.paths)).to.include('/perfiles');",
+                  "    pm.expect(d.components.schemas).to.have.property('Perfil');",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{gatewayBaseUrl}}/v3/api-docs/perfiles",
+              "host": [
+                "{{gatewayBaseUrl}}"
+              ],
+              "path": [
+                "v3",
+                "api-docs",
+                "perfiles"
+              ]
+            },
+            "description": "Mismo mecanismo para los servicios que no son Java."
+          }
+        }
+      ]
+    },
+    {
+      "name": "10 Baja del empleado",
+      "description": "El retiro es una baja lógica que se propaga por eventos: archiva el perfil, desactiva la cuenta de forma permanente y cancela las vacaciones pendientes. El historial nunca se borra.",
+      "item": [
+        {
+          "name": "10.1 Retirar al empleado",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Responde 200 con el empleado retirado', () => {",
+                  "    pm.response.to.have.status(200);",
+                  "    const e = pm.response.json();",
+                  "    pm.expect(e.estado).to.eql('RETIRADO');",
+                  "    pm.expect(e.fechaRetiro).to.not.be.null;",
+                  "});",
+                  "",
+                  "pm.test('La fecha de retiro lleva la hora, no solo el día', () => {",
+                  "    pm.expect(pm.response.json().fechaRetiro).to.match(/^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}/);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "DELETE",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{gatewayBaseUrl}}/empleados/{{empleadoId}}",
+              "host": [
+                "{{gatewayBaseUrl}}"
+              ],
+              "path": [
+                "empleados",
+                "{{empleadoId}}"
+              ]
+            },
+            "description": "No elimina la fila: cambia el estado a RETIRADO y guarda la fecha y hora exactas del hecho. Publica \"empleado.retirado\"."
+          }
+        },
+        {
+          "name": "10.2 Rechazar el retiro de un empleado ya retirado",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Responde 400 o 409', () => {",
+                  "    pm.expect(pm.response.code).to.be.oneOf([400, 409]);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "DELETE",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{gatewayBaseUrl}}/empleados/{{empleadoId}}",
+              "host": [
+                "{{gatewayBaseUrl}}"
+              ],
+              "path": [
+                "empleados",
+                "{{empleadoId}}"
+              ]
+            },
+            "description": "La operación no es idempotente a propósito: repetirla es un error del cliente, no una acción sin efecto."
+          }
+        },
+        {
+          "name": "10.3 Comprobar que el perfil quedó archivado",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Espera a que el perfil quede RETIRADO por el evento de retiro.",
+                  "//",
+                  "// Es un efecto asíncrono: viaja por RabbitMQ y el publicador lo envía en su",
+                  "// siguiente ciclo. Se comprueba una condición real, con un tope de 30 s.",
+                  "const base  = pm.environment.get('gatewayBaseUrl') || pm.variables.get('gatewayBaseUrl');",
+                  "const admin = pm.collectionVariables.get('tokenAdmin');",
+                  "",
+                  "(() => {",
+                  "  let intentos = 0;",
+                  "  function comprobar() {",
+                  "    pm.sendRequest({",
+                  "      url: base + '/perfiles/' + pm.collectionVariables.get('empleadoId'),",
+                  "      method: 'GET',",
+                  "      header: { Authorization: 'Bearer ' + admin, Accept: 'application/json' }",
+                  "    }",
+                  "    , (error, res) => {",
+                  "      let listo = false;",
+                  "      try { listo = !error && (res.code === 200 && res.json().estado === 'RETIRADO'); } catch (_) {}",
+                  "      if (listo) {  return; }",
+                  "      if (++intentos < 60) { setTimeout(comprobar, 500); return; }",
+                  "      console.log('No se cumplió la condición esperada en 30 s: el perfil quede RETIRADO por el evento de retiro');",
+                  "    });",
+                  "  }",
+                  "  comprobar();",
+                  "})();"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Responde 200 con el perfil retirado y archivado', () => {",
+                  "    pm.response.to.have.status(200);",
+                  "    const p = pm.response.json();",
+                  "    pm.expect(p.estado).to.eql('RETIRADO');",
+                  "    pm.expect(p.archivado).to.eql(true);",
+                  "    pm.expect(p.fechaRetiro).to.not.be.null;",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{gatewayBaseUrl}}/perfiles/{{empleadoId}}",
+              "host": [
+                "{{gatewayBaseUrl}}"
+              ],
+              "path": [
+                "perfiles",
+                "{{empleadoId}}"
+              ]
+            },
+            "description": "El perfil no se borra —el historial se conserva para auditoría— pero se archiva, y el archivado se escribe en la misma operación que el cambio de estado."
+          }
+        },
+        {
+          "name": "10.4 Comprobar que el perfil salió del listado vigente",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Responde 200 y el perfil retirado ya no aparece', () => {",
+                  "    pm.response.to.have.status(200);",
+                  "    const b = pm.response.json();",
+                  "    const filas = Array.isArray(b) ? b : b.data;",
+                  "    const ids = filas.map(p => p.empleadoId);",
+                  "    pm.expect(ids).to.not.include(pm.collectionVariables.get('empleadoId'));",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{gatewayBaseUrl}}/perfiles?archivado=false&limit=100",
+              "host": [
+                "{{gatewayBaseUrl}}"
+              ],
+              "path": [
+                "perfiles?archivado=false&limit=100"
+              ]
+            },
+            "description": "Es el efecto práctico del archivado: las consultas corrientes dejan de arrastrarlo."
+          }
+        },
+        {
+          "name": "10.5 Comprobar que la cuenta quedó desactivada de forma permanente",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Espera a que auth-service desactive la cuenta por el retiro.",
+                  "//",
+                  "// Es un efecto asíncrono: viaja por RabbitMQ y el publicador lo envía en su",
+                  "// siguiente ciclo. Se comprueba una condición real, con un tope de 30 s.",
+                  "const base  = pm.environment.get('gatewayBaseUrl') || pm.variables.get('gatewayBaseUrl');",
+                  "const admin = pm.collectionVariables.get('tokenAdmin');",
+                  "",
+                  "(() => {",
+                  "  let intentos = 0;",
+                  "  function comprobar() {",
+                  "    pm.sendRequest({",
+                  "      url: base + '/auth/login',",
+                  "      method: 'POST',",
+                  "      header: { 'Content-Type': 'application/json' },",
+                  "      body: { mode: 'raw', raw: JSON.stringify({ usuario: pm.collectionVariables.get('empleadoEmail'), password: pm.collectionVariables.get('empleadoPasswordNueva') }) }",
+                  "    }",
+                  "    , (error, res) => {",
+                  "      let listo = false;",
+                  "      try { listo = !error && (res.code === 401 && String(res.text()).indexOf('permanente') >= 0); } catch (_) {}",
+                  "      if (listo) {  return; }",
+                  "      if (++intentos < 60) { setTimeout(comprobar, 500); return; }",
+                  "      console.log('No se cumplió la condición esperada en 30 s: auth-service desactive la cuenta por el retiro');",
+                  "    });",
+                  "  }",
+                  "  comprobar();",
+                  "})();"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Responde 401 por baja permanente', () => {",
+                  "    pm.response.to.have.status(401);",
+                  "    pm.expect(pm.response.json().message).to.include('permanente');",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"usuario\": \"{{empleadoEmail}}\",\n  \"password\": \"{{empleadoPasswordNueva}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{gatewayBaseUrl}}/auth/login",
+              "host": [
+                "{{gatewayBaseUrl}}"
+              ],
+              "path": [
+                "auth",
+                "login"
+              ]
+            },
+            "description": "A diferencia de la suspensión por vacaciones, esta baja no se revierte: ni el login ni la recuperación la reactivan."
+          }
+        },
+        {
+          "name": "10.6 Comprobar que el empleado aparece en la auditoría de retiros",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Responde 200 y solo trae retirados', () => {",
+                  "    pm.response.to.have.status(200);",
+                  "    const b = pm.response.json();",
+                  "    const filas = Array.isArray(b) ? b : b.data;",
+                  "    filas.forEach(e => pm.expect(e.estado).to.eql('RETIRADO'));",
+                  "});",
+                  "",
+                  "pm.test('El empleado de esta ejecución está en la auditoría', () => {",
+                  "    const b = pm.response.json();",
+                  "    const filas = Array.isArray(b) ? b : b.data;",
+                  "    pm.expect(filas.map(e => e.id)).to.include(pm.collectionVariables.get('empleadoId'));",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{gatewayBaseUrl}}/empleados?desde=2020-01-01&hasta=2030-12-31",
+              "host": [
+                "{{gatewayBaseUrl}}"
+              ],
+              "path": [
+                "empleados?desde=2020-01-01&hasta=2030-12-31"
+              ]
+            },
+            "description": "Con desde y hasta, el listado se convierte en la auditoría de retiros: fuerza el estado RETIRADO y acota por fecha de retiro, con los dos límites inclusivos."
+          }
+        },
+        {
+          "name": "10.7 Rechazar una auditoría sin el rango completo",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Responde 400 pidiendo el rango', () => {",
+                  "    pm.response.to.have.status(400);",
+                  "    pm.expect(pm.response.json().message).to.include('obligatorio');",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{gatewayBaseUrl}}/empleados/auditoria",
+              "host": [
+                "{{gatewayBaseUrl}}"
+              ],
+              "path": [
+                "empleados",
+                "auditoria"
+              ]
+            },
+            "description": "Un rango abierto es una consulta sin techo, y acotar es justo lo que una auditoría necesita. Esta ruta se conserva como alias de la anterior por compatibilidad."
+          }
+        },
+        {
+          "name": "10.8 Rechazar el borrado de un departamento con empleados",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Responde 409 por tener empleados asociados', () => {",
+                  "    pm.response.to.have.status(409);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "DELETE",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{gatewayBaseUrl}}/departamentos/{{departamentoId}}",
+              "host": [
+                "{{gatewayBaseUrl}}"
+              ],
+              "path": [
+                "departamentos",
+                "{{departamentoId}}"
+              ]
+            },
+            "description": "Las bases de datos están separadas por servicio, así que no hay una llave foránea que PostgreSQL pueda defender: departments-service pregunta a employees-service antes de borrar. Si no pudiera preguntar, responde 503 y no borra."
+          }
+        },
+        {
+          "name": "10.9 Comprobar que el historial de notificaciones conserva el retiro",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Espera a que llegue la notificación del retiro.",
+                  "//",
+                  "// Es un efecto asíncrono: viaja por RabbitMQ y el publicador lo envía en su",
+                  "// siguiente ciclo. Se comprueba una condición real, con un tope de 30 s.",
+                  "const base  = pm.environment.get('gatewayBaseUrl') || pm.variables.get('gatewayBaseUrl');",
+                  "const admin = pm.collectionVariables.get('tokenAdmin');",
+                  "",
+                  "(() => {",
+                  "  let intentos = 0;",
+                  "  function comprobar() {",
+                  "    pm.sendRequest({",
+                  "      url: base + '/notificaciones/empleado/' + pm.collectionVariables.get('empleadoId'),",
+                  "      method: 'GET',",
+                  "      header: { Authorization: 'Bearer ' + admin, Accept: 'application/json' }",
+                  "    }",
+                  "    , (error, res) => {",
+                  "      let listo = false;",
+                  "      try { listo = !error && (res.code === 200 && JSON.stringify(res.json()).indexOf('empleado.retirado') >= 0); } catch (_) {}",
+                  "      if (listo) {  return; }",
+                  "      if (++intentos < 60) { setTimeout(comprobar, 500); return; }",
+                  "      console.log('No se cumplió la condición esperada en 30 s: llegue la notificación del retiro');",
+                  "    });",
+                  "  }",
+                  "  comprobar();",
+                  "})();"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Responde 200 y están los eventos del ciclo completo', () => {",
+                  "    pm.response.to.have.status(200);",
+                  "    const b = pm.response.json();",
+                  "    const filas = Array.isArray(b) ? b : b.data;",
+                  "    const tipos = filas.map(f => f.eventType);",
+                  "    pm.expect(tipos, 'bienvenida').to.include('usuario.creado');",
+                  "    pm.expect(tipos, 'retiro').to.include('empleado.retirado');",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAdmin}}"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{gatewayBaseUrl}}/notificaciones/empleado/{{empleadoId}}",
+              "host": [
+                "{{gatewayBaseUrl}}"
+              ],
+              "path": [
+                "notificaciones",
+                "empleado",
+                "{{empleadoId}}"
+              ]
+            },
+            "description": "Cierre del recorrido: el historial guarda toda la vida de la cuenta, desde la bienvenida hasta la desactivación."
+          }
+        }
+      ]
+    }
+  ],
+  "variable": [
+    {
+      "key": "tokenAdmin",
+      "value": ""
+    },
+    {
+      "key": "tokenUsuario",
+      "value": ""
+    },
+    {
+      "key": "tokenActivacion",
+      "value": ""
+    },
+    {
+      "key": "sufijo",
+      "value": ""
+    },
+    {
+      "key": "departamentoId",
+      "value": ""
+    },
+    {
+      "key": "empleadoId",
+      "value": ""
+    },
+    {
+      "key": "empleadoEmail",
+      "value": ""
+    },
+    {
+      "key": "empleadoNumero",
+      "value": ""
+    },
+    {
+      "key": "companeroId",
+      "value": ""
+    },
+    {
+      "key": "companeroEmail",
+      "value": ""
+    },
+    {
+      "key": "companeroNumero",
+      "value": ""
+    },
+    {
+      "key": "periodoId",
+      "value": ""
+    },
+    {
+      "key": "periodoInmediatoId",
+      "value": ""
+    },
+    {
+      "key": "hoyISO",
+      "value": ""
+    },
+    {
+      "key": "mananaISO",
+      "value": ""
+    },
+    {
+      "key": "empleadoPassword",
+      "value": "Secreta123"
+    },
+    {
+      "key": "empleadoPasswordNueva",
+      "value": "Nueva4567"
+    }
+  ]
+}
