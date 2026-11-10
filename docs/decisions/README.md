@@ -21,6 +21,7 @@ Registro formal de decisiones técnicas (Architecture Decision Records) del sist
 | [ADR-011](ADR-011-verificacion-de-efectos-asincronos.md) | Verificar efectos asíncronos con polling y disparar el tiempo a mano | Aceptada |
 | [ADR-012](ADR-012-departments-en-python.md) | Reconstruir departments-service en Python (FastAPI) conservando su contrato | Aceptada |
 | [ADR-013](ADR-013-renombrar-campos-publicados.md) | Renombrar un campo publicado conservando el nombre antiguo como alias | Aceptada |
+| [ADR-014](ADR-014-outbox-transaccional.md) | Publicar los eventos mediante un outbox transaccional | Aceptada |
 
 ---
 

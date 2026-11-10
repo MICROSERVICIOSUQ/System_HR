@@ -92,16 +92,81 @@ Todos los mensajes se emiten utilizando el sobre estándar definido en el proyec
 
 ---
 
-## Decisión de Arquitectura: Transaccionalidad y Consistencia
+## Transaccionalidad: outbox de eventos
 
-### ¿Por qué no Outbox Pattern en esta etapa?
-El patrón *Transactional Outbox* requiere una tabla adicional en base de datos (`outbox_events`), coordinación transaccional local y un proceso en segundo plano (poller periódico o Change Data Capture como Debezium) para publicar en RabbitMQ. 
+Los eventos **no se publican directamente** en RabbitMQ. Se escriben en la tabla
+`outbox_evento`, en la misma transacción que el cambio de negocio, y un
+publicador periódico la vacía contra el broker. El razonamiento completo y las
+alternativas están en
+[ADR-014](../../docs/decisions/ADR-014-outbox-transaccional.md).
 
-Para esta fase del Reto 4, se adopta la **estrategia de publicación confiable post-persistencia**:
-1. La operación de base de datos se ejecuta primero (validaciones, asignación de estado y `repository.save()`).
-2. Si la base de datos falla o se produce un rollback, **nunca se publica el evento en RabbitMQ**, evitando inconsistencias por eventos fantasmas.
-3. Tras la persistencia exitosa, se emite el evento al exchange `hr.events`.
-4. Si ocurre un fallo en RabbitMQ, el error se captura y se registra con log detallado a nivel `ERROR` (incluyendo tipo, id de evento, id de empleado y causa raíz) para alerta inmediata a observabilidad, manteniendo intacta la respuesta HTTP de persistencia (`201` o `200`) para no degradar el contrato con clientes HTTP.
+### Qué problema resuelve
+
+Antes había dos operaciones contra dos sistemas sin nada que las atara: un
+`repository.save()` y, después, un `convertAndSend` envuelto en un `try/catch`
+que solo registraba el fallo. Con el broker caído el empleado quedaba creado y
+`empleado.creado` no llegaba nunca, así que **no se creaba su cuenta, ni su
+perfil, ni su saldo de vacaciones** — y nadie lo reintentaba. El síntoma aparecía
+días después, con el empleado pidiendo acceso, y la reparación era manual.
+
+Ahora la tabla del outbox vive en la **misma base de datos** que los empleados,
+así que basta una transacción local: o se confirman el empleado y su evento, o no
+se confirma ninguno. No hace falta una transacción distribuida.
+
+| Pieza | Qué hace |
+|---|---|
+| `outbox_evento` (migración `V4`) | Guarda el sobre serializado; `publicado_en` nulo mientras espera |
+| `EmployeeEventPublisher` | Lo escribe dentro de la transacción de quien llama |
+| `PublicadorDeOutbox` | `@Scheduled` cada 5 s: lee lo pendiente, publica y marca |
+
+Garantiza entrega **al menos una vez**. No se persigue exactamente una vez porque
+no hace falta: los consumidores descartan los repetidos por `eventId` (ADR-007).
+
+### Cómo verlo funcionar
+
+```bash
+docker compose stop rabbitmq
+```
+
+```bash
+curl -s -o /dev/null -w "%{http_code}
+" -X POST http://localhost:8080/empleados   -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json"   -d '{"id":"EOUT1","nombre":"Sofia","apellido":"Ramirez","email":"sofia@empresa.com","numeroEmpleado":"EMP-OUT-001","cargo":"QA","area":"TI","departamentoId":"D001","fechaIngreso":"2026-06-01"}'
+```
+
+Responde **201**: el alta ya no depende del broker. Y el evento está esperando:
+
+```bash
+docker compose exec database-empleados psql -U postgres -d gestion_empleados -c "SELECT tipo, agregado_id, intentos, publicado_en IS NULL AS pendiente, left(ultimo_error,40) FROM outbox_evento ORDER BY creado_en DESC LIMIT 5;"
+```
+
+```
+      tipo       | agregado_id | intentos | pendiente |              left
+-----------------+-------------+----------+-----------+--------------------------------
+ empleado.creado | EOUT1       |        1 | t         | java.net.UnknownHostException: rabbitmq
+```
+
+Al devolver el broker, el evento sale solo y la cadena se completa:
+
+```bash
+docker compose start rabbitmq
+```
+
+```bash
+curl -s http://localhost:8080/perfiles/EOUT1 -H "Authorization: Bearer $TOKEN"
+```
+
+El perfil existe: `empleado.creado` llegó a su consumidor con minutos de retraso
+y sin que nadie interviniera. Antes ese evento se habría perdido para siempre.
+
+### Lo que no cubre
+
+- **Una sola instancia.** Dos réplicas publicarían las mismas filas; los
+  consumidores lo absorben por idempotencia, pero el trabajo se duplica. Se
+  resolvería con `SELECT ... FOR UPDATE SKIP LOCKED`.
+- **La tabla no se purga.** Los eventos publicados se conservan como auditoría;
+  hace falta un borrado por antigüedad.
+- **Solo está aquí.** `auth-service` y `vacations-service` siguen publicando
+  directamente: sus eventos aún se pueden perder.
 
 ---
 

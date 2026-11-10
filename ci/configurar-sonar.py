@@ -26,6 +26,14 @@ SONAR_PASSWORD_INICIAL = "admin"
 # los dos contenedores, porque el token solo existe después de crearlo aquí.
 DIRECTORIO_DE_SECRETOS = os.environ.get("SONAR_SECRETS_DIR")
 NOMBRE_DEL_TOKEN = "jenkins-system-hr"
+
+# Webhook con el que SonarQube avisa a Jenkins de que un analisis termino.
+# Sin el, el paso waitForQualityGate de los pipelines se queda esperando hasta
+# agotar su timeout de 10 minutos y la ejecucion acaba en ABORTED.
+NOMBRE_DEL_WEBHOOK = "Jenkins"
+URL_DEL_WEBHOOK = os.environ.get(
+    "SONAR_WEBHOOK_URL", "http://jenkins:8080/sonarqube-webhook/"
+)
 DEFAULT_PROJECTS = (
     "employees-service",
     "auth-service",
@@ -307,10 +315,41 @@ def ensure_token():
     print(f"Token '{NOMBRE_DEL_TOKEN}' escrito en {destino}")
 
 
+def ensure_webhook():
+    """Registra el webhook que avisa a Jenkins cuando termina un analisis.
+
+    El paso `waitForQualityGate` de los Jenkinsfile no consulta a SonarQube: se
+    queda esperando a que SonarQube le avise. Si el webhook no existe, la espera
+    agota el timeout de la etapa —10 minutos— y el pipeline termina en ABORTED
+    despues de haber hecho todo bien. Les pasaba a los tres pipelines Java.
+
+    Es idempotente: si ya hay un webhook con el mismo nombre y la misma URL, no
+    se toca; si la URL cambio, se borra y se vuelve a crear, porque la API no
+    permite actualizarla.
+    """
+    existentes = (request("webhooks/list") or {}).get("webhooks", [])
+    for webhook in existentes:
+        if webhook.get("name") != NOMBRE_DEL_WEBHOOK:
+            continue
+        if webhook.get("url") == URL_DEL_WEBHOOK:
+            print(f"Webhook '{NOMBRE_DEL_WEBHOOK}' ya configurado.")
+            return
+        request("webhooks/delete", data={"webhook": webhook["key"]})
+        print(f"Webhook '{NOMBRE_DEL_WEBHOOK}' tenia otra URL: se recrea.")
+        break
+
+    request(
+        "webhooks/create",
+        data={"name": NOMBRE_DEL_WEBHOOK, "url": URL_DEL_WEBHOOK},
+    )
+    print(f"Webhook '{NOMBRE_DEL_WEBHOOK}' creado -> {URL_DEL_WEBHOOK}")
+
+
 def main():
     projects = project_keys()
     wait_until_ready()
     ensure_admin_password()
+    ensure_webhook()
     ensure_projects(projects)
     ensure_quality_gate()
     associate_projects(projects)

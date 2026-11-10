@@ -12,7 +12,11 @@ import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
 import org.springframework.boot.test.context.SpringBootTest;
+import com.microservicios.employees.model.Employee;
 import org.springframework.boot.test.mock.mockito.MockBean;
+
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.when;
 import org.springframework.http.MediaType;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
@@ -107,6 +111,20 @@ class DepartmentCacheFallbackTest {
         circuit.reset();
         cache.clear();
         responseStatus.set(200);
+
+        // save() devuelve lo que recibe.
+        //
+        // Sin esta linea el mock devolvia null y el alta seguia con un empleado
+        // nulo: al publicar el evento reventaba con NullPointerException. No se
+        // notaba porque EmployeeService envolvia la publicacion en un try/catch
+        // que se tragaba cualquier excepcion — el mismo que ocultaba la perdida
+        // de eventos cuando RabbitMQ estaba caido. Al pasar al outbox, ese catch
+        // desaparecio y el fallo del doble quedo a la vista.
+        //
+        // Esta clase prueba el circuit breaker y la cache, no la persistencia,
+        // asi que lo correcto es que el doble se comporte como el repositorio
+        // real y devuelva la entidad guardada.
+        when(repository.save(any(Employee.class))).thenAnswer(inv -> inv.getArgument(0));
     }
 
     // ─────────────────────────────────────────────────────────────────────────

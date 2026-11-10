@@ -16,7 +16,7 @@ pipeline {
     }
 
     environment {
-        SONAR_PROJECT_KEY = 'system-hr-notifications'
+        SONAR_PROJECT_KEY = 'notifications-service'
         SONAR_QUALITY_GATE = 'RRHH-70'
         IMAGE = "system-hr/notifications-service:${BUILD_NUMBER}"
     }
@@ -46,7 +46,13 @@ pipeline {
             steps {
                 script {
                     docker.image('golang:1.25-alpine').inside(
-                        '-v hr-ci-go:/go/pkg/mod'
+                        // -u root: el volumen hr-ci-go pertenece a root y el
+                        // contenedor corria como uid 1000, asi que 'go mod
+                        // download' fallaba con "mkdir /go/pkg/mod/cache:
+                        // permission denied" en cada dependencia. Es el mismo
+                        // motivo por el que los pipelines de Node usan -u root
+                        // con hr-ci-npm.
+                        '-u root -v hr-ci-go:/go/pkg/mod'
                     ) {
                         dir('services/notifications-service') {
                             sh '''

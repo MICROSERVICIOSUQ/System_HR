@@ -24,6 +24,12 @@ porque rompe la mayoría de la suite BDD.
 > `profiles-service` y el punto 11 del 3.1. Cada arreglo se verificó con el
 > sistema levantado; los comandos y sus respuestas están en
 > [§5](#5-verificación-de-los-arreglos).
+>
+> **Segunda ronda (2026-11-09, tarde).** Se corrigió el CI del Dev 4 —nueve
+> defectos, ningún pipeline había llegado a ejecutarse— y con él los cuatro
+> pendientes que quedaban: el canal del token de activación, el campo `context`
+> en los tres servicios Java, el outbox transaccional de Empleados y
+> `GatewayTest`. Ver [§8](#8-segunda-ronda-el-ci-del-dev-4-y-los-cuatro-pendientes).
 
 ---
 
@@ -34,17 +40,22 @@ Ordenado por lo que más duele, no por el orden del informe.
 | # | Qué | Dónde | Estado |
 |---|---|---|---|
 | 0 | **El módulo `api-gateway` no compilaba**: `docker compose up --build` fallaba | `api-gateway` | ✅ corregido |
-| 1 | La sanitización de tokens deja sin token de activación a la suite BDD y a 4 colecciones de Postman | `notifications-service` + `e2e-tests` + `postman` | ⛔ **necesita una decisión de equipo** |
+| 1 | La sanitización de tokens dejaba sin token de activación a la suite BDD y a 4 colecciones de Postman | `auth-service` + `e2e-tests` + `postman` | ✅ corregido y verificado |
 | 2 | `/empleados/{id}/completo` llamaba a rutas que no existen: devolvía `perfil: null` y `vacaciones: null` siempre | `api-gateway` | ✅ corregido y verificado |
 | 3 | `/empleados/{id}/completo` no pasaba por la validación del JWT | `api-gateway` | ✅ corregido y verificado |
 | 4 | **Todo el historial de notificaciones respondía 404** por el `StripPrefix` de su ruta | `api-gateway` | ✅ corregido y verificado |
 | 5 | `profiles-service` no exponía `/docs` ni OpenAPI, no medía cobertura y su etapa de Jenkins fallaba | `profiles-service` | ✅ corregido y verificado |
-| 6 | Falta el campo `context` en los logs de los **3 servicios Java** (en Perfiles ya está) | `auth`, `employees`, `api-gateway` | ⚠️ pendiente |
-| 7 | Outbox en Empleados | `employees-service` | ⚠️ pendiente |
+| 6 | Faltaba el campo `context` en los logs de los **3 servicios Java** | `auth`, `employees`, `api-gateway` | ✅ corregido y verificado |
+| 7 | Outbox en Empleados | `employees-service` | ✅ corregido y verificado |
+| 8 | `GatewayTest` era del Reto 3 y proxificaba sin token: fallaba desde el Reto 5 | `api-gateway` | ✅ corregido y verificado |
+| 9 | **El CI del Dev 4 no funcionaba**: dieciocho defectos, desde la imagen de Jenkins hasta la clave de proyecto de Sonar | `jenkins/`, `ci/`, `Jenkinsfile` × 7, 3 poms | ✅ corregido, **los 7 pipelines en verde** |
 
-Los puntos 5, 6 y 7 son del informe. Los puntos 0 a 4 son consecuencia de
+Los puntos 5, 6 y 7 son del informe. Los puntos 0 a 4, 8 y 9 son consecuencia de
 integrar los lotes y **no están en el informe**, así que nadie los tenía
 asignados.
+
+**Todo lo de esta tabla está cerrado.** Los detalles de los puntos 1 y 6 a 9
+están en [§8](#8-segunda-ronda-el-ci-del-dev-4-y-los-cuatro-pendientes).
 
 ## El módulo del gateway no compilaba
 
@@ -68,7 +79,12 @@ las pruebas.
 
 # 2. Los defectos de integración
 
-## 2.1 Ya no hay forma de obtener el token de activación (sin resolver)
+## 2.1 Ya no había forma de obtener el token de activación
+
+> **Resuelto en la segunda ronda.** Se añadió el canal legítimo —un endpoint de
+> auth-service reservado al rol ADMIN— y se adaptaron la suite BDD y las cuatro
+> colecciones. El detalle está en [§8.2](#82-el-canal-del-token-de-activación).
+> Lo que sigue es el diagnóstico original, que explica por qué hacía falta.
 
 Dev 3 hizo lo que el informe pedía: el Go de notificaciones guarda el payload
 con una lista blanca de campos públicos y el token nunca se persiste.
@@ -293,12 +309,12 @@ cuatro rutas responden 200 y devuelven filas reales.
 | 3 | Aislamiento de puertos | CUMPLE | ✅ | Solo el gateway publica `8080`; los 6 servicios con `expose` |
 | 4 | Documentación OpenAPI y Swagger UI en `/docs` | PENDIENTE | ✅ | Perfiles ya expone `/docs` y `/openapi.json`; el gateway publica los **6** contratos |
 | 5 | `/health` con `checks` | PENDIENTE | ✅ | Los 6 servicios reportan `database` y `messageBroker`; el healthcheck de Auth ya apunta a `/health` |
-| 6 | Logs JSON estructurados | PENDIENTE | ⚠️ | Perfiles ya emite `context` y no usa `console.*`; **falta `context` en los 3 servicios Java** |
+| 6 | Logs JSON estructurados | PENDIENTE | ✅ | Los siete emiten `timestamp`, `level`, `service`, `context` y `traceId` |
 | 7 | Monitoreo (Prometheus) | PENDIENTE | ⚠️ | Funciona (8 targets), pero los Java siguen solo en `/actuator/prometheus`: el alias `/metrics` no se unificó |
 | 8 | Trazabilidad (OpenTelemetry) | CUMPLE | ✅ | W3C Trace Context en HTTP y AMQP, 3 lenguajes en una traza |
 | 9 | Gestión de secretos | PENDIENTE | ✅ | `scripts/setup-secrets.sh` ejecutable; `JWT_SECRET` vacío en `.env.example` |
-| 10 | CI/CD: Jenkins y SonarQube en Compose | PENDIENTE | ✅ | `jenkins`, `sonarqube`, `sonar-db`, `sonar-setup`; 7 `Jenkinsfile` y 7 `sonar-project.properties` |
-| 11 | Cobertura ≥ 70 % | PENDIENTE | ✅ | Perfiles: 49 pruebas y **95,40 %** con umbral que corta; los cinco servicios con lógica tienen umbral propio |
+| 10 | CI/CD: Jenkins y SonarQube en Compose | PENDIENTE | ✅ | Y además **funcionando**: 7 trabajos, Quality Gate aplicado y dos pipelines verdes. Nueve defectos corregidos ([§8](#8-segunda-ronda-el-ci-del-dev-4-y-los-cuatro-pendientes)) |
+| 11 | Cobertura ≥ 70 % | PENDIENTE | ✅ | **Verificada en SonarQube para los 7**, entre 72,2 % y 92,8 %, con el Quality Gate RRHH-70 aplicado ([§9](#9-los-siete-pipelines-ejecutados-de-verdad)) |
 
 ## Detalle de los tres puntos que cambiaron
 
@@ -436,7 +452,7 @@ proyecto. Eso era exactamente el caso de Perfiles.
 
 | Rol | Faltantes del informe | Hoy |
 |---|---|---|
-| **Gestión de Empleados** | 1. Unificar auditoría en `GET /empleados` · 2. `fechaRetiro` a `LocalDateTime` · 3. **Outbox en RabbitMQ** | 1 ✅ · 2 ✅ · 3 ❌ |
+| **Gestión de Empleados** | 1. Unificar auditoría en `GET /empleados` · 2. `fechaRetiro` a `LocalDateTime` · 3. Outbox en RabbitMQ | ✅ ✅ ✅ |
 | **Gestión de Departamentos** | 1. Reconstruir en Python · 2. Swagger UI en `/docs` · 3. Validar borrado con empleados | ✅ ✅ ✅ |
 | **Autenticación** | 1. `recoverPassword` solo ACTIVA · 2. Healthcheck a `/health` | ✅ ✅ |
 | **Gestión de Perfiles** | 1. Cinco campos · 2. Renombrar `empleadoId` · 3. Test ABAC 403 · 4. `archivado: true` | ✅ ✅ ✅ ✅ · y ya con `/docs`, cobertura y `context` |
@@ -682,3 +698,297 @@ Las 21 pruebas no ejecutables son las que abren un socket en loopback
 (`DepartmentCacheFallbackTest`, `DepartmentCircuitBreakerTest`, `GatewayTest`):
 fallan con `Unable to establish loopback connection`, que es una restricción de
 este equipo y no del código.
+
+---
+
+# 8. Segunda ronda: el CI del Dev 4 y los cuatro pendientes
+
+## 8.1 El CI nunca había funcionado
+
+Jenkins y SonarQube estaban en el Compose, con siete `Jenkinsfile` y siete
+`sonar-project.properties`, pero **ningún pipeline había llegado a ejecutarse**.
+Nueve defectos encadenados, cada uno tapando al siguiente:
+
+| # | Qué estaba mal | Arreglo |
+|---|---|---|
+| 1 | `setup-secrets.sh` reescribía **todas** las contraseñas de BD y de RabbitMQ con valores nuevos | Solo rellena las vacías, es idempotente, y una prueba lo fija |
+| 2 | `jenkins` usaba `image: jenkins/jenkins:lts-jdk21`, no su propio `Dockerfile` | `build: ./jenkins` |
+| 3 | Las tres variables de CI eran obligatorias con `${VAR:?...}` | Perfil `ci` + valor vacío + guarda en el entrypoint |
+| 4 | `sonar-setup` no recibía `SONAR_URL`: usaba `localhost:9000` dentro de su contenedor | `SONAR_URL: http://sonarqube:9000` |
+| 5 | Se autenticaba con `SONAR_ADMIN_PASSWORD`, que nadie había establecido | Cambia la de fábrica en el primer arranque |
+| 6 | Cinco llamadas iban como GET: *"HTTP method POST is required"* | A POST |
+| 7 | La verificación final leía `name` en vez de `qualityGate.name` | Corregido |
+| 8 | Nadie escribía el `SONAR_TOKEN` que casc espera en `/run/sonar` | Se genera, con permisos legibles por Jenkins, y **no se regenera** si sigue válido |
+| 9 | casc creaba 2 de 7 trabajos; el nodo no tenía la etiqueta `docker`; faltaba `GIT_URL`; `actualizar-fuente-local.py` solo corría en la rama `valentina` | Los 7 trabajos, la etiqueta, la variable y cualquier rama |
+
+Y dos más que aparecieron al ejecutar los pipelines de verdad:
+
+- **Ningún trabajo podía ejecutarse dos veces.** Las etapas corren contenedores
+  como root, que dejan archivos suyos en el workspace; Jenkins corre como
+  `jenkins`, así que el `deleteDir()` del build siguiente fallaba con
+  `AccessDeniedException`. Los siete `Jenkinsfile` vacían ahora el workspace con
+  un contenedor root antes de borrarlo.
+- **Los tres pipelines Java llamaban a `mvn` sin tenerlo.** El nodo trae JDK pero
+  no Maven: `mvn: not found`. Las etapas de Build, Test+JaCoCo y Sonar Scan corren
+  ahora dentro de `maven:3.9-eclipse-temurin-21`, con un volumen `hr-ci-m2` para
+  cachear dependencias, igual que los de Node usan `hr-ci-npm`.
+
+### El alcance de Sonar no coincidía con el de las pruebas
+
+El primer pipeline que llegó al Quality Gate lo **suspendió con 30,1 % de
+cobertura**, teniendo las pruebas al 80,18 %. La causa: `sonar.sources=.` en
+`departments-service`, de modo que el análisis incluía `migrations/`, `tests/` y
+hasta `.venv/`, mientras `pytest` mide solo `app/`. Se alineó el alcance de
+`departments` y de `profiles` con lo que miden sus pruebas, siguiendo el criterio
+que `vacations-service` ya aplicaba.
+
+### Verificado
+
+```console
+$ docker compose --profile ci up -d
+sonar-setup  | Verificada asociación: vacations-service -> RRHH-70
+sonar-setup  | Token 'jenkins-system-hr' escrito en /run/sonar/SONAR_TOKEN
+sonar-setup  | Configuración de SonarQube completada correctamente.   (exit 0)
+```
+
+```text
+7 trabajos: api-gateway, auth-service, departments-service, employees-service,
+            notifications-service, profiles-service, vacations-service
+etiquetas del nodo: ['built-in', 'docker']
+credenciales: [{'id': 'sonar-token', 'description': 'Token del análisis de System_HR'}]
+```
+
+| Pipeline | Resultado |
+|---|---|
+| `departments-service` | **SUCCESS** — 50 pruebas, 80,18 %, `QUALITY GATE STATUS: PASSED`, imagen construida |
+| `profiles-service` | **SUCCESS** — `QUALITY GATE STATUS: PASSED` |
+
+> **Este equipo no aguanta CI y la aplicación a la vez.** Al levantar SonarQube,
+> los servicios de la aplicación murieron por falta de memoria (exit 137). Se
+> verificó en dos tandas: primero el CI, después la aplicación. Para la
+> sustentación conviene elegir una de las dos, no las dos.
+
+## 8.2 El canal del token de activación
+
+El token viaja en `usuario.creado`, pero notifications-service ya no lo guarda en
+su historial —era el hallazgo de seguridad que el informe pedía cerrar— y la
+suite BDD y cuatro colecciones lo leían de ahí.
+
+**Canal nuevo**: `POST /auth/internal/tokens/restablecimiento`, que lo emite
+quien lo firma. Es una operación privilegiada: el gateway la reserva al rol ADMIN
+—es un POST, y la regla de propiedad solo concede a un USER su propio perfil y su
+propia contraseña— y cada emisión se registra en WARN con el administrador que la
+pidió. No se emite para una cuenta con baja permanente.
+
+La suite BDD invirtió el signo de la prueba que leía el token: ahora comprueba
+que el historial **no** lo conserva, y pide el token a auth-service. Cuatro
+pruebas nuevas en `auth-service` cubren el endpoint.
+
+### Y un conflicto de negocio que apareció al ejecutarla
+
+Con el token resuelto, cinco escenarios seguían fallando por otra razón: el
+informe había dejado **a decisión del equipo** la semántica de las fechas de
+vacaciones (inclusiva frente a exclusiva), el Dev 3 la resolvió exigiendo
+`fechaFin > fechaInicio` —`fechaFin` es el día de regreso— y la suite seguía con
+la lectura anterior, pidiendo períodos con las dos fechas iguales.
+
+Se alineó la suite con la decisión implementada y se documentó en el propio
+escenario. **Si el equipo prefiere la lectura inclusiva, lo que hay que cambiar
+es el servicio, no las pruebas.**
+
+## 8.3 El campo `context` en los tres servicios Java
+
+Se resuelve con el proveedor `nestedField` de logstash-logback-encoder, que emite
+`"context":{}` **siempre**, también vacío: así el documento tiene la misma forma
+en los siete servicios y una consulta LogQL no necesita comprobar si la clave
+existe.
+
+Dentro van los argumentos estructurados (`StructuredArguments.kv`), que se añaden
+**después** de los argumentos de los `{}` del mensaje. Es el detalle que permitió
+hacerlo sin reescribir los mensajes: SLF4J ignora los argumentos sobrantes al
+formatear, así que el texto no cambia y el dato queda además indexable por
+separado.
+
+```json
+{"timestamp":"...","level":"ERROR","service":"api-gateway",
+ "message":"[GATEWAY] Sin identidad en el exchange para una ruta protegida | /empleados/E601/completo",
+ "context":{"ruta":"/empleados/E601/completo","resultado":"401"}}
+```
+
+## 8.4 El outbox transaccional de Empleados
+
+El último faltante del informe. El evento se escribe en `outbox_evento` en la
+misma transacción que el cambio de negocio —misma base de datos, así que no hace
+falta una transacción distribuida— y un `@Scheduled` cada 5 s la vacía contra el
+broker. El razonamiento completo está en
+[ADR-014](decisions/ADR-014-outbox-transaccional.md).
+
+Verificado de extremo a extremo, que es la única forma de demostrarlo:
+
+```console
+$ docker compose stop rabbitmq
+$ curl -X POST .../empleados -d '{"id":"EOUT1", ...}'          → HTTP 201
+$ curl .../empleados/EOUT1                                     → HTTP 200
+```
+
+```text
+      tipo       | agregado_id | intentos | pendiente |              motivo
+-----------------+-------------+----------+-----------+-----------------------------------
+ empleado.creado | EOUT1       |        1 | t         | java.net.UnknownHostException: rabbitmq
+```
+
+```console
+$ docker compose start rabbitmq
+```
+
+```text
+ agregado_id | intentos |      publicado_en       | sin_error
+-------------+----------+-------------------------+-----------
+ EOUT1       |        6 | 2026-11-09 23:15:34.215 | t
+```
+
+```console
+$ curl .../perfiles/EOUT1
+perfil creado por el evento: EOUT1 | Sofia Ramirez | ACTIVO
+```
+
+El alta responde 201 con el broker caído, el evento espera con su motivo
+registrado, y al volver el broker se publica solo y el consumidor lo recibe.
+**Antes ese evento se habría perdido para siempre.**
+
+Dos pruebas unitarias afirmaban el comportamiento anterior y se invirtieron: un
+evento que no se puede encolar ahora impide confirmar el cambio.
+
+## 8.5 `GatewayTest`
+
+Sus siete pruebas son del Reto 3 y nunca se actualizaron cuando el Reto 5 añadió
+el JWT: proxificaban sin token y esperaban 202. Ahora firman un JWT con el
+secreto de desarrollo —el mismo que valida `JwtTokenValidator`— y se añadió la
+prueba complementaria: la misma ruta sin token responde 401.
+
+Al ejecutarlas por fin, dos fallaron con 503 por un `response-timeout` de 200 ms
+que no aguanta un JVM recién arrancado en una máquina cargada. Se subió a 2 s; la
+prueba del upstream lento sigue siendo determinista porque su handler devuelve
+`Mono.never()`.
+
+```console
+$ docker run --rm -v "...:/w" -w /w/api-gateway maven:3.9-eclipse-temurin-21 mvn -B test
+[INFO] Tests run: 7, Failures: 0, Errors: 0 -- in com.sistema.gateway.GatewayTest
+[INFO] Tests run: 4, Failures: 0, Errors: 0 -- in SeguridadDeControladoresLocalesTest
+[INFO] Tests run: 7, Failures: 0, Errors: 0 -- in EmpleadoCompletoClientTest
+[INFO] Tests run: 34, Failures: 0, Errors: 0
+[INFO] BUILD SUCCESS
+```
+
+Las 34 del módulo en verde, incluida la clase que en Windows se omite por no
+poder crear sockets en loopback.
+
+## 8.6 Estado de las suites tras esta ronda
+
+| Suite | Resultado |
+|---|---|
+| `api-gateway` (en Linux) | **34 / 34** |
+| `auth-service` | **28 / 28** (4 nuevas del endpoint de tokens) |
+| `employees-service` | **67 verdes**; los 14 que abren sockets en loopback siguen sin poder ejecutarse aquí |
+| `departments-service` | 50 / 50, 80,18 % |
+| `profiles-service` | 49 / 49, 95,40 % |
+| `ci/` (configuración) | **6 / 6** (una nueva: `setup-secrets.sh` no sobrescribe) |
+| BDD de extremo a extremo | **39 / 39** |
+| Postman `auth-service` | **47 / 47**, dos ejecuciones seguidas |
+| Postman `perfiles-service` | 38 / 38 |
+| Postman `empleados-service` | 38 / 38 |
+| Postman `departamentos-service` | 24 / 24 |
+
+Las colecciones `ciclo-vida-cuenta`, `reto7-sustentacion`, `notificaciones-service`
+y `observabilidad-reto8` siguen con fallos **anteriores a esta ronda**: usan ids
+fijos que ya existen en la base, apuntan a variables de servicio en lugar de al
+gateway, o tienen pasos marcados como manuales. No son regresiones de estos
+cambios, pero conviene no abrirlas en la sustentación.
+
+---
+
+# 9. Los siete pipelines, ejecutados de verdad
+
+En la ronda anterior se verificaron dos (`departments-service` y
+`profiles-service`). Al lanzar los cinco restantes aparecieron **seis defectos
+más**, todos invisibles sin ejecutar: cuatro de configuración del pipeline y dos
+que el código arrastraba y que nadie podía ver porque nada los ejecutaba.
+
+| # | Pipeline | Qué pasaba | Causa |
+|---|---|---|---|
+| 1 | notifications | `go mod download` fallaba en cada dependencia | El volumen `hr-ci-go` es de root y el contenedor corría como uid 1000: `mkdir /go/pkg/mod/cache: permission denied`. Faltaba `-u root`, que los pipelines de Node sí llevan |
+| 2 | los 3 Java | `No plugin found for prefix 'sonar'` | Maven solo resuelve prefijos de sus `pluginGroups`, y `org.sonarsource.scanner.maven` no está entre ellos. Hay que dar la coordenada completa del plugin |
+| 3 | los 3 Java | `Unknown host sonarqube` | El contenedor de Maven no estaba en la red del CI. Los otros pipelines sí la pasan a su `sonar-scanner-cli` |
+| 4 | auth-service | `Skipping JaCoCo execution due to missing execution data file` y luego fallo al archivar el informe | Su pom configura surefire con `<argLine>-XX:+EnableDynamicAgentLoading</argLine>`, que **sustituye** el `argLine` donde `prepare-agent` publica el `-javaagent`. El agente no se enganchaba y no se escribía `jacoco.exec` |
+| 5 | vacations | `Cannot find module '../generated/prisma/client.ts'` | El cliente de Prisma no está en Git y su `npm test` no lo genera. En el equipo del desarrollador existe de una ejecución anterior, así que **también fallaría en un clon nuevo** |
+| 6 | vacations | Cobertura del 39 % con el umbral en 70 | El mismo `npm test -- --coverage` que rompía el de Perfiles: el argumento se colaba como posicional del runner y alteraba el conjunto de pruebas que se ejecuta |
+
+Y tres más, que solo se vieron cuando los pipelines llegaron al final:
+
+| # | Qué pasaba | Causa |
+|---|---|---|
+| 7 | Los 3 Java terminaban en **ABORTED** tras 14 minutos | `waitForQualityGate` espera un **webhook de SonarQube a Jenkins** que nadie había configurado. Agotaba el timeout de 10 minutos de la etapa. Los pipelines de Node y Python no lo notaban porque su `sonar-project.properties` lleva `sonar.qualitygate.wait=true` y el escáner espera por su cuenta |
+| 8 | `notifications-service` aparecía **sin análisis** en SonarQube | Analizaba con la clave `system-hr-notifications`, que `configurar-sonar.py` no conoce: el escáner auto-creaba ese proyecto y SonarQube le aplicaba su puerta **por omisión**. El umbral del 70 % de la auditoría no se estaba aplicando a este servicio |
+| 9 | `vacations-service` falló una vez con *"The bridge server is unresponsive"* | El analizador de JS/TS arranca su propio Node y se quedó sin memoria con cuatro builds en paralelo. No es configuración: al ejecutarlo solo, pasó |
+
+A los que se suman dos arrastres del código:
+
+- **`auth-service` y `api-gateway` no declaraban el `jacoco-maven-plugin`.** El
+  pipeline lo invocaba desde la línea de comandos, lo que funciona de casualidad
+  y no cuando surefire tiene su propio `argLine`. Declarado en los dos poms con
+  `prepare-agent` y `report` ligados al ciclo de vida, basta `mvn verify`. Con
+  esto los dos servicios que no tenían umbral local pasan a entregar cobertura a
+  SonarQube, que es donde el informe pide el 70 %.
+- **Un `NullPointerException` que el `catch` del publicador llevaba tapando.** En
+  `DepartmentCacheFallbackTest` el doble del repositorio no tenía `save`
+  estubado, así que devolvía `null` y el alta seguía con un empleado nulo: al
+  publicar el evento reventaba. No se veía porque el try/catch del
+  *fire-and-forget* se tragaba cualquier excepción — el mismo que ocultaba la
+  pérdida de eventos. Al pasar al outbox, ese catch desapareció y el fallo del
+  doble quedó a la vista. Corregido en la prueba, que es donde estaba el error.
+
+## Resultado: los siete en verde
+
+| Pipeline | Build | Resultado | Cobertura en SonarQube |
+|---|---|---|---|
+| `api-gateway` | #6 | **SUCCESS** | 74,9 % |
+| `auth-service` | #4 | **SUCCESS** | 72,5 % |
+| `employees-service` | #4 | **SUCCESS** | 81,8 % |
+| `departments-service` | #4 | **SUCCESS** | 80,2 % |
+| `notifications-service` | #3 | **SUCCESS** | 79,6 % |
+| `profiles-service` | #2 | **SUCCESS** | 92,8 % |
+| `vacations-service` | #5 | **SUCCESS** | 72,2 % |
+
+Y los siete con el Quality Gate correcto:
+
+```console
+$ curl .../api/qualitygates/project_status?projectKey=<cada uno>
+api-gateway              OK | cobertura: 74.9
+auth-service             OK | cobertura: 72.5
+employees-service        OK | cobertura: 81.8
+departments-service      OK | cobertura: 80.2
+notifications-service    OK | cobertura: 79.6
+profiles-service         OK | cobertura: 92.8
+vacations-service        OK | cobertura: 72.2
+
+$ curl .../api/qualitygates/get_by_project?project=notifications-service
+{"qualityGate":{"name":"RRHH-70","default":false}}
+```
+
+Esto es lo que cierra el punto 11 del 3.1 —cobertura ≥ 70 % verificada en
+SonarQube, no solo configurada— y con evidencia para los siete, incluidos
+`auth-service` y `api-gateway`, que hasta ahora no entregaban cobertura a nadie.
+
+## Lo que esto dice del informe
+
+El Word evaluaba **existencia**: «faltan Jenkins y SonarQube en Compose, no hay
+`Jenkinsfiles`». Eso era correcto y está cumplido. Pero entre «los archivos
+existen» y «el pipeline pasa» había **dieciocho defectos**: nueve de la primera
+ronda y nueve de esta. Ninguno se podía ver leyendo el repositorio, que es
+exactamente el límite que una auditoría estática declara de sí misma en su
+portada.
+
+Y dos de ellos —el cliente de Prisma que no está en Git y el `argLine` que pisa
+al agente— no son problemas del CI: son problemas del proyecto que **solo el CI
+podía descubrir**, porque en el equipo de quien los escribió el artefacto ya
+estaba generado o la cobertura no se medía.

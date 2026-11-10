@@ -3,6 +3,9 @@ package com.microservicios.employees;
 import com.microservicios.employees.client.DepartmentClient;
 import com.microservicios.employees.events.EmployeeEventData;
 import com.microservicios.employees.events.EventEnvelope;
+import com.microservicios.employees.messaging.OutboxEvento;
+import com.microservicios.employees.messaging.OutboxRepository;
+import com.microservicios.employees.messaging.PublicadorDeOutbox;
 import com.microservicios.employees.messaging.RabbitMQConfig;
 import com.microservicios.employees.model.Employee;
 import com.microservicios.employees.model.EmployeeStatus;
@@ -20,6 +23,7 @@ import org.springframework.boot.test.mock.mockito.MockBean;
 
 import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.util.List;
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -28,6 +32,26 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.*;
 
+/**
+ * Publicación de eventos a través del outbox transaccional.
+ *
+ * <p><strong>Lo que cambió respecto a la versión anterior de esta clase.</strong>
+ * Antes, cada operación de negocio publicaba en RabbitMQ en el acto, así que
+ * bastaba registrar un empleado y comprobar el {@code convertAndSend}. Ahora el
+ * evento se guarda en la tabla outbox dentro de la misma transacción y el envío
+ * lo hace {@link PublicadorDeOutbox} en un ciclo aparte, de modo que la prueba
+ * tiene dos tiempos: primero se comprueba que el evento quedó encolado, y
+ * después se ejecuta el publicador a mano y se comprueba lo que sale al broker.
+ *
+ * <p>Las aserciones sobre el contenido del sobre —tipo, versión, productor, el
+ * {@code id} como UUID distinto del id del empleado, el payload— se conservan
+ * tal cual: el outbox cambia <em>cuándo</em> se envía, no <em>qué</em>.
+ *
+ * <p>El publicador se invoca explícitamente porque su {@code @Scheduled} está
+ * desactivado en las pruebas (ver {@code outbox.retraso-inicial-ms} en
+ * {@code src/test/resources/application.properties}). Un ciclo disparándose a
+ * mitad de una prueba haría que el resultado dependiera del reloj.
+ */
 @SpringBootTest
 class EmployeeEventPublisherTest {
 
@@ -36,6 +60,12 @@ class EmployeeEventPublisherTest {
 
     @Autowired
     private EmployeeRepository repository;
+
+    @Autowired
+    private OutboxRepository outboxRepository;
+
+    @Autowired
+    private PublicadorDeOutbox publicadorDeOutbox;
 
     @MockBean
     private DepartmentClient departmentClient;
@@ -46,6 +76,7 @@ class EmployeeEventPublisherTest {
     @BeforeEach
     void setUp() {
         repository.deleteAll();
+        outboxRepository.deleteAll();
         when(departmentClient.existsById("DEP-IT")).thenReturn(true);
         when(departmentClient.existsById("DEP-HR")).thenReturn(true);
     }
@@ -64,9 +95,23 @@ class EmployeeEventPublisherTest {
         return emp;
     }
 
-    @Test
-    @DisplayName("1. Creación exitosa publica evento empleado.creado en hr.events con envelope estándar")
+    /** Ejecuta el publicador y devuelve el único sobre que salió al broker. */
     @SuppressWarnings("unchecked")
+    private EventEnvelope<EmployeeEventData> publicarYCapturarElSobre() {
+        publicadorDeOutbox.publicarPendientes();
+
+        ArgumentCaptor<EventEnvelope<EmployeeEventData>> captor =
+                ArgumentCaptor.forClass(EventEnvelope.class);
+        verify(rabbitTemplate, times(1)).convertAndSend(
+                eq(RabbitMQConfig.EXCHANGE_HR_EVENTS),
+                eq(""),
+                captor.capture()
+        );
+        return captor.getValue();
+    }
+
+    @Test
+    @DisplayName("1. El alta encola empleado.creado y el publicador lo envía a hr.events con el sobre estándar")
     void employeeCreatedPublishesEvent() {
         Employee emp = createSampleEmployee("EMP-001", "carlos@empresa.com", "NUM-001");
 
@@ -74,14 +119,19 @@ class EmployeeEventPublisherTest {
         assertThat(saved).isNotNull();
         assertThat(saved.getStatus()).isEqualTo(EmployeeStatus.ACTIVE);
 
-        ArgumentCaptor<EventEnvelope<EmployeeEventData>> captor = ArgumentCaptor.forClass(EventEnvelope.class);
-        verify(rabbitTemplate, times(1)).convertAndSend(
-                eq(RabbitMQConfig.EXCHANGE_HR_EVENTS),
-                eq(""),
-                captor.capture()
-        );
+        // Primer tiempo: el evento está en el outbox y todavía no en el broker.
+        List<OutboxEvento> pendientes = outboxRepository.findAll();
+        assertThat(pendientes).hasSize(1);
+        assertThat(pendientes.get(0).getTipo()).isEqualTo("empleado.creado");
+        assertThat(pendientes.get(0).getAgregadoId()).isEqualTo("EMP-001");
+        assertThat(pendientes.get(0).getPublicadoEn())
+                .as("recién encolado, nadie lo ha publicado aún")
+                .isNull();
+        verify(rabbitTemplate, never()).convertAndSend(anyString(), anyString(), any(Object.class));
 
-        EventEnvelope<EmployeeEventData> envelope = captor.getValue();
+        // Segundo tiempo: el publicador lo envía.
+        EventEnvelope<EmployeeEventData> envelope = publicarYCapturarElSobre();
+
         assertThat(envelope).isNotNull();
         assertThat(envelope.type()).isEqualTo("empleado.creado");
         assertThat(envelope.version()).isEqualTo("1.0");
@@ -102,14 +152,18 @@ class EmployeeEventPublisherTest {
         assertThat(data.cargo()).isEqualTo("Ingeniero de Software");
         assertThat(data.fechaIngreso()).isEqualTo("2026-03-01");
         assertThat(data.fechaRetiro()).isNull();
+
+        // Y queda marcado, para que el ciclo siguiente no lo reenvíe.
+        assertThat(outboxRepository.findAll().get(0).getPublicadoEn()).isNotNull();
+        assertThat(publicadorDeOutbox.pendientes()).isZero();
     }
 
     @Test
-    @DisplayName("2. Actualización exitosa publica evento empleado.actualizado en hr.events")
-    @SuppressWarnings("unchecked")
+    @DisplayName("2. La actualización encola y publica empleado.actualizado")
     void employeeUpdatedPublishesEvent() {
         Employee emp = createSampleEmployee("EMP-002", "ana@empresa.com", "NUM-002");
         service.register(emp);
+        publicadorDeOutbox.publicarPendientes();
         reset(rabbitTemplate);
 
         Employee updateData = new Employee();
@@ -120,14 +174,7 @@ class EmployeeEventPublisherTest {
         assertThat(updated.getCargo()).isEqualTo("Líder Técnico");
         assertThat(updated.getDepartamentoId()).isEqualTo("DEP-HR");
 
-        ArgumentCaptor<EventEnvelope<EmployeeEventData>> captor = ArgumentCaptor.forClass(EventEnvelope.class);
-        verify(rabbitTemplate, times(1)).convertAndSend(
-                eq(RabbitMQConfig.EXCHANGE_HR_EVENTS),
-                eq(""),
-                captor.capture()
-        );
-
-        EventEnvelope<EmployeeEventData> envelope = captor.getValue();
+        EventEnvelope<EmployeeEventData> envelope = publicarYCapturarElSobre();
         assertThat(envelope.type()).isEqualTo("empleado.actualizado");
         assertThat(envelope.producer()).isEqualTo("employees-service");
         assertThat(envelope.data().cargo()).isEqualTo("Líder Técnico");
@@ -136,24 +183,17 @@ class EmployeeEventPublisherTest {
     }
 
     @Test
-    @DisplayName("3. Retiro lógico mediante DELETE publica evento empleado.retirado con fechaRetiro y estado RETIRADO")
-    @SuppressWarnings("unchecked")
+    @DisplayName("3. El retiro lógico encola y publica empleado.retirado con la hora exacta")
     void employeeRetiredPublishesEvent() {
         Employee emp = createSampleEmployee("EMP-003", "luis@empresa.com", "NUM-003");
         service.register(emp);
+        publicadorDeOutbox.publicarPendientes();
         reset(rabbitTemplate);
 
         Employee retired = service.retire("EMP-003");
         assertThat(retired.getStatus()).isEqualTo(EmployeeStatus.RETIRED);
 
-        ArgumentCaptor<EventEnvelope<EmployeeEventData>> captor = ArgumentCaptor.forClass(EventEnvelope.class);
-        verify(rabbitTemplate, times(1)).convertAndSend(
-                eq(RabbitMQConfig.EXCHANGE_HR_EVENTS),
-                eq(""),
-                captor.capture()
-        );
-
-        EventEnvelope<EmployeeEventData> envelope = captor.getValue();
+        EventEnvelope<EmployeeEventData> envelope = publicarYCapturarElSobre();
         assertThat(envelope.type()).isEqualTo("empleado.retirado");
         assertThat(envelope.producer()).isEqualTo("employees-service");
         assertThat(envelope.data().id()).isEqualTo("EMP-003");
@@ -173,7 +213,7 @@ class EmployeeEventPublisherTest {
     }
 
     @Test
-    @DisplayName("4. Fallo de validación/departamento inexistente NO publica ningún evento en RabbitMQ")
+    @DisplayName("4. Un departamento inexistente no encola nada: no hay evento que publicar")
     void validationFailureDoesNotPublishEvent() {
         when(departmentClient.existsById("DEP-INVALID")).thenReturn(false);
 
@@ -183,23 +223,59 @@ class EmployeeEventPublisherTest {
         assertThatThrownBy(() -> service.register(emp))
                 .isInstanceOf(RuntimeException.class);
 
+        assertThat(outboxRepository.findAll())
+                .as("una validación que falla no deja eventos pendientes")
+                .isEmpty();
+
+        publicadorDeOutbox.publicarPendientes();
         verify(rabbitTemplate, never()).convertAndSend(anyString(), anyString(), any(Object.class));
     }
 
+    /**
+     * La razón de ser del patrón: con el broker caído el evento no se pierde.
+     *
+     * <p>Esta prueba antes se llamaba «si RabbitMQ falla, el error se registra
+     * sin lanzar excepción y el empleado permanece persistido», y eso era
+     * exactamente el problema: el empleado quedaba creado y su evento no llegaba
+     * nunca a nadie. Ahora el empleado sigue persistido —eso no cambia— pero el
+     * evento queda pendiente y se entrega cuando el broker vuelve.
+     */
     @Test
-    @DisplayName("5. Si RabbitMQ falla, el error se registra sin lanzar excepción y el empleado permanece persistido")
+    @DisplayName("5. Con RabbitMQ caído el alta funciona, el evento queda pendiente y se publica al volver")
     void rabbitMQFailureDoesNotFailPersistence() {
         doThrow(new AmqpException("RabbitMQ connection refused"))
-                .when(rabbitTemplate).convertAndSend(eq(RabbitMQConfig.EXCHANGE_HR_EVENTS), eq(""), any(Object.class));
+                .when(rabbitTemplate).convertAndSend(
+                        eq(RabbitMQConfig.EXCHANGE_HR_EVENTS), eq(""), any(Object.class));
 
         Employee emp = createSampleEmployee("EMP-005", "resiliente@empresa.com", "NUM-005");
 
-        // No debe lanzar excepción
+        // El alta no depende del broker: ya no se habla con él en esta operación.
         Employee saved = service.register(emp);
-
-        // La persistencia se completó exitosamente
         assertThat(saved).isNotNull();
         assertThat(repository.findById("EMP-005")).isPresent();
-        assertThat(repository.findById("EMP-005").get().getEmail()).isEqualTo("resiliente@empresa.com");
+        assertThat(repository.findById("EMP-005").get().getEmail())
+                .isEqualTo("resiliente@empresa.com");
+
+        // El publicador intenta enviarlo y no puede: el evento se queda, con su
+        // intento contado y el motivo registrado para poder diagnosticarlo.
+        publicadorDeOutbox.publicarPendientes();
+
+        OutboxEvento pendiente = outboxRepository.findAll().get(0);
+        assertThat(pendiente.getPublicadoEn())
+                .as("el broker rechazó el envío: no puede quedar marcado como publicado")
+                .isNull();
+        assertThat(pendiente.getIntentos()).isEqualTo(1);
+        assertThat(pendiente.getUltimoError()).contains("RabbitMQ connection refused");
+        assertThat(publicadorDeOutbox.pendientes()).isEqualTo(1);
+
+        // El broker vuelve y el evento se entrega sin que nadie intervenga.
+        reset(rabbitTemplate);
+        publicadorDeOutbox.publicarPendientes();
+
+        verify(rabbitTemplate, times(1)).convertAndSend(
+                eq(RabbitMQConfig.EXCHANGE_HR_EVENTS), eq(""), any(Object.class));
+        assertThat(publicadorDeOutbox.pendientes())
+                .as("entregado: ya no hay nada pendiente")
+                .isZero();
     }
 }

@@ -157,8 +157,44 @@
                     ese manifiesto se corrompe y los tests fallan con NoClassDefFoundError.
                     Pasar el classpath directamente evita el problema. -->
                     <useManifestOnlyJar>false</useManifestOnlyJar>
-                    <argLine>-XX:+EnableDynamicAgentLoading</argLine>
+                    <!-- @{argLine} y no solo el flag: prepare-agent de JaCoCo publica
+                    el -javaagent en la propiedad argLine, y una configuracion
+                    explicita como esta la sustituia. El agente no se enganchaba, no
+                    se escribia jacoco.exec y el informe se omitia con "missing
+                    execution data file": SonarQube se quedaba sin cobertura. El
+                    @{...} es sustitucion tardia, asi que convive con el flag. -->
+                    <argLine>@{argLine} -XX:+EnableDynamicAgentLoading</argLine>
                 </configuration>
+            </plugin>
+            <!-- Cobertura para el analisis de SonarQube.
+                 Antes el pipeline lo invocaba desde la linea de comandos
+                 (mvn org.jacoco:jacoco-maven-plugin:prepare-agent verify
+                  org.jacoco:jacoco-maven-plugin:report) y el agente no llegaba a
+                 engancharse a surefire: el informe se omitia con "Skipping JaCoCo
+                 execution due to missing execution data file" y la etapa fallaba
+                 al archivar un directorio que no existia. Declarado aqui, las
+                 ejecuciones quedan ligadas al ciclo de vida y basta 'mvn verify'.
+                 El umbral del 70 % no se aplica localmente: lo exige el Quality
+                 Gate RRHH-70 de SonarQube, que es donde la auditoria lo pide. -->
+            <plugin>
+                <groupId>org.jacoco</groupId>
+                <artifactId>jacoco-maven-plugin</artifactId>
+                <version>0.8.12</version>
+                <executions>
+                    <execution>
+                        <id>prepare-agent</id>
+                        <goals>
+                            <goal>prepare-agent</goal>
+                        </goals>
+                    </execution>
+                    <execution>
+                        <id>report</id>
+                        <phase>verify</phase>
+                        <goals>
+                            <goal>report</goal>
+                        </goals>
+                    </execution>
+                </executions>
             </plugin>
         </plugins>
     </build>

@@ -49,7 +49,12 @@ pipeline {
                         '-u root -v hr-ci-npm:/root/.npm'
                     ) {
                         dir('services/vacations-service') {
-                            sh 'npm ci'
+                            // El cliente de Prisma no esta en Git, asi que hay
+                            // que generarlo: sin el, las pruebas no se cargan
+                            // (Cannot find module '../generated/prisma/client.ts').
+                            // En el equipo del desarrollador existe de una
+                            // ejecucion anterior y por eso no se notaba.
+                            sh 'npm ci && npx prisma generate'
                         }
                     }
                 }
@@ -64,7 +69,13 @@ pipeline {
                     ) {
                         dir('services/vacations-service') {
                             sh '''
-                                npm test -- --coverage
+                                # 'npm test' y no 'npm test -- --coverage': los
+                                # indicadores de cobertura ya estan en el script del
+                                # package.json. El --coverage se colaba como argumento
+                                # posicional del runner de pruebas y alteraba el
+                                # conjunto que se ejecuta: la cobertura bajaba del
+                                # 71 % al 39 % y el umbral del 70 % tumbaba el build.
+                                npm test
                                 mkdir -p coverage
                                 test -f reports/lcov.info
                                 cp reports/lcov.info coverage/lcov.info

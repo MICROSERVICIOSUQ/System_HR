@@ -61,12 +61,14 @@ pipeline {
                 script {
                     docker.image('maven:3.9-eclipse-temurin-21').inside('-u root -v hr-ci-m2:/root/.m2') {
                         dir('api-gateway') {
-                            sh '''
-                        mvn -B \
-                          org.jacoco:jacoco-maven-plugin:prepare-agent \
-                          verify \
-                          org.jacoco:jacoco-maven-plugin:report
-                            '''
+                            // Basta 'verify': el jacoco-maven-plugin esta
+                            // declarado en el pom con prepare-agent y report
+                            // ligados al ciclo de vida. Invocando los goals
+                            // desde la linea de comandos, el agente no se
+                            // enganchaba a surefire, el informe se omitia
+                            // ("missing execution data file") y la etapa
+                            // fallaba al archivar un directorio inexistente.
+                            sh 'mvn -B verify'
                         }
                     }
                 }
@@ -85,9 +87,19 @@ pipeline {
             steps {
                 withSonarQubeEnv('SonarQube') {
                     script {
-                        docker.image('maven:3.9-eclipse-temurin-21').inside('-u root -v hr-ci-m2:/root/.m2') {
+                        // --network: el contenedor tiene que resolver 'sonarqube'
+                        // por DNS. Sin la red del CI el analisis fallaba con
+                        // "Unknown host sonarqube". Es la misma red que usan los
+                        // contenedores de sonar-scanner-cli de los otros pipelines.
+                        docker.image('maven:3.9-eclipse-temurin-21').inside(
+                            '-u root -v hr-ci-m2:/root/.m2 --network ' + (env.CI_NETWORK ?: 'system_hr_ci')
+                        ) {
                             dir('api-gateway') {
-                                sh 'mvn -B sonar:sonar -Dsonar.projectKey=$SONAR_PROJECT_KEY -Dsonar.qualitygate.wait=false'
+                                // Coordenada completa del plugin, no el prefijo 'sonar':
+                                // Maven solo resuelve prefijos de sus pluginGroups
+                                // y org.sonarsource.scanner.maven no esta entre
+                                // ellos. Fallaba con NoPluginFoundForPrefixException.
+                                sh 'mvn -B org.sonarsource.scanner.maven:sonar-maven-plugin:3.11.0.3922:sonar -Dsonar.projectKey=$SONAR_PROJECT_KEY -Dsonar.qualitygate.wait=true'
                             }
                         }
                     }
