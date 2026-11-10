@@ -69,6 +69,10 @@ export interface CreateVacationPeriodDto {
 }
 
 export class VacationRepository {
+  async transaction<T>(work: (transaction: Prisma.TransactionClient) => Promise<T>): Promise<T> {
+    return prisma.$transaction(work);
+  }
+
   async processOnce<T>(
     eventId: string,
     process: (transaction: Prisma.TransactionClient) => Promise<T>
@@ -194,8 +198,8 @@ export class VacationRepository {
   // ── VacationPeriod (Productor / Write Model) ────────────────────────────────
 
   /** Crear un nuevo período de vacaciones */
-  async createPeriod(data: CreateVacationPeriodDto) {
-    return prisma.vacationPeriod.create({
+  async createPeriod(data: CreateVacationPeriodDto, transaction?: Prisma.TransactionClient) {
+    return (transaction ?? prisma).vacationPeriod.create({
       data: {
         empleadoId: data.empleadoId,
         fechaInicio: data.fechaInicio,
@@ -274,23 +278,24 @@ export class VacationRepository {
    *
    * Es un compare-and-set: si dos ejecuciones del scheduler se solapan, la
    * segunda obtiene {@code count === 0} y no vuelve a publicar el evento. Protege
-   * dentro de un mismo proceso; la coordinación entre varias instancias del
-   * servicio es la limitación documentada que resolverá ShedLock.
+   * también entre instancias: PostgreSQL solo permite ganar la actualización a
+   * una de ellas. El evento se guarda dentro de esa misma transacción.
    */
   async transitionPeriodState(
     id: string,
     estadoEsperado: string,
-    estadoNuevo: string
+    estadoNuevo: string,
+    transaction?: Prisma.TransactionClient
   ): Promise<boolean> {
-    const { count } = await prisma.vacationPeriod.updateMany({
+    const { count } = await (transaction ?? prisma).vacationPeriod.updateMany({
       where: { id, estado: estadoEsperado },
       data: { estado: estadoNuevo },
     });
     return count === 1;
   }
 
-  async updatePeriod(id: string, data: { fechaInicio: Date; fechaFin: Date }) {
-    return prisma.vacationPeriod.update({
+  async updatePeriod(id: string, data: { fechaInicio: Date; fechaFin: Date }, transaction?: Prisma.TransactionClient) {
+    return (transaction ?? prisma).vacationPeriod.update({
       where: { id },
       data: {
         fechaInicio: data.fechaInicio,

@@ -23,8 +23,9 @@ import java.util.Date;
  *       Claims: {@code sub} (empleadoId), {@code role}, {@code iat}, {@code exp}.</li>
  *   <li><strong>Reset JWT</strong> — se genera al crear un empleado o al pedir
  *       recuperación. Claims: {@code sub}, {@code type: "RESET_PASSWORD"},
- *       {@code iat}, {@code exp}. Opción A del enunciado (stateless): no se guarda
- *       en base de datos, su autenticidad y vigencia se verifican con la firma.</li>
+ *       {@code iat}, {@code exp}. Opción A del enunciado (stateless): su validación
+ *       no consulta un registro de tokens. El evento pendiente lo conserva cifrado
+ *       en el outbox hasta su entrega; la firma y la expiración verifican su uso.</li>
  * </ul>
  *
  * <p>Firma simétrica HMAC-SHA256 con el secreto compartido {@code JWT_SECRET}, el

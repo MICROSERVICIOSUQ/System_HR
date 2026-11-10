@@ -1,8 +1,18 @@
 {
   "info": {
-    "name": "Reto 7 — Sustentación System_HR",
+    "name": "Reto 7 - demostración funcional del sistema",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
-    "description": "Ejecutar manualmente en orden. Complementa la sustentación de Jenkins y SonarQube; no sustituye los reportes CI. El login 1.1 genera datos nuevos para cada recorrido. Esperar 1–2 segundos tras operaciones que publican eventos antes de comprobar sus efectos."
+    "description": "Ejecutar completa con Collection Runner. Datos únicos en cada ejecución; accesos de negocio por Gateway. Configure adminPassword en el entorno. Las esperas verifican resultados asíncronos reales."
+  },
+  "auth": {
+    "type": "bearer",
+    "bearer": [
+      {
+        "key": "token",
+        "value": "{{pendAdminToken}}",
+        "type": "string"
+      }
+    ]
   },
   "variable": [
     {
@@ -11,885 +21,716 @@
       "type": "string"
     },
     {
-      "key": "empleadoPassword",
-      "value": "Demostracion123!",
+      "key": "adminUsuario",
+      "value": "admin@empresa.com",
       "type": "string"
     },
     {
-      "key": "adminToken",
-      "value": "",
-      "type": "string"
-    },
-    {
-      "key": "userToken",
-      "value": "",
-      "type": "string"
-    },
-    {
-      "key": "departamentoId",
-      "value": "",
-      "type": "string"
-    },
-    {
-      "key": "empleadoId",
-      "value": "",
-      "type": "string"
-    },
-    {
-      "key": "empleadoNumero",
-      "value": "",
-      "type": "string"
-    },
-    {
-      "key": "empleadoEmail",
-      "value": "",
-      "type": "string"
-    },
-    {
-      "key": "hoy",
-      "value": "",
-      "type": "string"
-    },
-    {
-      "key": "fechaInicio",
-      "value": "",
-      "type": "string"
-    },
-    {
-      "key": "fechaFin",
-      "value": "",
-      "type": "string"
-    },
-    {
-      "key": "periodoId",
-      "value": "",
-      "type": "string"
-    },
-    {
-      "key": "resetToken",
-      "value": "",
-      "type": "string"
-    },
-    {
-      "key": "runId",
+      "key": "adminPassword",
       "value": "",
       "type": "string"
     }
   ],
   "item": [
     {
-      "name": "0. Salud y seguridad",
-      "item": [
+      "name": "Salud del Gateway",
+      "request": {
+        "method": "GET",
+        "url": "{{gatewayBaseUrl}}/health",
+        "header": [],
+        "auth": {
+          "type": "noauth"
+        }
+      },
+      "event": [
         {
-          "name": "0.1 Salud del gateway",
-          "request": {
-            "method": "GET",
-            "header": [],
-            "url": "{{gatewayBaseUrl}}/health"
-          },
-          "event": [
-            {
-              "listen": "test",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));"
-                ]
-              }
-            }
-          ]
-        },
-        {
-          "name": "0.2 Sin token no se leen empleados",
-          "request": {
-            "method": "GET",
-            "header": [],
-            "url": "{{gatewayBaseUrl}}/empleados"
-          },
-          "event": [
-            {
-              "listen": "test",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "pm.test('HTTP 401', () => pm.response.to.have.status(401));"
-                ]
-              }
-            }
-          ]
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('HTTP 200', () => pm.response.to.have.status(200));"
+            ]
+          }
         }
       ]
     },
     {
-      "name": "1. Onboarding y eventos",
-      "item": [
+      "name": "Sin token no se leen empleados",
+      "request": {
+        "method": "GET",
+        "url": "{{gatewayBaseUrl}}/empleados",
+        "header": [],
+        "auth": {
+          "type": "noauth"
+        }
+      },
+      "event": [
         {
-          "name": "1.1 Login ADMIN y preparar datos únicos",
-          "event": [
-            {
-              "listen": "prerequest",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "const id = Date.now().toString();",
-                  "pm.collectionVariables.set('runId', id);",
-                  "for (const key of ['departamentoId', 'empleadoId', 'empleadoNumero']) pm.collectionVariables.set(key, 'SUS-' + id);",
-                  "pm.collectionVariables.set('empleadoEmail', 'sustentacion.' + id + '@example.com');",
-                  "const hoy = new Date();",
-                  "const inicio = new Date(hoy); inicio.setUTCDate(inicio.getUTCDate() + 1);",
-                  "const fin = new Date(hoy); fin.setUTCDate(fin.getUTCDate() + 2);",
-                  "pm.collectionVariables.set('hoy', hoy.toISOString().slice(0, 10));",
-                  "pm.collectionVariables.set('fechaInicio', inicio.toISOString().slice(0, 10));",
-                  "pm.collectionVariables.set('fechaFin', fin.toISOString().slice(0, 10));",
-                  "for (const key of ['adminToken', 'userToken', 'resetToken', 'periodoId']) pm.collectionVariables.set(key, '');"
-                ]
-              }
-            },
-            {
-              "listen": "test",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));",
-                  "pm.collectionVariables.set('adminToken', pm.response.json().token);"
-                ]
-              }
-            }
-          ],
-          "request": {
-            "method": "POST",
-            "header": [
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              }
-            ],
-            "body": {
-              "mode": "raw",
-              "raw": "{\n  \"usuario\": \"{{adminUsuario}}\",\n  \"password\": \"{{adminPassword}}\"\n}",
-              "options": {
-                "raw": {
-                  "language": "json"
-                }
-              }
-            },
-            "url": {
-              "raw": "{{gatewayBaseUrl}}/auth/login",
-              "host": [
-                "{{gatewayBaseUrl}}"
-              ],
-              "path": [
-                "auth",
-                "login"
-              ]
-            }
-          },
-          "response": []
-        },
-        {
-          "name": "1.2 Crear departamento",
-          "event": [
-            {
-              "listen": "test",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "pm.test('HTTP 201', () => pm.response.to.have.status(201));"
-                ]
-              }
-            }
-          ],
-          "request": {
-            "method": "POST",
-            "header": [
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              },
-              {
-                "key": "Authorization",
-                "value": "Bearer {{adminToken}}"
-              }
-            ],
-            "body": {
-              "mode": "raw",
-              "raw": "{\n  \"id\": \"{{departamentoId}}\",\n  \"nombre\": \"Sustentación {{runId}}\",\n  \"descripcion\": \"Departamento de tecnología\"\n}",
-              "options": {
-                "raw": {
-                  "language": "json"
-                }
-              }
-            },
-            "url": {
-              "raw": "{{gatewayBaseUrl}}/departamentos",
-              "host": [
-                "{{gatewayBaseUrl}}"
-              ],
-              "path": [
-                "departamentos"
-              ]
-            }
-          },
-          "response": []
-        },
-        {
-          "name": "1.3 Crear empleado",
-          "event": [
-            {
-              "listen": "test",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "pm.test('HTTP 201', () => pm.response.to.have.status(201));"
-                ]
-              }
-            }
-          ],
-          "request": {
-            "method": "POST",
-            "header": [
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              },
-              {
-                "key": "Authorization",
-                "value": "Bearer {{adminToken}}"
-              }
-            ],
-            "body": {
-              "mode": "raw",
-              "raw": "{\n  \"id\": \"{{empleadoId}}\",\n  \"nombre\": \"Sofía\",\n  \"apellido\": \"Vargas\",\n  \"email\": \"{{empleadoEmail}}\",\n  \"numeroEmpleado\": \"{{empleadoNumero}}\",\n  \"cargo\": \"Ingeniera de Datos\",\n  \"area\": \"Tecnología\",\n  \"departamentoId\": \"{{departamentoId}}\",\n  \"fechaIngreso\": \"{{hoy}}\",\n  \"estado\": \"ACTIVO\"\n}",
-              "options": {
-                "raw": {
-                  "language": "json"
-                }
-              }
-            },
-            "url": {
-              "raw": "{{gatewayBaseUrl}}/empleados",
-              "host": [
-                "{{gatewayBaseUrl}}"
-              ],
-              "path": [
-                "empleados"
-              ]
-            }
-          },
-          "response": []
-        },
-        {
-          "name": "1.4 Consultar empleado",
-          "request": {
-            "method": "GET",
-            "header": [
-              {
-                "key": "Authorization",
-                "value": "Bearer {{adminToken}}"
-              }
-            ],
-            "url": "{{gatewayBaseUrl}}/empleados/{{empleadoId}}"
-          },
-          "event": [
-            {
-              "listen": "test",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));"
-                ]
-              }
-            }
-          ]
-        },
-        {
-          "name": "1.5 Comprobar perfil replicado",
-          "request": {
-            "method": "GET",
-            "header": [
-              {
-                "key": "Authorization",
-                "value": "Bearer {{adminToken}}"
-              }
-            ],
-            "url": "{{gatewayBaseUrl}}/perfiles/{{empleadoId}}"
-          },
-          "event": [
-            {
-              "listen": "test",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));"
-                ]
-              }
-            }
-          ]
-        },
-        {
-          "name": "1.6 Consultar eventos",
-          "request": {
-            "method": "GET",
-            "header": [
-              {
-                "key": "Authorization",
-                "value": "Bearer {{adminToken}}"
-              }
-            ],
-            "url": "{{gatewayBaseUrl}}/notifications?limit=50&sortBy=processedAt&order=DESC"
-          },
-          "event": [
-            {
-              "listen": "test",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));"
-                ]
-              }
-            }
-          ]
-        },
-        {
-          "name": "1.7 Activar cuenta mediante el evento usuario.creado",
-          "event": [
-            {
-              "listen": "prerequest",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "// Pide el token de activacion a auth-service, que es quien lo firma.",
-                  "//",
-                  "// Antes se leia de GET /notificaciones, porque notifications-service guardaba el",
-                  "// token en el payload de su historial. Eso era el hallazgo de seguridad que la",
-                  "// auditoria pidio cerrar, y el servicio reconstruido en Go ya solo conserva",
-                  "// campos publicos. Este es el canal legitimo, reservado al rol ADMIN.",
-                  "const base  = pm.environment.get('gatewayBaseUrl') || pm.variables.get('gatewayBaseUrl');",
-                  "const admin = pm.collectionVariables.get('adminToken');",
-                  "const empleadoId = pm.collectionVariables.get('empleadoId');",
-                  "",
-                  "if (!admin) {",
-                  "    console.log('Falta adminToken: ejecute antes el login del administrador.');",
-                  "} else {",
-                  "    pm.sendRequest({",
-                  "        url: base + '/auth/internal/tokens/restablecimiento',",
-                  "        method: 'POST',",
-                  "        header: {",
-                  "            'Authorization': 'Bearer ' + admin,",
-                  "            'Content-Type': 'application/json',",
-                  "            'Accept': 'application/json'",
-                  "        },",
-                  "        body: { mode: 'raw', raw: JSON.stringify({ empleadoId: empleadoId }) }",
-                  "    }, (err, res) => {",
-                  "        if (err) { console.log('No se pudo pedir el token:', err); return; }",
-                  "        if (res.code !== 200) {",
-                  "            console.log('auth-service respondio ' + res.code + ': ' + res.text());",
-                  "            return;",
-                  "        }",
-                  "        pm.collectionVariables.set('resetToken', res.json().token);",
-                  "        console.log('resetToken emitido por auth-service para ' + empleadoId);",
-                  "    });",
-                  "}"
-                ]
-              }
-            },
-            {
-              "listen": "test",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "pm.test('HTTP 200: cuenta activada', () => pm.response.to.have.status(200));"
-                ]
-              }
-            }
-          ],
-          "request": {
-            "method": "POST",
-            "header": [
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              }
-            ],
-            "body": {
-              "mode": "raw",
-              "raw": "{\n  \"token\": \"{{resetToken}}\",\n  \"nuevaPassword\": \"{{empleadoPassword}}\"\n}",
-              "options": {
-                "raw": {
-                  "language": "json"
-                }
-              }
-            },
-            "url": {
-              "raw": "{{gatewayBaseUrl}}/auth/reset-password",
-              "host": [
-                "{{gatewayBaseUrl}}"
-              ],
-              "path": [
-                "auth",
-                "reset-password"
-              ]
-            }
-          },
-          "response": []
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('HTTP 401', () => pm.response.to.have.status(401));"
+            ]
+          }
         }
       ]
     },
     {
-      "name": "2. Autenticación y permisos",
-      "item": [
-        {
-          "name": "2.1 Login USER: cuenta activa",
-          "event": [
-            {
-              "listen": "test",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "pm.test('Status 200: la cuenta está ACTIVA', () => pm.response.to.have.status(200));",
-                  "pm.test('Rol USER', () => pm.expect(pm.response.json().rol).to.eql('USER'));"
-                ]
-              }
-            },
-            {
-              "listen": "test",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "pm.collectionVariables.set('userToken', pm.response.json().token);"
-                ]
-              }
+      "name": "01 Login ADMIN y preparar datos únicos",
+      "request": {
+        "method": "POST",
+        "url": "{{gatewayBaseUrl}}/auth/login",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "auth": {
+          "type": "noauth"
+        },
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"usuario\": \"{{adminUsuario}}\",\n  \"password\": \"{{adminPassword}}\"\n}",
+          "options": {
+            "raw": {
+              "language": "json"
             }
-          ],
-          "request": {
-            "method": "POST",
-            "header": [
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              }
-            ],
-            "body": {
-              "mode": "raw",
-              "raw": "{\n  \"usuario\": \"{{empleadoEmail}}\",\n  \"password\": \"{{empleadoPassword}}\"\n}",
-              "options": {
-                "raw": {
-                  "language": "json"
-                }
-              }
-            },
-            "url": {
-              "raw": "{{gatewayBaseUrl}}/auth/login",
-              "host": [
-                "{{gatewayBaseUrl}}"
-              ],
-              "path": [
-                "auth",
-                "login"
-              ]
-            },
-            "description": "Primer eslabón de la cadena que pide el enunciado: login OK."
-          },
-          "response": []
+          }
+        }
+      },
+      "event": [
+        {
+          "listen": "prerequest",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "const run = pm.variables.replaceIn('{{$guid}}').replace(/-/g, '').slice(0, 12);",
+              "const values = {",
+              "  pendRunId: run, pendDepartamentoId: 'DP-' + run,",
+              "  pendEmpleadoId: 'EP-' + run, pendEmpleadoEmail: 'ep-' + run + '@example.test',",
+              "  pendBordeId: 'EB-' + run, pendBordeEmail: 'eb-' + run + '@example.test',",
+              "  pendPassword: 'Demo9!-' + run, pendHoy: new Date().toISOString().slice(0, 10)",
+              "};",
+              "for (const [key, value] of Object.entries(values)) pm.collectionVariables.set(key, value);",
+              "for (const [key, offset] of [['pendInicio', 5], ['pendFin', 8]]) {",
+              "  const date = new Date(); date.setUTCDate(date.getUTCDate() + offset);",
+              "  pm.collectionVariables.set(key, date.toISOString().slice(0, 10));",
+              "}",
+              "for (const key of ['pendAdminToken', 'pendUserToken', 'pendResetToken', 'pendPeriodoId', 'pendBordePeriodoId', 'pendMessageId']) {",
+              "  pm.collectionVariables.unset(key);",
+              "}"
+            ]
+          }
         },
         {
-          "name": "2.2 USER no puede crear departamentos",
-          "request": {
-            "method": "POST",
-            "header": [
-              {
-                "key": "Authorization",
-                "value": "Bearer {{userToken}}"
-              },
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              }
-            ],
-            "url": "{{gatewayBaseUrl}}/departamentos",
-            "body": {
-              "mode": "raw",
-              "raw": "{\n  \"id\": \"NO-PERMITIDO-{{runId}}\",\n  \"nombre\": \"No debe crearse\",\n  \"descripcion\": \"Prueba RBAC\"\n}",
-              "options": {
-                "raw": {
-                  "language": "json"
-                }
-              }
-            }
-          },
-          "event": [
-            {
-              "listen": "test",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "pm.test('HTTP 403', () => pm.response.to.have.status(403));"
-                ]
-              }
-            }
-          ]
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('HTTP 200', () => pm.response.to.have.status(200));",
+              "if(pm.response.code===200) pm.collectionVariables.set('pendAdminToken',pm.response.json().token);"
+            ]
+          }
         }
       ]
     },
     {
-      "name": "3. Vacaciones",
-      "item": [
-        {
-          "name": "3.1 Programar vacaciones futuras",
-          "event": [
-            {
-              "listen": "test",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "pm.test('HTTP 201', () => pm.response.to.have.status(201));",
-                  "const period = pm.response.json().data || pm.response.json();",
-                  "pm.test('PROGRAMADA', () => pm.expect(period.estado).to.eql('PROGRAMADA'));",
-                  "pm.collectionVariables.set('periodoId', period.id);"
-                ]
-              }
+      "name": "02 Crear departamento único",
+      "request": {
+        "method": "POST",
+        "url": "{{gatewayBaseUrl}}/departamentos",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"id\": \"{{pendDepartamentoId}}\",\n  \"nombre\": \"Demo {{pendRunId}}\",\n  \"descripcion\": \"Prueba repetible\"\n}",
+          "options": {
+            "raw": {
+              "language": "json"
             }
-          ],
-          "request": {
-            "method": "POST",
-            "header": [
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              },
-              {
-                "key": "Authorization",
-                "value": "Bearer {{adminToken}}"
-              }
-            ],
-            "body": {
-              "mode": "raw",
-              "raw": "{\n  \"empleadoId\": \"{{empleadoId}}\",\n  \"fechaInicio\": \"{{fechaInicio}}\",\n  \"fechaFin\": \"{{fechaFin}}\"\n}",
-              "options": {
-                "raw": {
-                  "language": "json"
-                }
-              }
-            },
-            "url": {
-              "raw": "{{gatewayBaseUrl}}/vacaciones",
-              "host": [
-                "{{gatewayBaseUrl}}"
-              ],
-              "path": [
-                "vacaciones"
-              ]
-            },
-            "description": "Paso 12 del enunciado. fechaInicio = fechaFin = hoy es la estrategia sugerida para que el scheduler (cada minuto) pueda dispararlo sin esperar."
-          },
-          "response": []
-        },
+          }
+        }
+      },
+      "event": [
         {
-          "name": "3.2 Consultar período",
-          "request": {
-            "method": "GET",
-            "header": [
-              {
-                "key": "Authorization",
-                "value": "Bearer {{adminToken}}"
-              }
-            ],
-            "url": "{{gatewayBaseUrl}}/vacaciones/{{periodoId}}"
-          },
-          "event": [
-            {
-              "listen": "test",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));"
-                ]
-              }
-            }
-          ]
-        },
-        {
-          "name": "3.3 Forzar inicio",
-          "event": [
-            {
-              "listen": "test",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));",
-                  "pm.test('EN_CURSO', () => pm.expect(pm.response.json().data.estado).to.eql('EN_CURSO'));"
-                ]
-              }
-            }
-          ],
-          "request": {
-            "method": "POST",
-            "header": [
-              {
-                "key": "Authorization",
-                "value": "Bearer {{adminToken}}"
-              }
-            ],
-            "url": {
-              "raw": "{{gatewayBaseUrl}}/vacaciones/{{periodoId}}/forzar-inicio",
-              "host": [
-                "{{gatewayBaseUrl}}"
-              ],
-              "path": [
-                "vacaciones",
-                "{{periodoId}}",
-                "forzar-inicio"
-              ]
-            },
-            "description": "ENDPOINT DE DESARROLLO, protegido con rol ADMIN. Hace lo mismo que haría el scheduler al llegar la fecha: transición PROGRAMADA → EN_CURSO y publicación de vacaciones.iniciadas.\n\nSi prefiere esperar al scheduler automático, omita este request: con fechaInicio = hoy lo disparará en el próximo minuto."
-          },
-          "response": []
-        },
-        {
-          "name": "3.4 Login rechazado durante vacaciones",
-          "event": [
-            {
-              "listen": "test",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "pm.test('Status 401: la cuenta quedó suspendida', () => {",
-                  "    pm.response.to.have.status(401);",
-                  "});",
-                  "",
-                  "pm.test('El motivo es la suspensión por vacaciones', () => {",
-                  "    pm.expect(pm.response.json().message).to.include('vacaciones');",
-                  "});"
-                ]
-              }
-            }
-          ],
-          "request": {
-            "method": "POST",
-            "header": [
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              }
-            ],
-            "body": {
-              "mode": "raw",
-              "raw": "{\n  \"usuario\": \"{{empleadoEmail}}\",\n  \"password\": \"{{empleadoPassword}}\"\n}",
-              "options": {
-                "raw": {
-                  "language": "json"
-                }
-              }
-            },
-            "url": {
-              "raw": "{{gatewayBaseUrl}}/auth/login",
-              "host": [
-                "{{gatewayBaseUrl}}"
-              ],
-              "path": [
-                "auth",
-                "login"
-              ]
-            },
-            "description": "Paso 13 del enunciado: la contraseña es correcta, pero el estado de la cuenta no permite el login. Segundo eslabón de la cadena."
-          },
-          "response": []
-        },
-        {
-          "name": "3.5 Forzar fin",
-          "event": [
-            {
-              "listen": "test",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));",
-                  "pm.test('FINALIZADA', () => pm.expect(pm.response.json().data.estado).to.eql('FINALIZADA'));"
-                ]
-              }
-            }
-          ],
-          "request": {
-            "method": "POST",
-            "header": [
-              {
-                "key": "Authorization",
-                "value": "Bearer {{adminToken}}"
-              }
-            ],
-            "url": {
-              "raw": "{{gatewayBaseUrl}}/vacaciones/{{periodoId}}/forzar-fin",
-              "host": [
-                "{{gatewayBaseUrl}}"
-              ],
-              "path": [
-                "vacaciones",
-                "{{periodoId}}",
-                "forzar-fin"
-              ]
-            },
-            "description": "Contraparte simétrica de forzar-inicio. El scheduler automático solo finaliza un período cuando la fechaFin es estrictamente anterior a hoy (la fechaFin es inclusiva: unas vacaciones que terminan hoy siguen vigentes hoy), así que para demostrar la reactivación en la sustentación se usa este endpoint."
-          },
-          "response": []
-        },
-        {
-          "name": "3.6 Login vuelve a funcionar",
-          "event": [
-            {
-              "listen": "test",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "pm.test('Status 200: la cuenta se reactivó', () => pm.response.to.have.status(200));",
-                  "pm.test('Mismo empleado, mismo rol', () => {",
-                  "    const b = pm.response.json();",
-                  "    pm.expect(b.empleadoId).to.eql(pm.collectionVariables.get('empleadoId'));",
-                  "    pm.expect(b.rol).to.eql('USER');",
-                  "});",
-                  "",
-                  "console.log('CADENA COMPLETA DEMOSTRADA: login OK → vacaciones inician → login falla → vacaciones terminan → login OK');"
-                ]
-              }
-            }
-          ],
-          "request": {
-            "method": "POST",
-            "header": [
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              }
-            ],
-            "body": {
-              "mode": "raw",
-              "raw": "{\n  \"usuario\": \"{{empleadoEmail}}\",\n  \"password\": \"{{empleadoPassword}}\"\n}",
-              "options": {
-                "raw": {
-                  "language": "json"
-                }
-              }
-            },
-            "url": {
-              "raw": "{{gatewayBaseUrl}}/auth/login",
-              "host": [
-                "{{gatewayBaseUrl}}"
-              ],
-              "path": [
-                "auth",
-                "login"
-              ]
-            },
-            "description": "Paso 14 del enunciado y cuarto eslabón: la cuenta se reactivó sola, por evento, sin intervención manual sobre el auth-service."
-          },
-          "response": []
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('HTTP 201', () => pm.response.to.have.status(201));"
+            ]
+          }
         }
       ]
     },
     {
-      "name": "4. Offboarding y auditoría",
-      "item": [
+      "name": "Crear empleado pendEmpleado",
+      "request": {
+        "method": "POST",
+        "url": "{{gatewayBaseUrl}}/empleados",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"id\": \"{{pendEmpleadoId}}\",\n  \"nombre\": \"Demo\",\n  \"apellido\": \"Prueba\",\n  \"email\": \"{{pendEmpleadoEmail}}\",\n  \"numeroEmpleado\": \"NUM-{{pendRunId}}-pendEmpleado\",\n  \"cargo\": \"Analista\",\n  \"area\": \"Tecnología\",\n  \"departamentoId\": \"{{pendDepartamentoId}}\",\n  \"fechaIngreso\": \"{{pendHoy}}\",\n  \"estado\": \"ACTIVO\"\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        }
+      },
+      "event": [
         {
-          "name": "4.1 Retirar empleado",
-          "request": {
-            "method": "DELETE",
-            "header": [
-              {
-                "key": "Authorization",
-                "value": "Bearer {{adminToken}}"
-              }
-            ],
-            "url": "{{gatewayBaseUrl}}/empleados/{{empleadoId}}"
-          },
-          "event": [
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('HTTP 201', () => pm.response.to.have.status(201));",
+              "if(pm.response.code===201) {",
+              "(() => {",
+              "  let tries = 0;",
+              "  function check() {",
+              "    pm.sendRequest({url:pm.variables.get('gatewayBaseUrl')+'/vacaciones/balances/'+pm.collectionVariables.get('pendEmpleadoId'),header:{Authorization:'Bearer '+pm.collectionVariables.get('pendAdminToken')}}, (error, response) => {",
+              "      let ready = false;",
+              "      try { ready = !error && (response.code===200); } catch (_) {}",
+              "      if (ready) {",
+              "        ",
+              "        pm.test(\"La r\\u00e9plica de Vacaciones est\\u00e1 disponible\", () => pm.expect(ready).to.eql(true));",
+              "        return;",
+              "      }",
+              "      if (++tries < 60) { setTimeout(check, 500); return; }",
+              "      pm.test(\"La r\\u00e9plica de Vacaciones est\\u00e1 disponible\", () => { throw new Error('No se alcanzó la condición esperada dentro del tiempo de espera'); });",
+              "    });",
+              "  }",
+              "  check();",
+              "})();",
+              "}"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "Consultar empleado",
+      "request": {
+        "method": "GET",
+        "url": "{{gatewayBaseUrl}}/empleados/{{pendEmpleadoId}}",
+        "header": []
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('HTTP 200', () => pm.response.to.have.status(200));"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "Consultar perfil replicado",
+      "request": {
+        "method": "GET",
+        "url": "{{gatewayBaseUrl}}/perfiles/{{pendEmpleadoId}}",
+        "header": []
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('HTTP 200', () => pm.response.to.have.status(200));"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "Consultar el evento de bienvenida sin exponer su token",
+      "request": {
+        "method": "GET",
+        "url": "{{gatewayBaseUrl}}/notificaciones/empleado/{{pendEmpleadoId}}",
+        "header": []
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('HTTP 200', () => pm.response.to.have.status(200));",
+              "",
+              "(() => {",
+              "  let tries = 0;",
+              "  function check() {",
+              "    pm.sendRequest({url:pm.variables.get('gatewayBaseUrl')+'/notificaciones/empleado/'+pm.collectionVariables.get('pendEmpleadoId'),header:{Authorization:'Bearer '+pm.collectionVariables.get('pendAdminToken')}}, (error, response) => {",
+              "      let ready = false;",
+              "      try { ready = !error && (response.code===200 && response.json().some(event=>event.eventType==='usuario.creado')); } catch (_) {}",
+              "      if (ready) {",
+              "        ",
+              "        pm.test(\"Notificaciones recibi\\u00f3 usuario.creado\", () => pm.expect(ready).to.eql(true));",
+              "        return;",
+              "      }",
+              "      if (++tries < 60) { setTimeout(check, 500); return; }",
+              "      pm.test(\"Notificaciones recibi\\u00f3 usuario.creado\", () => { throw new Error('No se alcanzó la condición esperada dentro del tiempo de espera'); });",
+              "    });",
+              "  }",
+              "  check();",
+              "})();"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "Activar cuenta pendEmpleado mediante Auth ADMIN",
+      "request": {
+        "method": "POST",
+        "url": "{{gatewayBaseUrl}}/auth/reset-password",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "auth": {
+          "type": "noauth"
+        },
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"token\": \"{{pendResetToken}}\",\n  \"nuevaPassword\": \"{{pendPassword}}\"\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        }
+      },
+      "event": [
+        {
+          "listen": "prerequest",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.collectionVariables.unset('pendResetToken');",
+              "",
+              "(() => {",
+              "  let tries = 0;",
+              "  function check() {",
+              "    pm.sendRequest({url:pm.variables.get('gatewayBaseUrl')+'/auth/internal/tokens/restablecimiento',method:'POST',header:{Authorization:'Bearer '+pm.collectionVariables.get('pendAdminToken'),'Content-Type':'application/json'},body:{mode:'raw',raw:JSON.stringify({empleadoId:pm.collectionVariables.get('pendEmpleadoId')})}}, (error, response) => {",
+              "      let ready = false;",
+              "      try { ready = !error && (response.code===200); } catch (_) {}",
+              "      if (ready) {",
+              "        pm.collectionVariables.set('pendResetToken',response.json().token);",
+              "        pm.test(\"Auth ya permite emitir el token ADMIN\", () => pm.expect(ready).to.eql(true));",
+              "        return;",
+              "      }",
+              "      if (++tries < 60) { setTimeout(check, 500); return; }",
+              "      pm.test(\"Auth ya permite emitir el token ADMIN\", () => { throw new Error('No se alcanzó la condición esperada dentro del tiempo de espera'); });",
+              "    });",
+              "  }",
+              "  check();",
+              "})();"
+            ]
+          }
+        },
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('HTTP 200', () => pm.response.to.have.status(200));"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "Login pendEmpleado: esperado 200",
+      "request": {
+        "method": "POST",
+        "url": "{{gatewayBaseUrl}}/auth/login",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "auth": {
+          "type": "noauth"
+        },
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"usuario\": \"{{pendEmpleadoEmail}}\",\n  \"password\": \"{{pendPassword}}\"\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('HTTP 200', () => pm.response.to.have.status(200));",
+              "if(pm.response.code===200) pm.collectionVariables.set('pendUserToken',pm.response.json().token);"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "USER no puede crear departamentos",
+      "request": {
+        "method": "POST",
+        "url": "{{gatewayBaseUrl}}/departamentos",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "auth": {
+          "type": "bearer",
+          "bearer": [
             {
-              "listen": "test",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "pm.test('Retiro aceptado', () => pm.expect(pm.response.code).to.be.oneOf([200,204]));"
-                ]
-              }
+              "key": "token",
+              "value": "{{pendUserToken}}",
+              "type": "string"
             }
           ]
         },
-        {
-          "name": "4.2 Login rechazado tras retiro",
-          "event": [
-            {
-              "listen": "test",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "pm.test('HTTP 401', () => pm.response.to.have.status(401));",
-                  "pm.test('Baja permanente', () => pm.expect(pm.response.json().message).to.include('permanente'));"
-                ]
-              }
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"id\": \"PROHIBIDO-{{pendRunId}}\",\n  \"nombre\": \"No permitido\",\n  \"descripcion\": \"RBAC\"\n}",
+          "options": {
+            "raw": {
+              "language": "json"
             }
-          ],
-          "request": {
-            "method": "POST",
-            "header": [
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              }
-            ],
-            "body": {
-              "mode": "raw",
-              "raw": "{\n  \"usuario\": \"{{empleadoEmail}}\",\n  \"password\": \"{{empleadoPassword}}\"\n}",
-              "options": {
-                "raw": {
-                  "language": "json"
-                }
-              }
-            },
-            "url": {
-              "raw": "{{gatewayBaseUrl}}/auth/login",
-              "host": [
-                "{{gatewayBaseUrl}}"
-              ],
-              "path": [
-                "auth",
-                "login"
-              ]
-            },
-            "description": "Primer eslabón de la cadena que pide el enunciado: login OK."
-          },
-          "response": []
+          }
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('HTTP 403', () => pm.response.to.have.status(403));"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "Programar vacaciones pendEmpleado",
+      "request": {
+        "method": "POST",
+        "url": "{{gatewayBaseUrl}}/vacaciones",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"empleadoId\": \"{{pendEmpleadoId}}\",\n  \"fechaInicio\": \"{{pendInicio}}\",\n  \"fechaFin\": \"{{pendFin}}\"\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('HTTP 201', () => pm.response.to.have.status(201));",
+              "if(pm.response.code===201) pm.collectionVariables.set('pendPeriodoId',(pm.response.json().data||pm.response.json()).id);"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "Consultar período",
+      "request": {
+        "method": "GET",
+        "url": "{{gatewayBaseUrl}}/vacaciones/{{pendPeriodoId}}",
+        "header": []
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('HTTP 200', () => pm.response.to.have.status(200));"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "Forzar inicio pendEmpleado",
+      "request": {
+        "method": "POST",
+        "url": "{{gatewayBaseUrl}}/vacaciones/{{pendPeriodoId}}/forzar-inicio",
+        "header": []
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('HTTP 200', () => pm.response.to.have.status(200));",
+              "if(pm.response.code===200) {",
+              "(() => {",
+              "  let tries = 0;",
+              "  function check() {",
+              "    pm.sendRequest({url:pm.variables.get('gatewayBaseUrl')+'/auth/login',method:'POST',header:{'Content-Type':'application/json'},body:{mode:'raw',raw:JSON.stringify({usuario:pm.collectionVariables.get('pendEmpleadoEmail'),password:pm.collectionVariables.get('pendPassword')})}}, (error, response) => {",
+              "      let ready = false;",
+              "      try { ready = !error && (response.code===401); } catch (_) {}",
+              "      if (ready) {",
+              "        ",
+              "        pm.test(\"El cambio de cuenta lleg\\u00f3 a Auth\", () => pm.expect(ready).to.eql(true));",
+              "        return;",
+              "      }",
+              "      if (++tries < 60) { setTimeout(check, 500); return; }",
+              "      pm.test(\"El cambio de cuenta lleg\\u00f3 a Auth\", () => { throw new Error('No se alcanzó la condición esperada dentro del tiempo de espera'); });",
+              "    });",
+              "  }",
+              "  check();",
+              "})();",
+              "}"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "Login pendEmpleado: esperado 401",
+      "request": {
+        "method": "POST",
+        "url": "{{gatewayBaseUrl}}/auth/login",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "auth": {
+          "type": "noauth"
         },
-        {
-          "name": "4.3 Consultar retirados",
-          "request": {
-            "method": "GET",
-            "header": [
-              {
-                "key": "Authorization",
-                "value": "Bearer {{adminToken}}"
-              }
-            ],
-            "url": "{{gatewayBaseUrl}}/empleados?estado=RETIRADO"
-          },
-          "event": [
-            {
-              "listen": "test",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));"
-                ]
-              }
-            },
-            {
-              "listen": "test",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "const body = pm.response.json(); const rows = Array.isArray(body) ? body : body.data || [];",
-                  "pm.test('Se conserva la fecha de retiro', () => pm.expect(rows.some(row => row.id === pm.collectionVariables.get('empleadoId') && row.fechaRetiro)).to.eql(true));"
-                ]
-              }
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"usuario\": \"{{pendEmpleadoEmail}}\",\n  \"password\": \"{{pendPassword}}\"\n}",
+          "options": {
+            "raw": {
+              "language": "json"
             }
-          ]
+          }
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('HTTP 401', () => pm.response.to.have.status(401));"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "Forzar fin pendEmpleado",
+      "request": {
+        "method": "POST",
+        "url": "{{gatewayBaseUrl}}/vacaciones/{{pendPeriodoId}}/forzar-fin",
+        "header": []
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('HTTP 200', () => pm.response.to.have.status(200));",
+              "if(pm.response.code===200) {",
+              "(() => {",
+              "  let tries = 0;",
+              "  function check() {",
+              "    pm.sendRequest({url:pm.variables.get('gatewayBaseUrl')+'/auth/login',method:'POST',header:{'Content-Type':'application/json'},body:{mode:'raw',raw:JSON.stringify({usuario:pm.collectionVariables.get('pendEmpleadoEmail'),password:pm.collectionVariables.get('pendPassword')})}}, (error, response) => {",
+              "      let ready = false;",
+              "      try { ready = !error && (response.code===200); } catch (_) {}",
+              "      if (ready) {",
+              "        ",
+              "        pm.test(\"El cambio de cuenta lleg\\u00f3 a Auth\", () => pm.expect(ready).to.eql(true));",
+              "        return;",
+              "      }",
+              "      if (++tries < 60) { setTimeout(check, 500); return; }",
+              "      pm.test(\"El cambio de cuenta lleg\\u00f3 a Auth\", () => { throw new Error('No se alcanzó la condición esperada dentro del tiempo de espera'); });",
+              "    });",
+              "  }",
+              "  check();",
+              "})();",
+              "}"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "Login pendEmpleado: esperado 200",
+      "request": {
+        "method": "POST",
+        "url": "{{gatewayBaseUrl}}/auth/login",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "auth": {
+          "type": "noauth"
+        },
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"usuario\": \"{{pendEmpleadoEmail}}\",\n  \"password\": \"{{pendPassword}}\"\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('HTTP 200', () => pm.response.to.have.status(200));"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "Retirar empleado pendEmpleado",
+      "request": {
+        "method": "DELETE",
+        "url": "{{gatewayBaseUrl}}/empleados/{{pendEmpleadoId}}",
+        "header": []
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('HTTP 200', () => pm.response.to.have.status(200));",
+              "if(pm.response.code===200) {",
+              "(() => {",
+              "  let tries = 0;",
+              "  function check() {",
+              "    pm.sendRequest({url:pm.variables.get('gatewayBaseUrl')+'/auth/login',method:'POST',header:{'Content-Type':'application/json'},body:{mode:'raw',raw:JSON.stringify({usuario:pm.collectionVariables.get('pendEmpleadoEmail'),password:pm.collectionVariables.get('pendPassword')})}}, (error, response) => {",
+              "      let ready = false;",
+              "      try { ready = !error && (response.code===401); } catch (_) {}",
+              "      if (ready) {",
+              "        ",
+              "        pm.test(\"El cambio de cuenta lleg\\u00f3 a Auth\", () => pm.expect(ready).to.eql(true));",
+              "        return;",
+              "      }",
+              "      if (++tries < 60) { setTimeout(check, 500); return; }",
+              "      pm.test(\"El cambio de cuenta lleg\\u00f3 a Auth\", () => { throw new Error('No se alcanzó la condición esperada dentro del tiempo de espera'); });",
+              "    });",
+              "  }",
+              "  check();",
+              "})();",
+              "}"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "Login pendEmpleado: esperado 401",
+      "request": {
+        "method": "POST",
+        "url": "{{gatewayBaseUrl}}/auth/login",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "auth": {
+          "type": "noauth"
+        },
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"usuario\": \"{{pendEmpleadoEmail}}\",\n  \"password\": \"{{pendPassword}}\"\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('HTTP 401', () => pm.response.to.have.status(401));"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "Consultar retirados",
+      "request": {
+        "method": "GET",
+        "url": "{{gatewayBaseUrl}}/empleados?estado=RETIRADO&departamentoId={{pendDepartamentoId}}",
+        "header": []
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('HTTP 200', () => pm.response.to.have.status(200));",
+              "pm.test('Incluye el empleado retirado',()=>{const b=pm.response.json();const rows=Array.isArray(b)?b:b.data;pm.expect(rows.some(x=>x.id===pm.collectionVariables.get('pendEmpleadoId'))).to.eql(true);});"
+            ]
+          }
         }
       ]
     }

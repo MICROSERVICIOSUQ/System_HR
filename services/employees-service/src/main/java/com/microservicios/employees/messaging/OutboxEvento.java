@@ -56,6 +56,9 @@ public class OutboxEvento {
     @Column(name = "payload", nullable = false, columnDefinition = "TEXT")
     private String payload;
 
+    @Column(name = "traceparent", length = 55)
+    private String traceparent;
+
     @Column(name = "creado_en", nullable = false)
     private LocalDateTime creadoEn;
 
@@ -112,6 +115,9 @@ public class OutboxEvento {
     public String getPayload() {
         return payload;
     }
+
+    public String getTraceparent() { return traceparent; }
+    public void setTraceparent(String traceparent) { this.traceparent = traceparent; }
 
     public LocalDateTime getCreadoEn() {
         return creadoEn;

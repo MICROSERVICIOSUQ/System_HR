@@ -35,8 +35,16 @@ import reactor.netty.http.server.HttpServer;
  * del JWT, estas pruebas también lo notan.
  */
 @org.springframework.boot.test.autoconfigure.web.reactive.AutoConfigureWebTestClient
+@org.springframework.boot.test.autoconfigure.actuate.observability.AutoConfigureObservability(tracing = false)
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
 class GatewayTest {
+
+    @Test
+    void metricsEsPublicoYConservaElFormatoPrometheus() {
+        client.get().uri("/metrics").exchange().expectStatus().isOk()
+                .expectBody(String.class).value(body ->
+                        org.assertj.core.api.Assertions.assertThat(body).contains("# HELP"));
+    }
 
     /** El mismo valor por omisión de jwt.secret en application.yml. */
     private static final String SECRETO =

@@ -68,3 +68,20 @@ model IdempotencyRecord {
 
   @@map("http_idempotency")
 }
+
+/// Cambios de negocio y eventos se confirman juntos; RabbitMQ se reintenta aparte.
+model OutboxEvento {
+  id           String    @id @db.VarChar(36)
+  secuencia    BigInt    @unique @default(autoincrement())
+  tipo         String    @db.VarChar(80)
+  agregadoId   String    @map("agregado_id")
+  payload      Json
+  headers      Json
+  creadoEn     DateTime  @default(now()) @map("creado_en") @db.Timestamp(3)
+  publicadoEn  DateTime? @map("publicado_en") @db.Timestamp(3)
+  intentos     Int       @default(0)
+  ultimoError  String?   @map("ultimo_error") @db.VarChar(500)
+
+  @@index([publicadoEn, secuencia])
+  @@map("outbox_evento")
+}

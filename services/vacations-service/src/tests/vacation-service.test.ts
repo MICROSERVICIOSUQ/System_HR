@@ -37,6 +37,16 @@ interface PeriodoFake {
  * reimplemente —ni contradiga— la lógica que se está protegiendo.
  */
 class RepositorioFake {
+  async transaction<T>(work: (transaction: any) => Promise<T>): Promise<T> {
+    const previous = this.periodos.map(period => ({ ...period }));
+    try {
+      return await work({});
+    } catch (error) {
+      this.periodos = previous;
+      throw error;
+    }
+  }
+
   balances = new Map<string, { employeeId: string; estadoEmpleado: string }>();
   periodos: PeriodoFake[] = [];
   private secuencia = 0;

@@ -109,6 +109,7 @@ gateway:
       - /auth/recover-password
       - /auth/reset-password
       - /health
+      - /metrics
       - /actuator/**
       - /swagger-ui.html
       - /swagger-ui/**

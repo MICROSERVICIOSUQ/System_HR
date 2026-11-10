@@ -25,10 +25,18 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 import static org.mockito.Mockito.when;
 
+@org.springframework.boot.test.autoconfigure.actuate.observability.AutoConfigureObservability(tracing = false)
 @SpringBootTest
 @AutoConfigureMockMvc
 @TestMethodOrder(MethodOrderer.OrderAnnotation.class)
 class EmployeeEndpointsTest {
+
+    @Test
+    void aliasMetricsConservaElFormatoPrometheus() throws Exception {
+        mockMvc.perform(get("/metrics")).andExpect(status().isOk())
+                .andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.content()
+                        .string(org.hamcrest.Matchers.containsString("# HELP")));
+    }
 
     @Autowired
     private MockMvc mockMvc;

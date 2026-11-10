@@ -29,7 +29,7 @@ scrape_configs:
   # cliente. Si el gateway dice que todo va bien, va bien de verdad; si un
   # servicio interno está lento, aquí se ve antes que en ningún otro sitio.
   - job_name: 'api-gateway'
-    metrics_path: '/actuator/prometheus'
+    metrics_path: '/metrics'
     static_configs:
       - targets: ['api-gateway:8080']
         labels:
@@ -37,9 +37,9 @@ scrape_configs:
           capa: borde
 
   # ── Servicios Java (Spring Boot + Actuator + Micrometer) ─────────────────
-  # Micrometer expone las métricas en /actuator/prometheus, no en /metrics.
+  # Los servicios Java conservan Actuator y ofrecen también el alias /metrics.
   - job_name: 'auth-service'
-    metrics_path: '/actuator/prometheus'
+    metrics_path: '/metrics'
     static_configs:
       - targets: ['auth-service:8085']
         labels:
@@ -47,7 +47,7 @@ scrape_configs:
           capa: negocio
 
   - job_name: 'employees-service'
-    metrics_path: '/actuator/prometheus'
+    metrics_path: '/metrics'
     static_configs:
       - targets: ['employees-service:8080']
         labels:
@@ -56,8 +56,7 @@ scrape_configs:
 
   # ── Servicios Node/TypeScript (Express + prom-client) ────────────────────
   # prom-client expone en /metrics, que es la convención en el resto de
-  # lenguajes. La diferencia de ruta entre familias de servicios es
-  # precisamente por qué metrics_path se configura por job y no globalmente.
+  # lenguajes. Todos los servicios ofrecen ahora ese mismo endpoint.
   - job_name: 'departments-service'
     metrics_path: '/metrics'
     static_configs:

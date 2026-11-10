@@ -3,6 +3,7 @@ import { log } from './observability/logger.ts';
 import app from './app.ts';
 import { RabbitMQConsumer } from './messaging/rabbitmq.consumer.ts';
 import { VacationScheduler } from './scheduler/vacation.scheduler.ts';
+import { OutboxPublisher } from './messaging/outbox.publisher.ts';
 
 const PORT = Number(process.env.PORT ?? 8084);
 
@@ -20,11 +21,14 @@ consumer.start().catch((err) => {
 // Scheduler que hace avanzar los períodos al llegar sus fechas (Reto 5)
 const scheduler = new VacationScheduler();
 scheduler.start();
+const outbox = new OutboxPublisher();
+outbox.start();
 
 // Manejo de apagado ordenado
 const shutdown = async () => {
   log.info('[VACATIONS-SERVICE] Recibida señal de apagado, cerrando recursos...');
   scheduler.stop();
+  await outbox.stop();
   await consumer.stop();
   await telemetry.shutdown();
   server.close(() => {

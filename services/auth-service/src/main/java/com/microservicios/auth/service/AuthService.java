@@ -92,7 +92,7 @@ public class AuthService {
      * <p>Una cuenta con baja permanente no recibe token: permitirlo sería una vía
      * para que un empleado retirado recupere el acceso.
      */
-    @Transactional(readOnly = true)
+    @Transactional
     public void recuperarPassword(String email) {
         UserAccount cuenta = repository.findByEmailIgnoreCase(email)
                 .orElseThrow(() -> new CuentaNoEncontradaException(email));

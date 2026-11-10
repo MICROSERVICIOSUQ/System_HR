@@ -31,6 +31,7 @@ public class GatewaySecurityProperties {
             "/auth/reset-password",
             "/health",
             "/actuator/**",
+            "/metrics",
             "/swagger-ui.html",
             "/swagger-ui/**",
             "/webjars/**",

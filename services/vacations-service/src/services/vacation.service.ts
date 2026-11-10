@@ -176,34 +176,17 @@ export class VacationService {
       );
     }
 
-    // Persistir el período
-    const period = await this.repository.createPeriod({
-      empleadoId: dto.empleadoId,
-      fechaInicio: inicio,
-      fechaFin: fin,
-      estado: 'PROGRAMADA',
+    return this.repository.transaction(async (transaction) => {
+      const period = await this.repository.createPeriod({
+        empleadoId: dto.empleadoId,
+        fechaInicio: inicio,
+        fechaFin: fin,
+        estado: 'PROGRAMADA',
+      }, transaction);
+      const result = this.mapPeriod(period);
+      await this.publisher.publishVacacionesProgramadas(result, correlationId, transaction);
+      return result;
     });
-
-    const result = this.mapPeriod(period);
-
-    // Publicar evento vacaciones.programadas en RabbitMQ (fire-and-forget, no bloquea)
-    this.publisher
-      .publishVacacionesProgramadas({
-        id: result.id,
-        empleadoId: result.empleadoId,
-        fechaInicio: result.fechaInicio,
-        fechaFin: result.fechaFin,
-        estado: result.estado,
-        fechaCreacion: result.fechaCreacion,
-      }, correlationId)
-      .catch((err) => {
-        log.error(
-          `[VACATIONS] [WARN] No se pudo publicar evento para período ${result.id}:`,
-          err.message
-        );
-      });
-
-    return result;
   }
 
   async getAllPeriods(
@@ -316,29 +299,15 @@ export class VacationService {
       );
     }
 
-    const updated = await this.repository.updatePeriod(id, {
-      fechaInicio: inicio,
-      fechaFin: fin,
+    return this.repository.transaction(async (transaction) => {
+      const updated = await this.repository.updatePeriod(id, {
+        fechaInicio: inicio,
+        fechaFin: fin,
+      }, transaction);
+      const result = this.mapPeriod(updated);
+      await this.publisher.publishVacacionesReprogramadas(result, correlationId, transaction);
+      return result;
     });
-    const result = this.mapPeriod(updated);
-
-    this.publisher
-      .publishVacacionesReprogramadas({
-        id: result.id,
-        empleadoId: result.empleadoId,
-        fechaInicio: result.fechaInicio,
-        fechaFin: result.fechaFin,
-        estado: result.estado,
-        fechaCreacion: result.fechaCreacion,
-      }, correlationId)
-      .catch((err) => {
-        log.error(
-          `[VACATIONS] [WARN] No se pudo publicar evento de reprogramación para período ${result.id}:`,
-          err.message
-        );
-      });
-
-    return result;
   }
 
   async getPeriodById(id: string): Promise<VacationPeriodResult | null> {
@@ -612,71 +581,31 @@ export class VacationService {
   }
 
   private async startPeriod(period: any): Promise<boolean> {
-    const transicionGanada = await this.repository.transitionPeriodState(
-      period.id,
-      'PROGRAMADA',
-      'EN_CURSO'
-    );
-    if (!transicionGanada) {
-      return false;
-    }
-
-    transitions.inc({ state: 'EN_CURSO' });
-    const result = this.mapPeriod({ ...period, estado: 'EN_CURSO' });
-    log.info(
-      `[VACATIONS] [SCHEDULER] Período ${result.id} EN_CURSO | empleado: ${result.empleadoId} | ${result.fechaInicio} → ${result.fechaFin}`
-    );
-
-    try {
-      await this.publisher.publishVacacionesIniciadas({
-        id: result.id,
-        empleadoId: result.empleadoId,
-        fechaInicio: result.fechaInicio,
-        fechaFin: result.fechaFin,
-        estado: result.estado,
-        fechaCreacion: result.fechaCreacion,
-      });
-    } catch (err: any) {
-      log.error(
-        `[VACATIONS] [WARN] No se pudo publicar vacaciones.iniciadas para ${result.id}:`,
-        err.message
-      );
-    }
-    return true;
+    return this.transitionWithEvent(period, 'PROGRAMADA', 'EN_CURSO');
   }
 
   private async finishPeriod(period: any): Promise<boolean> {
-    const transicionGanada = await this.repository.transitionPeriodState(
-      period.id,
-      'EN_CURSO',
-      'FINALIZADA'
-    );
-    if (!transicionGanada) {
-      return false;
-    }
+    return this.transitionWithEvent(period, 'EN_CURSO', 'FINALIZADA');
+  }
 
-    transitions.inc({ state: 'FINALIZADA' });
-    const result = this.mapPeriod({ ...period, estado: 'FINALIZADA' });
-    log.info(
-      `[VACATIONS] [SCHEDULER] Período ${result.id} FINALIZADA | empleado: ${result.empleadoId} | fechaFin: ${result.fechaFin}`
-    );
-
-    try {
-      await this.publisher.publishVacacionesFinalizadas({
-        id: result.id,
-        empleadoId: result.empleadoId,
-        fechaInicio: result.fechaInicio,
-        fechaFin: result.fechaFin,
-        estado: result.estado,
-        fechaCreacion: result.fechaCreacion,
-      });
-    } catch (err: any) {
-      log.error(
-        `[VACATIONS] [WARN] No se pudo publicar vacaciones.finalizadas para ${result.id}:`,
-        err.message
-      );
+  private async transitionWithEvent(period: any, expected: string, next: string): Promise<boolean> {
+    const changed = await this.repository.transaction(async (transaction) => {
+      if (!await this.repository.transitionPeriodState(period.id, expected, next, transaction)) {
+        return false;
+      }
+      const result = this.mapPeriod({ ...period, estado: next });
+      if (next === 'EN_CURSO') {
+        await this.publisher.publishVacacionesIniciadas(result, undefined, transaction);
+      } else {
+        await this.publisher.publishVacacionesFinalizadas(result, undefined, transaction);
+      }
+      return true;
+    });
+    if (changed) {
+      transitions.inc({ state: next });
+      log.info(`[VACATIONS] Período ${period.id}: ${next}; evento guardado en outbox`);
     }
-    return true;
+    return changed;
   }
 
   private mapPeriod(p: any): VacationPeriodResult {

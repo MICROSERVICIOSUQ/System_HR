@@ -8,6 +8,7 @@ import { rabbitConfig } from '../config/rabbitmq.ts';
 import { RabbitMQConsumer } from '../messaging/rabbitmq.consumer.ts';
 import { VacationService } from '../services/vacation.service.ts';
 import { brokerHealth } from '../observability/health.ts';
+import { OutboxPublisher } from '../messaging/outbox.publisher.ts';
 
 async function eventually(check: () => Promise<boolean>) {
   const deadline = Date.now() + 15000;
@@ -33,6 +34,7 @@ test('HTTP + PostgreSQL + RabbitMQ: CRUD, validaciones y scheduler', async () =>
   const consumer = new RabbitMQConsumer();
   const server = app.listen(0);
   const publisher = new (await import('../messaging/rabbitmq.publisher.ts')).RabbitMQPublisher();
+  const outbox = new OutboxPublisher(publisher);
   try {
     await consumer.start();
     await eventually(async () => brokerHealth.connected);
@@ -76,6 +78,7 @@ test('HTTP + PostgreSQL + RabbitMQ: CRUD, validaciones y scheduler', async () =>
     assert.deepEqual(await service.runSchedulerCycle(), { iniciadas: 1, finalizadas: 1 });
     assert.equal((await prisma.vacationPeriod.findUnique({ where: { id: active.id } }))?.estado, 'FINALIZADA');
     assert.equal((await prisma.vacationPeriod.findUnique({ where: { id: pending.id } }))?.estado, 'EN_CURSO');
+    await outbox.publicarPendientes();
     await eventually(async () => ['vacaciones.programadas', 'vacaciones.iniciadas', 'vacaciones.finalizadas'].every(type => events.some(event => event.type === type)));
     const transitions = events.filter(event => ['vacaciones.iniciadas', 'vacaciones.finalizadas'].includes(event.type));
     assert.deepEqual(transitions.map(event => event.type), ['vacaciones.finalizadas', 'vacaciones.iniciadas']);

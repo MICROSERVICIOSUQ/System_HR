@@ -1,35 +1,84 @@
 {
   "info": {
-    "name": "Observabilidad (Reto 8)",
-    "description": "Verifica el stack de observabilidad del ecosistema System_HR: metricas en Prometheus, trazas distribuidas en Zipkin, logs estructurados en Loki, el dashboard y las alertas de Grafana, y la simulacion de caos.\n\nORDEN DE EJECUCION: las carpetas 0 a 5 se pueden lanzar de corrido con el Runner, esperando ~10 s entre la carpeta 1 y la 3 para que la cadena asincrona termine. La carpeta 6 tiene dos pasos manuales en la terminal.\n\nNOTA IMPORTANTE: los microservicios usan expose y no ports, asi que solo el gateway esta publicado al host. El /health de cada servicio no es accesible desde Postman por diseno (ADR-008: impide esquivar la validacion del JWT); la salud por servicio se comprueba con la metrica up de Prometheus, que es la peticion 2.1.",
-    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+    "name": "Observabilidad - operación y caída controlada",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
+    "description": "Ejecute las tres carpetas mediante scripts/probar-postman-pendientes.py --caida-departamentos. El comando conserva las variables de esta colección entre fases, detiene Departamentos y lo restaura en finally. Para una revisión sin caída, ejecute solo 01 Funcionamiento. No ejecute las carpetas de caída con el servicio activo."
   },
+  "auth": {
+    "type": "bearer",
+    "bearer": [
+      {
+        "key": "token",
+        "value": "{{pendAdminToken}}",
+        "type": "string"
+      }
+    ]
+  },
+  "variable": [
+    {
+      "key": "gatewayBaseUrl",
+      "value": "http://localhost:8080",
+      "type": "string"
+    },
+    {
+      "key": "adminUsuario",
+      "value": "admin@empresa.com",
+      "type": "string"
+    },
+    {
+      "key": "adminPassword",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "prometheusBaseUrl",
+      "value": "http://localhost:9090",
+      "type": "string"
+    },
+    {
+      "key": "zipkinBaseUrl",
+      "value": "http://localhost:9411",
+      "type": "string"
+    },
+    {
+      "key": "lokiBaseUrl",
+      "value": "http://localhost:3100",
+      "type": "string"
+    },
+    {
+      "key": "grafanaBaseUrl",
+      "value": "http://localhost:3000",
+      "type": "string"
+    },
+    {
+      "key": "grafanaUser",
+      "value": "admin",
+      "type": "string"
+    },
+    {
+      "key": "grafanaPassword",
+      "value": "",
+      "type": "string"
+    }
+  ],
   "item": [
     {
-      "name": "0. Preparacion",
-      "description": "Token de administrador y departamento de prueba.",
+      "name": "01 Funcionamiento",
       "item": [
         {
-          "name": "0.1 Login ADMIN",
+          "name": "01 Login ADMIN y preparar datos únicos",
           "request": {
             "method": "POST",
+            "url": "{{gatewayBaseUrl}}/auth/login",
             "header": [
               {
                 "key": "Content-Type",
                 "value": "application/json"
               }
             ],
-            "url": {
-              "raw": "{{gatewayBaseUrl}}/auth/login",
-              "host": [
-                "{{gatewayBaseUrl}}"
-              ],
-              "path": [
-                "auth",
-                "login"
-              ]
+            "auth": {
+              "type": "noauth"
             },
-            "description": "Guarda el token en adminToken. Todo lo demas depende de esta peticion.",
             "body": {
               "mode": "raw",
               "raw": "{\n  \"usuario\": \"{{adminUsuario}}\",\n  \"password\": \"{{adminPassword}}\"\n}",
@@ -42,44 +91,54 @@
           },
           "event": [
             {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const run = pm.variables.replaceIn('{{$guid}}').replace(/-/g, '').slice(0, 12);",
+                  "const values = {",
+                  "  pendRunId: run, pendDepartamentoId: 'DP-' + run,",
+                  "  pendEmpleadoId: 'EP-' + run, pendEmpleadoEmail: 'ep-' + run + '@example.test',",
+                  "  pendBordeId: 'EB-' + run, pendBordeEmail: 'eb-' + run + '@example.test',",
+                  "  pendPassword: 'Demo9!-' + run, pendHoy: new Date().toISOString().slice(0, 10)",
+                  "};",
+                  "for (const [key, value] of Object.entries(values)) pm.collectionVariables.set(key, value);",
+                  "for (const [key, offset] of [['pendInicio', 5], ['pendFin', 8]]) {",
+                  "  const date = new Date(); date.setUTCDate(date.getUTCDate() + offset);",
+                  "  pm.collectionVariables.set(key, date.toISOString().slice(0, 10));",
+                  "}",
+                  "for (const key of ['pendAdminToken', 'pendUserToken', 'pendResetToken', 'pendPeriodoId', 'pendBordePeriodoId', 'pendMessageId']) {",
+                  "  pm.collectionVariables.unset(key);",
+                  "}"
+                ]
+              }
+            },
+            {
               "listen": "test",
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test('Status 200', () => pm.response.to.have.status(200));",
-                  "pm.collectionVariables.set('adminToken', pm.response.json().token);"
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));",
+                  "if(pm.response.code===200) pm.collectionVariables.set('pendAdminToken',pm.response.json().token);"
                 ]
               }
             }
           ]
         },
         {
-          "name": "0.2 Precondicion: departamento IT",
+          "name": "02 Crear departamento único",
           "request": {
             "method": "POST",
+            "url": "{{gatewayBaseUrl}}/departamentos",
             "header": [
               {
                 "key": "Content-Type",
                 "value": "application/json"
-              },
-              {
-                "key": "Authorization",
-                "value": "Bearer {{adminToken}}"
               }
             ],
-            "url": {
-              "raw": "{{gatewayBaseUrl}}/departamentos",
-              "host": [
-                "{{gatewayBaseUrl}}"
-              ],
-              "path": [
-                "departamentos"
-              ]
-            },
-            "description": "El alta de empleado valida el departamento contra departments-service por HTTP. Ese salto es el que hace visible el cruce Java -> Node en la traza, asi que el departamento tiene que existir.",
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"id\": \"IT\",\n  \"nombre\": \"Tecnologia\",\n  \"descripcion\": \"Departamento de tecnologia\"\n}",
+              "raw": "{\n  \"id\": \"{{pendDepartamentoId}}\",\n  \"nombre\": \"Demo {{pendRunId}}\",\n  \"descripcion\": \"Prueba repetible\"\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -93,51 +152,30 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test('IT disponible (201 creado, o 400/409 si ya existia)', () => {",
-                  "    pm.expect(pm.response.code).to.be.oneOf([201, 400, 409]);",
-                  "});"
+                  "pm.test('HTTP 201', () => pm.response.to.have.status(201));"
                 ]
               }
             }
           ]
-        }
-      ]
-    },
-    {
-      "name": "1. Generar telemetria",
-      "description": "Crea trafico y eventos para que haya algo que observar. La peticion 1.1 elige su propio traceId, de modo que las carpetas 3 y 4 van directas a esa traza.",
-      "item": [
+        },
         {
-          "name": "1.1 Crear empleado (dispara toda la cadena)",
+          "name": "Crear empleado pendEmpleado",
           "request": {
             "method": "POST",
+            "url": "{{gatewayBaseUrl}}/empleados",
             "header": [
               {
                 "key": "Content-Type",
                 "value": "application/json"
               },
               {
-                "key": "Authorization",
-                "value": "Bearer {{adminToken}}"
-              },
-              {
                 "key": "traceparent",
-                "value": "{{traceparent}}"
+                "value": "{{pendTraceparent}}"
               }
             ],
-            "url": {
-              "raw": "{{gatewayBaseUrl}}/empleados",
-              "host": [
-                "{{gatewayBaseUrl}}"
-              ],
-              "path": [
-                "empleados"
-              ]
-            },
-            "description": "La peticion mas valiosa del reto. Dispara en cascada: el gateway enruta a employees-service (Java), que valida el departamento llamando a departments-service (Node) por HTTP, y publica empleado.creado en RabbitMQ. Ese evento lo consumen notifications, profiles y vacations (Node) y auth-service (Java), que a su vez publica usuario.creado y vuelve a activar a los tres. Resultado medido: ~47 spans y 7 servicios en UNA sola traza, cruzando HTTP, el broker y los dos lenguajes.",
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"id\": \"{{empleadoDemoId}}\",\n  \"nombre\": \"Observabilidad\",\n  \"apellido\": \"Demo\",\n  \"email\": \"{{empleadoDemoEmail}}\",\n  \"numeroEmpleado\": \"{{empleadoDemoNumero}}\",\n  \"cargo\": \"Analista\",\n  \"area\": \"Tecnologia\",\n  \"departamentoId\": \"IT\",\n  \"fechaIngreso\": \"2026-11-03\",\n  \"estado\": \"ACTIVO\"\n}",
+              "raw": "{\n  \"id\": \"{{pendEmpleadoId}}\",\n  \"nombre\": \"Demo\",\n  \"apellido\": \"Prueba\",\n  \"email\": \"{{pendEmpleadoEmail}}\",\n  \"numeroEmpleado\": \"NUM-{{pendRunId}}-pendEmpleado\",\n  \"cargo\": \"Analista\",\n  \"area\": \"Tecnología\",\n  \"departamentoId\": \"{{pendDepartamentoId}}\",\n  \"fechaIngreso\": \"{{pendHoy}}\",\n  \"estado\": \"ACTIVO\"\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -151,32 +189,10 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "// El CLIENTE elige el traceId, en lugar de dejar que lo genere el gateway.",
-                  "//",
-                  "// Es valido: el estandar W3C Trace Context dice que si la peticion entrante trae",
-                  "// la cabecera traceparent, el servicio continua esa traza en vez de abrir una",
-                  "// nueva. Verificado contra este sistema: la traza con el id elegido aqui aparece",
-                  "// en Zipkin con los 7 servicios.",
-                  "//",
-                  "// La ventaja para la demo es que deja de haber que buscar \"la traza mas larga\":",
-                  "// las peticiones 3.1 y 4.1 van directas a ESTA traza.",
-                  "const hex = (n) => Array.from({ length: n }, () =>",
-                  "    '0123456789abcdef'[Math.floor(Math.random() * 16)]).join('');",
-                  "",
-                  "const traceId = hex(32);   // 16 bytes",
-                  "const spanId  = hex(16);   // 8 bytes",
-                  "",
-                  "// Formato: version-traceId-spanId-flags. El 01 final significa \"muestreada\".",
-                  "pm.collectionVariables.set('traceparent', `00-${traceId}-${spanId}-01`);",
-                  "pm.collectionVariables.set('traceIdDemo', traceId);",
-                  "",
-                  "// Identificadores unicos para poder repetir la coleccion sin vaciar la base.",
-                  "const sufijo = String(Date.now()).slice(-9);",
-                  "pm.collectionVariables.set('empleadoDemoId', 'EOBS' + sufijo);",
-                  "pm.collectionVariables.set('empleadoDemoEmail', 'obs' + sufijo + '@empresa.com');",
-                  "pm.collectionVariables.set('empleadoDemoNumero', 'EMP-OBS-' + sufijo);",
-                  "",
-                  "console.log('traceId de esta demo: ' + traceId);"
+                  "const hex = () => pm.variables.replaceIn('{{$guid}}').replace(/-/g,'');",
+                  "const traceId = hex();",
+                  "pm.collectionVariables.set('pendTraceId', traceId);",
+                  "pm.collectionVariables.set('pendTraceparent','00-'+traceId+'-'+hex().slice(0,16)+'-01');"
                 ]
               }
             },
@@ -185,354 +201,37 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test('Status 201', () => pm.response.to.have.status(201));",
-                  "pm.test('El empleado se creo', () => {",
-                  "    pm.expect(pm.response.json().id).to.eql(pm.collectionVariables.get('empleadoDemoId'));",
-                  "});",
-                  "console.log('Espere ~10s antes de la carpeta 3: la cadena asincrona tarda en completarse.');"
-                ]
-              }
-            }
-          ]
-        },
-        {
-          "name": "1.2 Trafico: listar empleados",
-          "request": {
-            "method": "GET",
-            "header": [
-              {
-                "key": "Authorization",
-                "value": "Bearer {{adminToken}}"
-              }
-            ],
-            "url": {
-              "raw": "{{gatewayBaseUrl}}/empleados",
-              "host": [
-                "{{gatewayBaseUrl}}"
-              ],
-              "path": [
-                "empleados"
-              ]
-            },
-            "description": "Ejecute esta y las tres siguientes varias veces (o use el Runner con 10 iteraciones) para que los paneles de trafico y latencia tengan datos. rate() necesita al menos dos muestras en la ventana para dibujar algo."
-          },
-          "event": [
-            {
-              "listen": "test",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "pm.test('Status 200', () => pm.response.to.have.status(200));"
-                ]
-              }
-            }
-          ]
-        },
-        {
-          "name": "1.3 Trafico: listar departamentos",
-          "request": {
-            "method": "GET",
-            "header": [
-              {
-                "key": "Authorization",
-                "value": "Bearer {{adminToken}}"
-              }
-            ],
-            "url": {
-              "raw": "{{gatewayBaseUrl}}/departamentos",
-              "host": [
-                "{{gatewayBaseUrl}}"
-              ],
-              "path": [
-                "departamentos"
-              ]
-            },
-            "description": "Genera metricas en un servicio Node (prom-client)."
-          },
-          "event": [
-            {
-              "listen": "test",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "pm.test('Status 200', () => pm.response.to.have.status(200));"
-                ]
-              }
-            }
-          ]
-        },
-        {
-          "name": "1.4 Trafico: listar notificaciones",
-          "request": {
-            "method": "GET",
-            "header": [
-              {
-                "key": "Authorization",
-                "value": "Bearer {{adminToken}}"
-              }
-            ],
-            "url": {
-              "raw": "{{gatewayBaseUrl}}/notifications",
-              "host": [
-                "{{gatewayBaseUrl}}"
-              ],
-              "path": [
-                "notifications"
-              ]
-            },
-            "description": "Ademas de generar trafico, deja ver el historial de eventos procesados."
-          },
-          "event": [
-            {
-              "listen": "test",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "pm.test('Status 200', () => pm.response.to.have.status(200));"
-                ]
-              }
-            }
-          ]
-        },
-        {
-          "name": "1.5 Trafico: listar perfiles",
-          "request": {
-            "method": "GET",
-            "header": [
-              {
-                "key": "Authorization",
-                "value": "Bearer {{adminToken}}"
-              }
-            ],
-            "url": {
-              "raw": "{{gatewayBaseUrl}}/perfiles",
-              "host": [
-                "{{gatewayBaseUrl}}"
-              ],
-              "path": [
-                "perfiles"
-              ]
-            },
-            "description": "Read model CQRS alimentado por eventos."
-          },
-          "event": [
-            {
-              "listen": "test",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "pm.test('Status 200', () => pm.response.to.have.status(200));"
-                ]
-              }
-            }
-          ]
-        },
-        {
-          "name": "1.6 Provocar un 404 (para el panel de errores)",
-          "request": {
-            "method": "GET",
-            "header": [
-              {
-                "key": "Authorization",
-                "value": "Bearer {{adminToken}}"
-              }
-            ],
-            "url": {
-              "raw": "{{gatewayBaseUrl}}/empleados/NO-EXISTE",
-              "host": [
-                "{{gatewayBaseUrl}}"
-              ],
-              "path": [
-                "empleados",
-                "NO-EXISTE"
-              ]
-            },
-            "description": "El panel \"Errores HTTP 4xx y 5xx\" necesita errores que mostrar. Un 404 es la forma inocua de generarlos: no rompe nada y aparece en el dashboard."
-          },
-          "event": [
-            {
-              "listen": "test",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "pm.test('Status 404', () => pm.response.to.have.status(404));",
-                  "pm.test('Aparecera en el panel de errores 4xx', () => {",
-                  "    pm.expect(String(pm.response.code)).to.match(/^4/);",
-                  "});"
-                ]
-              }
-            }
-          ]
-        }
-      ]
-    },
-    {
-      "name": "2. Metricas (Prometheus)",
-      "description": "Criterio 1: modelo pull, 7 targets.",
-      "item": [
-        {
-          "name": "2.1 Los 7 servicios estan UP",
-          "request": {
-            "method": "GET",
-            "header": [],
-            "url": {
-              "raw": "{{prometheusBaseUrl}}/api/v1/query?query=up{job!=\"prometheus\"}",
-              "host": [
-                "{{prometheusBaseUrl}}"
-              ],
-              "path": [
-                "api",
-                "v1",
-                "query"
-              ],
-              "query": [
-                {
-                  "key": "query",
-                  "value": "up{job!=\"prometheus\"}"
-                }
-              ]
-            },
-            "description": "Criterio 1 del reto. up vale 1 si Prometheus consiguio raspar el servicio. Deben salir 7 series, una por microservicio, todas en 1."
-          },
-          "event": [
-            {
-              "listen": "test",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "pm.test('Status 200', () => pm.response.to.have.status(200));",
-                  "",
-                  "const series = pm.response.json().data.result;",
-                  "",
-                  "pm.test('Hay 7 microservicios vigilados', () => {",
-                  "    pm.expect(series).to.have.lengthOf(7);",
-                  "});",
-                  "",
-                  "pm.test('Todos responden al scraping', () => {",
-                  "    const caidos = series.filter(s => s.value[1] !== '1').map(s => s.metric.job);",
-                  "    pm.expect(caidos, 'servicios caidos: ' + caidos.join(', ')).to.be.empty;",
-                  "});",
-                  "",
-                  "pm.test('El API Gateway esta entre ellos', () => {",
-                  "    pm.expect(series.map(s => s.metric.job)).to.include('api-gateway');",
-                  "});",
-                  "",
-                  "console.log('Vigilados: ' + series.map(s => s.metric.job).sort().join(', '));"
-                ]
-              }
-            }
-          ]
-        },
-        {
-          "name": "2.2 Trafico por servicio",
-          "request": {
-            "method": "GET",
-            "header": [],
-            "url": {
-              "raw": "{{prometheusBaseUrl}}/api/v1/query?query=sum by (job) (rate(http_server_requests_seconds_count[5m])) or sum by (job) (rate(http_requests_total[5m]))",
-              "host": [
-                "{{prometheusBaseUrl}}"
-              ],
-              "path": [
-                "api",
-                "v1",
-                "query"
-              ],
-              "query": [
-                {
-                  "key": "query",
-                  "value": "sum by (job) (rate(http_server_requests_seconds_count[5m])) or sum by (job) (rate(http_requests_total[5m]))"
-                }
-              ]
-            },
-            "description": "Golden Signal de trafico. La consulta lleva \"or\" porque Micrometer (Java) y prom-client (Node) nombran la metrica distinto: http_server_requests_seconds_count frente a http_requests_total."
-          },
-          "event": [
-            {
-              "listen": "test",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "pm.test('Status 200', () => pm.response.to.have.status(200));",
-                  "pm.test('Hay metricas de trafico', () => {",
-                  "    pm.expect(pm.response.json().data.result.length).to.be.above(0);",
-                  "});"
-                ]
-              }
-            }
-          ]
-        },
-        {
-          "name": "2.3 Latencia media del gateway",
-          "request": {
-            "method": "GET",
-            "header": [],
-            "url": {
-              "raw": "{{prometheusBaseUrl}}/api/v1/query?query=sum(rate(http_server_requests_seconds_sum{job=\"api-gateway\"}[5m])) / sum(rate(http_server_requests_seconds_count{job=\"api-gateway\"}[5m]))",
-              "host": [
-                "{{prometheusBaseUrl}}"
-              ],
-              "path": [
-                "api",
-                "v1",
-                "query"
-              ],
-              "query": [
-                {
-                  "key": "query",
-                  "value": "sum(rate(http_server_requests_seconds_sum{job=\"api-gateway\"}[5m])) / sum(rate(http_server_requests_seconds_count{job=\"api-gateway\"}[5m]))"
-                }
-              ]
-            },
-            "description": "Golden Signal de latencia, medida en el borde porque es la perspectiva del cliente. El SLO es < 300 ms y la alerta salta por encima de 2 s."
-          },
-          "event": [
-            {
-              "listen": "test",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "pm.test('Status 200', () => pm.response.to.have.status(200));",
-                  "",
-                  "const r = pm.response.json().data.result;",
-                  "if (r.length === 0) {",
-                  "    console.log('Sin trafico en la ventana: ejecute la carpeta 1 y reintente.');",
-                  "} else {",
-                  "    const segundos = parseFloat(r[0].value[1]);",
-                  "    console.log('Latencia media del gateway: ' + (segundos * 1000).toFixed(1) + ' ms');",
-                  "    pm.test('Por debajo del umbral de alerta (2s)', () => {",
-                  "        pm.expect(segundos).to.be.below(2);",
+                  "pm.test('HTTP 201', () => pm.response.to.have.status(201));",
+                  "if(pm.response.code===201) {",
+                  "(() => {",
+                  "  let tries = 0;",
+                  "  function check() {",
+                  "    pm.sendRequest({url:pm.variables.get('gatewayBaseUrl')+'/vacaciones/balances/'+pm.collectionVariables.get('pendEmpleadoId'),header:{Authorization:'Bearer '+pm.collectionVariables.get('pendAdminToken')}}, (error, response) => {",
+                  "      let ready = false;",
+                  "      try { ready = !error && (response.code===200); } catch (_) {}",
+                  "      if (ready) {",
+                  "        ",
+                  "        pm.test(\"La r\\u00e9plica de Vacaciones est\\u00e1 disponible\", () => pm.expect(ready).to.eql(true));",
+                  "        return;",
+                  "      }",
+                  "      if (++tries < 60) { setTimeout(check, 500); return; }",
+                  "      pm.test(\"La r\\u00e9plica de Vacaciones est\\u00e1 disponible\", () => { throw new Error('No se alcanzó la condición esperada dentro del tiempo de espera'); });",
                   "    });",
+                  "  }",
+                  "  check();",
+                  "})();",
                   "}"
                 ]
               }
             }
           ]
-        }
-      ]
-    },
-    {
-      "name": "3. Trazas (Zipkin)",
-      "description": "Criterio 2: una traza que cruza HTTP, RabbitMQ y dos lenguajes.",
-      "item": [
+        },
         {
-          "name": "3.1 La traza completa del onboarding",
+          "name": "Tráfico /empleados",
           "request": {
             "method": "GET",
-            "header": [],
-            "url": {
-              "raw": "{{zipkinBaseUrl}}/api/v2/trace/{{traceIdDemo}}",
-              "host": [
-                "{{zipkinBaseUrl}}"
-              ],
-              "path": [
-                "api",
-                "v2",
-                "trace",
-                "{{traceIdDemo}}"
-              ]
-            },
-            "description": "Criterio 2 del reto, y el punto fuerte de la sustentacion. Va directa al traceId que eligio la peticion 1.1, asi que no hay que buscar nada. Comprueba que la traza cruza los dos lenguajes y que incluye el salto por RabbitMQ."
+            "url": "{{gatewayBaseUrl}}/empleados",
+            "header": []
           },
           "event": [
             {
@@ -540,64 +239,18 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test('Status 200', () => pm.response.to.have.status(200));",
-                  "",
-                  "const spans = pm.response.json();",
-                  "const servicios = [...new Set(spans.map(s => s.localEndpoint && s.localEndpoint.serviceName))];",
-                  "",
-                  "pm.test('La traza existe y tiene profundidad', () => {",
-                  "    pm.expect(spans.length, 'spans').to.be.above(15);",
-                  "});",
-                  "",
-                  "pm.test('Cruza los dos lenguajes del ecosistema', () => {",
-                  "    pm.expect(servicios).to.include('employees-service');    // Java",
-                  "    pm.expect(servicios).to.include('departments-service');  // Node",
-                  "});",
-                  "",
-                  "pm.test('Incluye el salto asincrono por RabbitMQ', () => {",
-                  "    const haySalto = spans.some(s => s.kind === 'PRODUCER');",
-                  "    const hayConsumo = spans.some(s => s.kind === 'CONSUMER');",
-                  "    pm.expect(haySalto, 'span PRODUCER').to.be.true;",
-                  "    pm.expect(hayConsumo, 'span CONSUMER').to.be.true;",
-                  "});",
-                  "",
-                  "pm.test('Llega hasta la base de datos', () => {",
-                  "    pm.expect(spans.some(s => (s.name || '').startsWith('pg.'))).to.be.true;",
-                  "});",
-                  "",
-                  "const lento = spans.reduce((a, b) => (a.duration > b.duration ? a : b));",
-                  "console.log('--------------------------------------------------');",
-                  "console.log('traceId:   ' + pm.collectionVariables.get('traceIdDemo'));",
-                  "console.log('spans:     ' + spans.length);",
-                  "console.log('servicios: ' + servicios.sort().join(', '));",
-                  "console.log('span mas lento: ' + lento.name + ' (' +",
-                  "            (lento.localEndpoint && lento.localEndpoint.serviceName) + ') ' +",
-                  "            (lento.duration / 1000).toFixed(1) + ' ms');",
-                  "console.log('Abralo en: ' + pm.variables.replaceIn('{{zipkinBaseUrl}}') +",
-                  "            '/zipkin/traces/' + pm.collectionVariables.get('traceIdDemo'));",
-                  "console.log('--------------------------------------------------');"
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));"
                 ]
               }
             }
           ]
         },
         {
-          "name": "3.2 Zipkin conoce los 7 servicios",
+          "name": "Tráfico /departamentos",
           "request": {
             "method": "GET",
-            "header": [],
-            "url": {
-              "raw": "{{zipkinBaseUrl}}/api/v2/services",
-              "host": [
-                "{{zipkinBaseUrl}}"
-              ],
-              "path": [
-                "api",
-                "v2",
-                "services"
-              ]
-            },
-            "description": "Si un servicio no aparece aqui es que no esta instrumentado o no alcanza a Zipkin. Es la comprobacion mas rapida de que la instrumentacion llego a todos."
+            "url": "{{gatewayBaseUrl}}/departamentos",
+            "header": []
           },
           "event": [
             {
@@ -605,132 +258,118 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test('Status 200', () => pm.response.to.have.status(200));",
-                  "",
-                  "const esperados = ['api-gateway', 'auth-service', 'employees-service',",
-                  "                   'departments-service', 'notifications-service',",
-                  "                   'profiles-service', 'vacations-service'];",
-                  "const presentes = pm.response.json();",
-                  "",
-                  "pm.test('Los 7 servicios envian trazas', () => {",
-                  "    const faltan = esperados.filter(s => !presentes.includes(s));",
-                  "    pm.expect(faltan, 'sin instrumentar o sin trafico: ' + faltan.join(', ')).to.be.empty;",
-                  "});"
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));"
                 ]
               }
             }
           ]
-        }
-      ]
-    },
-    {
-      "name": "4. Logs (Loki)",
-      "description": "Criterio 3: logs JSON correlacionados con la traza por traceId.",
-      "item": [
+        },
         {
-          "name": "4.1 Los logs de ESA traza, en todos los servicios",
+          "name": "Tráfico /notificaciones",
           "request": {
             "method": "GET",
-            "header": [],
-            "url": {
-              "raw": "{{lokiBaseUrl}}/loki/api/v1/query_range?query={job=\"docker\"} | json | traceId = \"{{traceIdDemo}}\"&start={{lokiDesde}}&end={{lokiHasta}}&limit=100",
-              "host": [
-                "{{lokiBaseUrl}}"
-              ],
-              "path": [
-                "loki",
-                "api",
-                "v1",
-                "query_range"
-              ],
-              "query": [
-                {
-                  "key": "query",
-                  "value": "{job=\"docker\"} | json | traceId = \"{{traceIdDemo}}\""
-                },
-                {
-                  "key": "start",
-                  "value": "{{lokiDesde}}"
-                },
-                {
-                  "key": "end",
-                  "value": "{{lokiHasta}}"
-                },
-                {
-                  "key": "limit",
-                  "value": "100"
-                }
-              ]
-            },
-            "description": "Criterio 3, y la demostracion de que los tres pilares estan correlacionados. Devuelve los logs de TODOS los servicios que participaron en la peticion 1.1, unidos por el traceId. La metrica dice que algo va mal, la traza dice por donde paso, y el log dice que ocurrio exactamente en cada paso."
+            "url": "{{gatewayBaseUrl}}/notificaciones",
+            "header": []
           },
           "event": [
-            {
-              "listen": "prerequest",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "// Loki espera el rango en nanosegundos desde epoch.",
-                  "const ahora = Date.now();",
-                  "pm.collectionVariables.set('lokiDesde', (ahora - 15 * 60 * 1000) * 1000000);",
-                  "pm.collectionVariables.set('lokiHasta', ahora * 1000000);"
-                ]
-              }
-            },
             {
               "listen": "test",
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test('Status 200', () => pm.response.to.have.status(200));",
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Tráfico /perfiles",
+          "request": {
+            "method": "GET",
+            "url": "{{gatewayBaseUrl}}/perfiles",
+            "header": []
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Error 404 conocido",
+          "request": {
+            "method": "GET",
+            "url": "{{gatewayBaseUrl}}/empleados/NO-EXISTE-{{pendRunId}}",
+            "header": []
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 404', () => pm.response.to.have.status(404));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Los siete servicios están UP",
+          "request": {
+            "method": "GET",
+            "url": "{{prometheusBaseUrl}}/api/v1/query?query=up%7Bjob%21%3D%22prometheus%22%7D",
+            "header": [],
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));",
                   "",
-                  "const flujos = pm.response.json().data.result;",
-                  "const lineas = flujos.flatMap(f => f.values.map(v => v[1]));",
-                  "const servicios = new Set();",
-                  "lineas.forEach(l => { try { servicios.add(JSON.parse(l).service); } catch (e) {} });",
-                  "",
-                  "pm.test('Hay logs de esta traza', () => {",
-                  "    pm.expect(lineas.length, 'lineas encontradas').to.be.above(0);",
-                  "});",
-                  "",
-                  "pm.test('Los logs son JSON estructurado', () => {",
-                  "    const j = JSON.parse(lineas[0]);",
-                  "    ['timestamp', 'level', 'service', 'traceId', 'message'].forEach(c => {",
-                  "        pm.expect(j, 'falta el campo ' + c).to.have.property(c);",
+                  "(() => {",
+                  "  let tries = 0;",
+                  "  function check() {",
+                  "    pm.sendRequest({url:pm.variables.replaceIn(\"{{prometheusBaseUrl}}/api/v1/query?query=up%7Bjob%21%3D%22prometheus%22%7D\")}, (error, response) => {",
+                  "      let ready = false;",
+                  "      try { ready = !error && (response.code===200 && response.json().data.result.length===7 && response.json().data.result.every(x=>Number(x.value[1])===1)); } catch (_) {}",
+                  "      if (ready) {",
+                  "        ",
+                  "        pm.test(\"Siete objetivos de negocio disponibles\", () => pm.expect(ready).to.eql(true));",
+                  "        return;",
+                  "      }",
+                  "      if (++tries < 120) { setTimeout(check, 500); return; }",
+                  "      pm.test(\"Siete objetivos de negocio disponibles\", () => { throw new Error('No se alcanzó la condición esperada dentro del tiempo de espera'); });",
                   "    });",
-                  "});",
-                  "",
-                  "pm.test('Varios servicios comparten el mismo traceId', () => {",
-                  "    pm.expect(servicios.size, 'servicios: ' + [...servicios].join(', ')).to.be.above(1);",
-                  "});",
-                  "",
-                  "console.log('Logs: ' + lineas.length + ' lineas de ' + servicios.size +",
-                  "            ' servicios (' + [...servicios].sort().join(', ') + ')');"
+                  "  }",
+                  "  check();",
+                  "})();"
                 ]
               }
             }
           ]
         },
         {
-          "name": "4.2 Loki recoge los 7 servicios",
+          "name": "Tráfico registrado en Prometheus",
           "request": {
             "method": "GET",
+            "url": "{{prometheusBaseUrl}}/api/v1/query?query=sum%20by%20%28job%29%20%28rate%28http_server_requests_seconds_count%5B5m%5D%29%29%20or%20sum%20by%20%28job%29%20%28rate%28http_requests_total%5B5m%5D%29%29",
             "header": [],
-            "url": {
-              "raw": "{{lokiBaseUrl}}/loki/api/v1/label/service/values",
-              "host": [
-                "{{lokiBaseUrl}}"
-              ],
-              "path": [
-                "loki",
-                "api",
-                "v1",
-                "label",
-                "service",
-                "values"
-              ]
-            },
-            "description": "Promtail descubre los contenedores por el socket de Docker, asi que aqui aparecen tambien las bases de datos y el propio stack. Lo que importa es que los 7 microservicios esten."
+            "auth": {
+              "type": "noauth"
+            }
           },
           "event": [
             {
@@ -738,17 +377,341 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test('Status 200', () => pm.response.to.have.status(200));",
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));",
                   "",
-                  "const esperados = ['api-gateway', 'auth-service', 'employees-service',",
-                  "                   'departments-service', 'notifications-service',",
-                  "                   'profiles-service', 'vacations-service'];",
-                  "const presentes = pm.response.json().data || [];",
+                  "(() => {",
+                  "  let tries = 0;",
+                  "  function check() {",
+                  "    pm.sendRequest({url:pm.variables.replaceIn(\"{{prometheusBaseUrl}}/api/v1/query?query=sum%20by%20%28job%29%20%28rate%28http_server_requests_seconds_count%5B5m%5D%29%29%20or%20sum%20by%20%28job%29%20%28rate%28http_requests_total%5B5m%5D%29%29\")}, (error, response) => {",
+                  "      let ready = false;",
+                  "      try { ready = !error && (response.code===200 && response.json().data.result.length>0); } catch (_) {}",
+                  "      if (ready) {",
+                  "        ",
+                  "        pm.test(\"Hay m\\u00e9tricas de tr\\u00e1fico\", () => pm.expect(ready).to.eql(true));",
+                  "        return;",
+                  "      }",
+                  "      if (++tries < 120) { setTimeout(check, 500); return; }",
+                  "      pm.test(\"Hay m\\u00e9tricas de tr\\u00e1fico\", () => { throw new Error('No se alcanzó la condición esperada dentro del tiempo de espera'); });",
+                  "    });",
+                  "  }",
+                  "  check();",
+                  "})();"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Latencia media del Gateway",
+          "request": {
+            "method": "GET",
+            "url": "{{prometheusBaseUrl}}/api/v1/query?query=sum%28rate%28http_server_requests_seconds_sum%7Bjob%3D%22api-gateway%22%7D%5B5m%5D%29%29%20%2F%20sum%28rate%28http_server_requests_seconds_count%7Bjob%3D%22api-gateway%22%7D%5B5m%5D%29%29",
+            "header": [],
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));",
                   "",
-                  "pm.test('Promtail recoge los logs de los 7 microservicios', () => {",
-                  "    const faltan = esperados.filter(s => !presentes.includes(s));",
-                  "    pm.expect(faltan, 'sin logs en Loki: ' + faltan.join(', ')).to.be.empty;",
-                  "});"
+                  "(() => {",
+                  "  let tries = 0;",
+                  "  function check() {",
+                  "    pm.sendRequest({url:pm.variables.replaceIn(\"{{prometheusBaseUrl}}/api/v1/query?query=sum%28rate%28http_server_requests_seconds_sum%7Bjob%3D%22api-gateway%22%7D%5B5m%5D%29%29%20%2F%20sum%28rate%28http_server_requests_seconds_count%7Bjob%3D%22api-gateway%22%7D%5B5m%5D%29%29\")}, (error, response) => {",
+                  "      let ready = false;",
+                  "      try { ready = !error && (response.code===200 && response.json().data.result.some(x=>Number.isFinite(Number(x.value[1])))); } catch (_) {}",
+                  "      if (ready) {",
+                  "        pm.test('Latencia media menor al umbral de alerta de 2 segundos',()=>{const result=response.json().data.result;pm.expect(result.length).to.be.greaterThan(0);pm.expect(Number(result[0].value[1])).to.be.below(2);});",
+                  "        pm.test(\"Hay muestras de latencia\", () => pm.expect(ready).to.eql(true));",
+                  "        return;",
+                  "      }",
+                  "      if (++tries < 120) { setTimeout(check, 500); return; }",
+                  "      pm.test(\"Hay muestras de latencia\", () => { throw new Error('No se alcanzó la condición esperada dentro del tiempo de espera'); });",
+                  "    });",
+                  "  }",
+                  "  check();",
+                  "})();"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "La traza de onboarding contiene los siete servicios",
+          "request": {
+            "method": "GET",
+            "url": "{{zipkinBaseUrl}}/api/v2/trace/{{pendTraceId}}",
+            "header": [],
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));",
+                  "",
+                  "(() => {",
+                  "  let tries = 0;",
+                  "  function check() {",
+                  "    pm.sendRequest({url:pm.variables.replaceIn(\"{{zipkinBaseUrl}}/api/v2/trace/{{pendTraceId}}\")}, (error, response) => {",
+                  "      let ready = false;",
+                  "      try { ready = !error && (response.code===200 && [\"api-gateway\", \"employees-service\", \"departments-service\", \"auth-service\", \"profiles-service\", \"vacations-service\", \"notifications-service\"].every(s=>response.json().some(span=>span.localEndpoint?.serviceName===s))); } catch (_) {}",
+                  "      if (ready) {",
+                  "        ",
+                  "        pm.test(\"Cadena distribuida completa en Zipkin\", () => pm.expect(ready).to.eql(true));",
+                  "        return;",
+                  "      }",
+                  "      if (++tries < 120) { setTimeout(check, 500); return; }",
+                  "      pm.test(\"Cadena distribuida completa en Zipkin\", () => { throw new Error('No se alcanzó la condición esperada dentro del tiempo de espera'); });",
+                  "    });",
+                  "  }",
+                  "  check();",
+                  "})();"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Zipkin conoce los siete servicios",
+          "request": {
+            "method": "GET",
+            "url": "{{zipkinBaseUrl}}/api/v2/services",
+            "header": [],
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));",
+                  "",
+                  "(() => {",
+                  "  let tries = 0;",
+                  "  function check() {",
+                  "    pm.sendRequest({url:pm.variables.replaceIn(\"{{zipkinBaseUrl}}/api/v2/services\")}, (error, response) => {",
+                  "      let ready = false;",
+                  "      try { ready = !error && (response.code===200 && [\"api-gateway\", \"employees-service\", \"departments-service\", \"auth-service\", \"profiles-service\", \"vacations-service\", \"notifications-service\"].every(s=>response.json().includes(s))); } catch (_) {}",
+                  "      if (ready) {",
+                  "        ",
+                  "        pm.test(\"Siete servicios instrumentados\", () => pm.expect(ready).to.eql(true));",
+                  "        return;",
+                  "      }",
+                  "      if (++tries < 120) { setTimeout(check, 500); return; }",
+                  "      pm.test(\"Siete servicios instrumentados\", () => { throw new Error('No se alcanzó la condición esperada dentro del tiempo de espera'); });",
+                  "    });",
+                  "  }",
+                  "  check();",
+                  "})();"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Logs de la traza",
+          "request": {
+            "method": "GET",
+            "url": "{{lokiBaseUrl}}/loki/api/v1/query_range?query={job%3D%22docker%22}%20%7C%20json%20%7C%20traceId%20%3D%20%22{{pendTraceId}}%22&limit=100",
+            "header": [],
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));",
+                  "",
+                  "(() => {",
+                  "  let tries = 0;",
+                  "  function check() {",
+                  "    pm.sendRequest({url:pm.variables.replaceIn(\"{{lokiBaseUrl}}/loki/api/v1/query_range?query={job%3D%22docker%22}%20%7C%20json%20%7C%20traceId%20%3D%20%22{{pendTraceId}}%22&limit=100\")}, (error, response) => {",
+                  "      let ready = false;",
+                  "      try { ready = !error && (response.code===200 && response.json().data.result.flatMap(stream=>stream.values).length>0); } catch (_) {}",
+                  "      if (ready) {",
+                  "        ",
+                  "const lines=response.json().data.result.flatMap(stream=>stream.values.map(value=>value[1]));",
+                  "pm.test('Logs JSON con los campos del contrato',()=>{",
+                  "  pm.expect(lines.length).to.be.greaterThan(0);",
+                  "  const record=JSON.parse(lines[0]);",
+                  "  for(const key of ['timestamp','level','service','traceId','message']) pm.expect(record).to.have.property(key);",
+                  "});",
+                  "pm.test('Varios servicios comparten la traza en sus logs',()=>{",
+                  "  const services=new Set(lines.map(line=>{try{return JSON.parse(line).service;}catch(_){return undefined;}}).filter(Boolean));",
+                  "  pm.expect(services.size).to.be.greaterThan(1);",
+                  "});",
+                  "",
+                  "        pm.test(\"Hay logs de la traza\", () => pm.expect(ready).to.eql(true));",
+                  "        return;",
+                  "      }",
+                  "      if (++tries < 120) { setTimeout(check, 500); return; }",
+                  "      pm.test(\"Hay logs de la traza\", () => { throw new Error('No se alcanzó la condición esperada dentro del tiempo de espera'); });",
+                  "    });",
+                  "  }",
+                  "  check();",
+                  "})();"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Loki recoge los siete servicios",
+          "request": {
+            "method": "GET",
+            "url": "{{lokiBaseUrl}}/loki/api/v1/label/service/values",
+            "header": [],
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));",
+                  "",
+                  "(() => {",
+                  "  let tries = 0;",
+                  "  function check() {",
+                  "    pm.sendRequest({url:pm.variables.replaceIn(\"{{lokiBaseUrl}}/loki/api/v1/label/service/values\")}, (error, response) => {",
+                  "      let ready = false;",
+                  "      try { ready = !error && (response.code===200 && [\"api-gateway\", \"employees-service\", \"departments-service\", \"auth-service\", \"profiles-service\", \"vacations-service\", \"notifications-service\"].every(s=>response.json().data.includes(s))); } catch (_) {}",
+                  "      if (ready) {",
+                  "        ",
+                  "        pm.test(\"Siete servicios con logs recolectados\", () => pm.expect(ready).to.eql(true));",
+                  "        return;",
+                  "      }",
+                  "      if (++tries < 120) { setTimeout(check, 500); return; }",
+                  "      pm.test(\"Siete servicios con logs recolectados\", () => { throw new Error('No se alcanzó la condición esperada dentro del tiempo de espera'); });",
+                  "    });",
+                  "  }",
+                  "  check();",
+                  "})();"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Dashboard aprovisionado",
+          "request": {
+            "method": "GET",
+            "url": "{{grafanaBaseUrl}}/api/dashboards/uid/system-hr-observabilidad",
+            "header": [],
+            "auth": {
+              "type": "basic",
+              "basic": [
+                {
+                  "key": "username",
+                  "value": "{{grafanaUser}}",
+                  "type": "string"
+                },
+                {
+                  "key": "password",
+                  "value": "{{grafanaPassword}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));",
+                  "pm.test('Dashboard correcto',()=>pm.expect(pm.response.json().dashboard.uid).to.eql('system-hr-observabilidad'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Reglas de alerta aprovisionadas",
+          "request": {
+            "method": "GET",
+            "url": "{{grafanaBaseUrl}}/api/v1/provisioning/alert-rules",
+            "header": [],
+            "auth": {
+              "type": "basic",
+              "basic": [
+                {
+                  "key": "username",
+                  "value": "{{grafanaUser}}",
+                  "type": "string"
+                },
+                {
+                  "key": "password",
+                  "value": "{{grafanaPassword}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));",
+                  "pm.test('Hay reglas',()=>pm.expect(pm.response.json().length).to.be.greaterThan(0));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Canales de alerta aprovisionados",
+          "request": {
+            "method": "GET",
+            "url": "{{grafanaBaseUrl}}/api/v1/provisioning/contact-points",
+            "header": [],
+            "auth": {
+              "type": "basic",
+              "basic": [
+                {
+                  "key": "username",
+                  "value": "{{grafanaUser}}",
+                  "type": "string"
+                },
+                {
+                  "key": "password",
+                  "value": "{{grafanaPassword}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));",
+                  "pm.test('El punto de contacto Discord está configurado',()=>pm.expect(pm.response.json().some(c=>c.type==='discord')).to.eql(true));"
                 ]
               }
             }
@@ -757,39 +720,16 @@
       ]
     },
     {
-      "name": "5. Dashboard y alertas (Grafana)",
-      "description": "Criterios 4 y 5: todo aprovisionado como codigo.",
+      "name": "02 Caida controlada",
       "item": [
         {
-          "name": "5.1 El dashboard esta aprovisionado",
+          "name": "Prometheus detecta Departamentos caído",
           "request": {
             "method": "GET",
+            "url": "{{prometheusBaseUrl}}/api/v1/query?query=up%7Bjob%3D%22departments-service%22%7D",
             "header": [],
-            "url": {
-              "raw": "{{grafanaBaseUrl}}/api/dashboards/uid/system-hr-observabilidad",
-              "host": [
-                "{{grafanaBaseUrl}}"
-              ],
-              "path": [
-                "api",
-                "dashboards",
-                "uid",
-                "system-hr-observabilidad"
-              ]
-            },
-            "description": "Criterio 4. El dashboard no se creo clicando: esta en un JSON versionado en Git y Grafana lo carga al arrancar. Esta peticion lo demuestra sin abrir el navegador.",
             "auth": {
-              "type": "basic",
-              "basic": [
-                {
-                  "key": "username",
-                  "value": "{{grafanaUser}}"
-                },
-                {
-                  "key": "password",
-                  "value": "{{grafanaPassword}}"
-                }
-              ]
+              "type": "noauth"
             }
           },
           "event": [
@@ -798,53 +738,48 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test('Status 200', () => pm.response.to.have.status(200));",
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));",
                   "",
-                  "const d = pm.response.json();",
-                  "const paneles = d.dashboard.panels.filter(p => p.type !== 'row');",
-                  "",
-                  "pm.test('Tiene al menos los 4 paneles requeridos', () => {",
-                  "    pm.expect(paneles.length).to.be.at.least(4);",
-                  "});",
-                  "",
-                  "pm.test('Esta en la carpeta System_HR', () => {",
-                  "    pm.expect(d.meta.folderTitle).to.eql('System_HR');",
-                  "});",
-                  "",
-                  "console.log('Paneles: ' + paneles.map(p => p.title).join(' | '));"
+                  "(() => {",
+                  "  let tries = 0;",
+                  "  function check() {",
+                  "    pm.sendRequest({url:pm.variables.replaceIn(\"{{prometheusBaseUrl}}/api/v1/query?query=up%7Bjob%3D%22departments-service%22%7D\")}, (error, response) => {",
+                  "      let ready = false;",
+                  "      try { ready = !error && (response.code===200 && response.json().data.result.some(x=>Number(x.value[1])===0)); } catch (_) {}",
+                  "      if (ready) {",
+                  "        ",
+                  "        pm.test(\"up=0 observado\", () => pm.expect(ready).to.eql(true));",
+                  "        return;",
+                  "      }",
+                  "      if (++tries < 120) { setTimeout(check, 500); return; }",
+                  "      pm.test(\"up=0 observado\", () => { throw new Error('No se alcanzó la condición esperada dentro del tiempo de espera'); });",
+                  "    });",
+                  "  }",
+                  "  check();",
+                  "})();"
                 ]
               }
             }
           ]
         },
         {
-          "name": "5.2 Las reglas de alerta estan activas",
+          "name": "Grafana muestra su alerta activa",
           "request": {
             "method": "GET",
+            "url": "{{grafanaBaseUrl}}/api/alertmanager/grafana/api/v2/alerts",
             "header": [],
-            "url": {
-              "raw": "{{grafanaBaseUrl}}/api/v1/provisioning/alert-rules",
-              "host": [
-                "{{grafanaBaseUrl}}"
-              ],
-              "path": [
-                "api",
-                "v1",
-                "provisioning",
-                "alert-rules"
-              ]
-            },
-            "description": "Criterio 5. Tres reglas: servicio caido, alta tasa de errores y alta latencia. Cada umbral se deriva de un SLO documentado en el README, no de un numero elegido al azar.",
             "auth": {
               "type": "basic",
               "basic": [
                 {
                   "key": "username",
-                  "value": "{{grafanaUser}}"
+                  "value": "{{grafanaUser}}",
+                  "type": "string"
                 },
                 {
                   "key": "password",
-                  "value": "{{grafanaPassword}}"
+                  "value": "{{grafanaPassword}}",
+                  "type": "string"
                 }
               ]
             }
@@ -855,208 +790,44 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test('Status 200', () => pm.response.to.have.status(200));",
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));",
                   "",
-                  "const reglas = pm.response.json();",
-                  "",
-                  "pm.test('Al menos 2 reglas, como pide el enunciado', () => {",
-                  "    pm.expect(reglas.length).to.be.at.least(2);",
-                  "});",
-                  "",
-                  "pm.test('Incluye la deteccion de servicio caido', () => {",
-                  "    pm.expect(reglas.map(r => r.title)).to.include('Servicio caído');",
-                  "});",
-                  "",
-                  "reglas.forEach(r => console.log(r.title + ' | for: ' + r.for +",
-                  "                                ' | severidad: ' + (r.labels || {}).severity));"
+                  "(() => {",
+                  "  let tries = 0;",
+                  "  function check() {",
+                  "    pm.sendRequest({url:pm.variables.replaceIn(\"{{grafanaBaseUrl}}/api/alertmanager/grafana/api/v2/alerts\"),header:{Authorization:'Basic '+btoa(pm.variables.get('grafanaUser')+':'+pm.variables.get('grafanaPassword'))}}, (error, response) => {",
+                  "      let ready = false;",
+                  "      try { ready = !error && (response.code===200 && response.json().some(a=>a.labels?.job==='departments-service' || a.labels?.service==='departments-service')); } catch (_) {}",
+                  "      if (ready) {",
+                  "        ",
+                  "        pm.test(\"Alerta de Departamentos activa\", () => pm.expect(ready).to.eql(true));",
+                  "        return;",
+                  "      }",
+                  "      if (++tries < 360) { setTimeout(check, 500); return; }",
+                  "      pm.test(\"Alerta de Departamentos activa\", () => { throw new Error('No se alcanzó la condición esperada dentro del tiempo de espera'); });",
+                  "    });",
+                  "  }",
+                  "  check();",
+                  "})();"
                 ]
               }
             }
           ]
         },
         {
-          "name": "5.3 El canal de Discord esta configurado",
-          "request": {
-            "method": "GET",
-            "header": [],
-            "url": {
-              "raw": "{{grafanaBaseUrl}}/api/v1/provisioning/contact-points",
-              "host": [
-                "{{grafanaBaseUrl}}"
-              ],
-              "path": [
-                "api",
-                "v1",
-                "provisioning",
-                "contact-points"
-              ]
-            },
-            "description": "El canal externo al que Grafana envia las alertas. La URL del webhook NO esta en el repositorio: llega por la variable de entorno DISCORD_WEBHOOK_URL, porque un webhook es una credencial.",
-            "auth": {
-              "type": "basic",
-              "basic": [
-                {
-                  "key": "username",
-                  "value": "{{grafanaUser}}"
-                },
-                {
-                  "key": "password",
-                  "value": "{{grafanaPassword}}"
-                }
-              ]
-            }
-          },
-          "event": [
-            {
-              "listen": "test",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "pm.test('Status 200', () => pm.response.to.have.status(200));",
-                  "",
-                  "const canales = pm.response.json();",
-                  "",
-                  "pm.test('Hay un canal de Discord', () => {",
-                  "    pm.expect(canales.some(c => c.type === 'discord'),",
-                  "              'canales: ' + canales.map(c => c.type).join(', ')).to.be.true;",
-                  "});"
-                ]
-              }
-            }
-          ]
-        }
-      ]
-    },
-    {
-      "name": "6. Simulacion de caos",
-      "description": "Criterio 6. Dos pasos se ejecutan en la terminal; la coleccion verifica el efecto.",
-      "item": [
-        {
-          "name": "6.1 [MANUAL] Pare departments-service y espere 100s",
-          "request": {
-            "method": "GET",
-            "header": [],
-            "url": {
-              "raw": "{{prometheusBaseUrl}}/api/v1/query?query=up{job=\"departments-service\"}",
-              "host": [
-                "{{prometheusBaseUrl}}"
-              ],
-              "path": [
-                "api",
-                "v1",
-                "query"
-              ],
-              "query": [
-                {
-                  "key": "query",
-                  "value": "up{job=\"departments-service\"}"
-                }
-              ]
-            },
-            "description": "PASO MANUAL. En la terminal:\n\n    docker compose stop departments-service\n\nTiempos medidos en esta maquina:\n  ~22 s  Prometheus marca el target DOWN\n  ~95 s  Grafana dispara la alerta\n         Discord recibe el mensaje\n\nEse minuto y medio no es lentitud: la regla tiene for: 1m para que un reinicio normal del contenedor no despierte a nadie. Ejecute esta peticion pasados ~25 s."
-          },
-          "event": [
-            {
-              "listen": "test",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "pm.test('Status 200', () => pm.response.to.have.status(200));",
-                  "",
-                  "const r = pm.response.json().data.result;",
-                  "pm.test('Prometheus detecto la caida', () => {",
-                  "    pm.expect(r.length, 'no hay serie up para departments-service').to.be.above(0);",
-                  "    pm.expect(r[0].value[1], 'up deberia ser 0').to.eql('0');",
-                  "});"
-                ]
-              }
-            }
-          ]
-        },
-        {
-          "name": "6.2 La alerta esta disparada",
-          "request": {
-            "method": "GET",
-            "header": [],
-            "url": {
-              "raw": "{{grafanaBaseUrl}}/api/alertmanager/grafana/api/v2/alerts",
-              "host": [
-                "{{grafanaBaseUrl}}"
-              ],
-              "path": [
-                "api",
-                "alertmanager",
-                "grafana",
-                "api",
-                "v2",
-                "alerts"
-              ]
-            },
-            "description": "Ejecutela ~100 s despues de parar el servicio. Debe aparecer la alerta \"Servicio caido\" en estado active, y el mensaje debe haber llegado a Discord.",
-            "auth": {
-              "type": "basic",
-              "basic": [
-                {
-                  "key": "username",
-                  "value": "{{grafanaUser}}"
-                },
-                {
-                  "key": "password",
-                  "value": "{{grafanaPassword}}"
-                }
-              ]
-            }
-          },
-          "event": [
-            {
-              "listen": "test",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "pm.test('Status 200', () => pm.response.to.have.status(200));",
-                  "",
-                  "const alertas = pm.response.json();",
-                  "const caidos = alertas.filter(a => (a.labels || {}).alertname === 'Servicio caído');",
-                  "",
-                  "pm.test('La alerta de servicio caido esta activa', () => {",
-                  "    pm.expect(caidos.length, 'aun no se dispara: espere a los 95s').to.be.above(0);",
-                  "});",
-                  "",
-                  "caidos.forEach(a => console.log('ALERTA: ' + a.labels.alertname +",
-                  "                                ' | job=' + a.labels.job +",
-                  "                                ' | estado=' + a.status.state));"
-                ]
-              }
-            }
-          ]
-        },
-        {
-          "name": "6.3 Degradacion: el alta falla con 503",
+          "name": "Una consulta sin caché recibe 503",
           "request": {
             "method": "POST",
+            "url": "{{gatewayBaseUrl}}/empleados",
             "header": [
               {
                 "key": "Content-Type",
                 "value": "application/json"
-              },
-              {
-                "key": "Authorization",
-                "value": "Bearer {{adminToken}}"
               }
             ],
-            "url": {
-              "raw": "{{gatewayBaseUrl}}/empleados",
-              "host": [
-                "{{gatewayBaseUrl}}"
-              ],
-              "path": [
-                "empleados"
-              ]
-            },
-            "description": "Con departments-service caido, el alta de un empleado en un departamento NUNCA consultado antes responde 503: el circuit breaker del Reto 3 abre y el cache de contingencia no tiene entrada que servir. Si usara IT, el cache responderia y el alta funcionaria — que es justo el comportamiento resiliente que se diseno entonces, y que ahora ademas se VE en Zipkin.",
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"id\": \"{{empleadoDemoId}}-CAOS\",\n  \"nombre\": \"Caos\",\n  \"apellido\": \"Demo\",\n  \"email\": \"caos-{{empleadoDemoEmail}}\",\n  \"numeroEmpleado\": \"CAOS-{{empleadoDemoNumero}}\",\n  \"cargo\": \"Analista\",\n  \"area\": \"Tecnologia\",\n  \"departamentoId\": \"NUNCA-CONSULTADO\",\n  \"fechaIngreso\": \"2026-11-03\",\n  \"estado\": \"ACTIVO\"\n}",
+              "raw": "{\n  \"id\": \"{{pendEmpleadoId}}-CAIDA\",\n  \"nombre\": \"Demo\",\n  \"apellido\": \"Prueba\",\n  \"email\": \"rec-{{pendRunId}}@example.test\",\n  \"numeroEmpleado\": \"NUM-{{pendRunId}}-pendEmpleado-CAIDA\",\n  \"cargo\": \"Analista\",\n  \"area\": \"Tecnología\",\n  \"departamentoId\": \"SIN-CACHE-{{pendRunId}}\",\n  \"fechaIngreso\": \"{{pendHoy}}\",\n  \"estado\": \"ACTIVO\"\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -1070,40 +841,26 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test('Responde 503, no 500', () => {",
-                  "    pm.expect(pm.response.code, 'cuerpo: ' + pm.response.text()).to.eql(503);",
-                  "});",
-                  "pm.test('El error explica que la dependencia no esta disponible', () => {",
-                  "    pm.expect(pm.response.text().toLowerCase()).to.match(/disponible|departamento/);",
-                  "});"
+                  "pm.test('HTTP 503', () => pm.response.to.have.status(503));"
                 ]
               }
             }
           ]
-        },
+        }
+      ]
+    },
+    {
+      "name": "03 Recuperacion",
+      "item": [
         {
-          "name": "6.4 [MANUAL] Reinicie y verifique la recuperacion",
+          "name": "Prometheus detecta recuperación",
           "request": {
             "method": "GET",
+            "url": "{{prometheusBaseUrl}}/api/v1/query?query=up%7Bjob%3D%22departments-service%22%7D",
             "header": [],
-            "url": {
-              "raw": "{{prometheusBaseUrl}}/api/v1/query?query=up{job=\"departments-service\"}",
-              "host": [
-                "{{prometheusBaseUrl}}"
-              ],
-              "path": [
-                "api",
-                "v1",
-                "query"
-              ],
-              "query": [
-                {
-                  "key": "query",
-                  "value": "up{job=\"departments-service\"}"
-                }
-              ]
-            },
-            "description": "PASO MANUAL. En la terminal:\n\n    docker compose start departments-service\n\nTiempos medidos: ~21 s hasta up=1, ~31 s hasta que la alerta se resuelve y Discord recibe el aviso de recuperacion. Saber que el servicio volvio es tan importante como saber que se cayo: evita que alguien siga investigando un problema ya resuelto."
+            "auth": {
+              "type": "noauth"
+            }
           },
           "event": [
             {
@@ -1111,52 +868,64 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test('Status 200', () => pm.response.to.have.status(200));",
-                  "pm.test('El servicio volvio', () => {",
-                  "    const r = pm.response.json().data.result;",
-                  "    pm.expect(r.length).to.be.above(0);",
-                  "    pm.expect(r[0].value[1], 'espere ~25s tras el start').to.eql('1');",
-                  "});"
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));",
+                  "",
+                  "(() => {",
+                  "  let tries = 0;",
+                  "  function check() {",
+                  "    pm.sendRequest({url:pm.variables.replaceIn(\"{{prometheusBaseUrl}}/api/v1/query?query=up%7Bjob%3D%22departments-service%22%7D\")}, (error, response) => {",
+                  "      let ready = false;",
+                  "      try { ready = !error && (response.code===200 && response.json().data.result.some(x=>Number(x.value[1])===1)); } catch (_) {}",
+                  "      if (ready) {",
+                  "        ",
+                  "        pm.test(\"up=1 observado\", () => pm.expect(ready).to.eql(true));",
+                  "        return;",
+                  "      }",
+                  "      if (++tries < 120) { setTimeout(check, 500); return; }",
+                  "      pm.test(\"up=1 observado\", () => { throw new Error('No se alcanzó la condición esperada dentro del tiempo de espera'); });",
+                  "    });",
+                  "  }",
+                  "  check();",
+                  "})();"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "La operación de negocio vuelve a funcionar",
+          "request": {
+            "method": "POST",
+            "url": "{{gatewayBaseUrl}}/empleados",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"id\": \"{{pendEmpleadoId}}-REC\",\n  \"nombre\": \"Demo\",\n  \"apellido\": \"Prueba\",\n  \"email\": \"rec-{{pendRunId}}@example.test\",\n  \"numeroEmpleado\": \"NUM-{{pendRunId}}-pendEmpleado-REC\",\n  \"cargo\": \"Analista\",\n  \"area\": \"Tecnología\",\n  \"departamentoId\": \"{{pendDepartamentoId}}\",\n  \"fechaIngreso\": \"{{pendHoy}}\",\n  \"estado\": \"ACTIVO\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 201', () => pm.response.to.have.status(201));"
                 ]
               }
             }
           ]
         }
       ]
-    }
-  ],
-  "variable": [
-    {
-      "key": "adminToken",
-      "value": ""
-    },
-    {
-      "key": "traceparent",
-      "value": ""
-    },
-    {
-      "key": "traceIdDemo",
-      "value": ""
-    },
-    {
-      "key": "empleadoDemoId",
-      "value": ""
-    },
-    {
-      "key": "empleadoDemoEmail",
-      "value": ""
-    },
-    {
-      "key": "empleadoDemoNumero",
-      "value": ""
-    },
-    {
-      "key": "lokiDesde",
-      "value": ""
-    },
-    {
-      "key": "lokiHasta",
-      "value": ""
     }
   ]
 }

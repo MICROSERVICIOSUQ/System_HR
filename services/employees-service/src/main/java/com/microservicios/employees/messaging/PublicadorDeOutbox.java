@@ -2,12 +2,14 @@ package com.microservicios.employees.messaging;
 
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import io.micrometer.tracing.Span;
+import io.micrometer.tracing.Tracer;
+import org.springframework.beans.factory.ObjectProvider;
 import com.microservicios.employees.events.EmployeeEventData;
 import com.microservicios.employees.events.EventEnvelope;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
-import org.springframework.data.domain.Limit;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Transactional;
@@ -23,11 +25,10 @@ import static net.logstash.logback.argument.StructuredArguments.kv;
  * transacción que el cambio de negocio— la hace {@link EmployeeEventPublisher}.
  * Aquí solo se lee lo pendiente, se publica y se marca.
  *
- * <p><strong>Cada evento se marca por separado.</strong> Si el tercero de cinco
- * falla, los dos primeros quedan marcados como publicados y no se reenvían. Con
- * una sola transacción para todo el lote, un fallo al final habría deshecho las
- * marcas de los anteriores y los habría reenviado, multiplicando los duplicados
- * sin necesidad.
+ * <p>La transacción mantiene bloqueadas las filas hasta guardar las marcas de
+ * publicación y los intentos fallidos. Si el proceso cae entre el envío y el
+ * commit, un evento puede reenviarse; los consumidores siguen necesitando su
+ * control de idempotencia por identificador.
  *
  * <p><strong>Un fallo no interrumpe el ciclo</strong> cuando es de un evento
  * concreto, pero sí lo corta cuando es del broker: si no hay conexión, insistir
@@ -47,15 +48,18 @@ public class PublicadorDeOutbox {
     private final EmployeeEventPublisher publisher;
     private final ObjectMapper objectMapper;
     private final int porCiclo;
+    private final Tracer tracer;
 
     public PublicadorDeOutbox(OutboxRepository repository,
                               EmployeeEventPublisher publisher,
                               ObjectMapper objectMapper,
-                              @Value("${outbox.eventos-por-ciclo:50}") int porCiclo) {
+                              @Value("${outbox.eventos-por-ciclo:50}") int porCiclo,
+                              ObjectProvider<Tracer> tracer) {
         this.repository = repository;
         this.publisher = publisher;
         this.objectMapper = objectMapper;
         this.porCiclo = porCiclo;
+        this.tracer = tracer.getIfAvailable();
     }
 
     /**
@@ -70,7 +74,7 @@ public class PublicadorDeOutbox {
     @Transactional
     public void publicarPendientes() {
         List<OutboxEvento> pendientes =
-                repository.findByPublicadoEnIsNullOrderByCreadoEnAsc(Limit.of(porCiclo));
+                repository.bloquearPendientes(Math.max(1, porCiclo));
         if (pendientes.isEmpty()) {
             return;
         }
@@ -80,7 +84,8 @@ public class PublicadorDeOutbox {
 
         int publicados = 0;
         for (OutboxEvento evento : pendientes) {
-            try {
+            Span span = continuarTraza(evento.getTraceparent());
+            try (Tracer.SpanInScope scope = span == null ? null : tracer.withSpan(span)) {
                 publicar(evento);
                 evento.marcarPublicado();
                 publicados++;
@@ -105,6 +110,8 @@ public class PublicadorDeOutbox {
                             kv("pendientes", pendientes.size() - publicados));
                     break;
                 }
+            } finally {
+                if (span != null) span.end();
             }
         }
         // Las marcas se persisten al cerrar la transacción: las entidades están
@@ -118,6 +125,13 @@ public class PublicadorDeOutbox {
         EventEnvelope<EmployeeEventData> sobre =
                 objectMapper.readValue(evento.getPayload(), TIPO_DEL_SOBRE);
         publisher.enviarAlBroker(sobre);
+    }
+
+    private Span continuarTraza(String parent) {
+        if (tracer == null || parent == null) return null;
+        String[] parts = parent.split("-");
+        return tracer.spanBuilder().setParent(tracer.traceContextBuilder().traceId(parts[1]).spanId(parts[2])
+                .sampled(parts[3].equals("01")).build()).name("outbox.publish").start();
     }
 
     /**

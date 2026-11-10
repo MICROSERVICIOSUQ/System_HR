@@ -1,93 +1,330 @@
 {
   "info": {
-    "name": "notificaciones-service",
-    "description": "Consultas del historial inmutable de notificaciones, paginación e idempotencia.",
-    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+    "name": "Notificaciones - acceso por Gateway",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
+    "description": "Ejecutar completa con Collection Runner. Datos únicos en cada ejecución; accesos de negocio por Gateway. Configure adminPassword en el entorno. Las esperas verifican resultados asíncronos reales."
+  },
+  "auth": {
+    "type": "bearer",
+    "bearer": [
+      {
+        "key": "token",
+        "value": "{{pendAdminToken}}",
+        "type": "string"
+      }
+    ]
   },
   "variable": [
-    { "key": "notificacionesBaseUrl", "value": "http://localhost:8082" },
-    { "key": "notificationMessageId", "value": "e1f2a3b4-c5d6-7890-abcd-ef1234567890" }
+    {
+      "key": "gatewayBaseUrl",
+      "value": "http://localhost:8080",
+      "type": "string"
+    },
+    {
+      "key": "adminUsuario",
+      "value": "admin@empresa.com",
+      "type": "string"
+    },
+    {
+      "key": "adminPassword",
+      "value": "",
+      "type": "string"
+    }
   ],
   "item": [
     {
-      "name": "1. GET /notifications listado",
-      "request": {
-        "method": "GET",
-        "url": {
-          "raw": "{{notificacionesBaseUrl}}/notifications",
-          "host": ["{{notificacionesBaseUrl}}"],
-          "path": ["notifications"]
-        }
-      },
-      "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": [
-        "pm.test('Status 200', () => pm.response.to.have.status(200));",
-        "pm.test('Devuelve historial como array', () => pm.expect(pm.response.json()).to.be.an('array'));"
-      ] } }]
-    },
-    {
-      "name": "2. GET /notifications paginado",
-      "request": {
-        "method": "GET",
-        "url": {
-          "raw": "{{notificacionesBaseUrl}}/notifications?page=1&limit=10",
-          "host": ["{{notificacionesBaseUrl}}"],
-          "path": ["notifications"],
-          "query": [
-            { "key": "page", "value": "1" },
-            { "key": "limit", "value": "10" }
-          ]
-        }
-      },
-      "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": [
-        "pm.test('Status 200', () => pm.response.to.have.status(200));",
-        "const body = pm.response.json();",
-        "pm.test('Página con data y meta', () => { pm.expect(body.data).to.be.an('array'); pm.expect(body.meta.totalPages).to.be.a('number'); });"
-      ] } }]
-    },
-    {
-      "name": "3. GET /notifications/:messageId",
-      "request": {
-        "method": "GET",
-        "url": {
-          "raw": "{{notificacionesBaseUrl}}/notifications/{{notificationMessageId}}",
-          "host": ["{{notificacionesBaseUrl}}"],
-          "path": ["notifications", "{{notificationMessageId}}"]
-        }
-      },
-      "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": [
-        "pm.test('Status 200 o 404 según exista el evento', () => pm.expect([200, 404]).to.include(pm.response.code));",
-        "if (pm.response.code === 200) pm.test('Devuelve messageId consultado', () => pm.expect(pm.response.json().messageId).to.eql(pm.collectionVariables.get('notificationMessageId')));"
-      ] } }]
-    },
-    {
-      "name": "4. POST /notifications rechazado",
+      "name": "01 Login ADMIN y preparar datos únicos",
       "request": {
         "method": "POST",
-        "header": [{ "key": "Content-Type", "value": "application/json" }],
-        "body": { "mode": "raw", "raw": "{}", "options": { "raw": { "language": "json" } } },
-        "url": {
-          "raw": "{{notificacionesBaseUrl}}/notifications",
-          "host": ["{{notificacionesBaseUrl}}"],
-          "path": ["notifications"]
+        "url": "{{gatewayBaseUrl}}/auth/login",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "auth": {
+          "type": "noauth"
+        },
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"usuario\": \"{{adminUsuario}}\",\n  \"password\": \"{{adminPassword}}\"\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
         }
       },
-      "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": [
-        "pm.test('Status 405 Method Not Allowed', () => pm.response.to.have.status(405));"
-      ] } }]
+      "event": [
+        {
+          "listen": "prerequest",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "const run = pm.variables.replaceIn('{{$guid}}').replace(/-/g, '').slice(0, 12);",
+              "const values = {",
+              "  pendRunId: run, pendDepartamentoId: 'DP-' + run,",
+              "  pendEmpleadoId: 'EP-' + run, pendEmpleadoEmail: 'ep-' + run + '@example.test',",
+              "  pendBordeId: 'EB-' + run, pendBordeEmail: 'eb-' + run + '@example.test',",
+              "  pendPassword: 'Demo9!-' + run, pendHoy: new Date().toISOString().slice(0, 10)",
+              "};",
+              "for (const [key, value] of Object.entries(values)) pm.collectionVariables.set(key, value);",
+              "for (const [key, offset] of [['pendInicio', 5], ['pendFin', 8]]) {",
+              "  const date = new Date(); date.setUTCDate(date.getUTCDate() + offset);",
+              "  pm.collectionVariables.set(key, date.toISOString().slice(0, 10));",
+              "}",
+              "for (const key of ['pendAdminToken', 'pendUserToken', 'pendResetToken', 'pendPeriodoId', 'pendBordePeriodoId', 'pendMessageId']) {",
+              "  pm.collectionVariables.unset(key);",
+              "}"
+            ]
+          }
+        },
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('HTTP 200', () => pm.response.to.have.status(200));",
+              "if(pm.response.code===200) pm.collectionVariables.set('pendAdminToken',pm.response.json().token);"
+            ]
+          }
+        }
+      ]
     },
     {
-      "name": "5. DELETE /notifications/:messageId rechazado",
+      "name": "02 Crear departamento único",
       "request": {
-        "method": "DELETE",
-        "url": {
-          "raw": "{{notificacionesBaseUrl}}/notifications/{{notificationMessageId}}",
-          "host": ["{{notificacionesBaseUrl}}"],
-          "path": ["notifications", "{{notificationMessageId}}"]
+        "method": "POST",
+        "url": "{{gatewayBaseUrl}}/departamentos",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"id\": \"{{pendDepartamentoId}}\",\n  \"nombre\": \"Demo {{pendRunId}}\",\n  \"descripcion\": \"Prueba repetible\"\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
         }
       },
-      "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": [
-        "pm.test('Status 405 Method Not Allowed', () => pm.response.to.have.status(405));"
-      ] } }]
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('HTTP 201', () => pm.response.to.have.status(201));"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "Crear empleado pendEmpleado",
+      "request": {
+        "method": "POST",
+        "url": "{{gatewayBaseUrl}}/empleados",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"id\": \"{{pendEmpleadoId}}\",\n  \"nombre\": \"Demo\",\n  \"apellido\": \"Prueba\",\n  \"email\": \"{{pendEmpleadoEmail}}\",\n  \"numeroEmpleado\": \"NUM-{{pendRunId}}-pendEmpleado\",\n  \"cargo\": \"Analista\",\n  \"area\": \"Tecnología\",\n  \"departamentoId\": \"{{pendDepartamentoId}}\",\n  \"fechaIngreso\": \"{{pendHoy}}\",\n  \"estado\": \"ACTIVO\"\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('HTTP 201', () => pm.response.to.have.status(201));",
+              "if(pm.response.code===201) {",
+              "(() => {",
+              "  let tries = 0;",
+              "  function check() {",
+              "    pm.sendRequest({url:pm.variables.get('gatewayBaseUrl')+'/vacaciones/balances/'+pm.collectionVariables.get('pendEmpleadoId'),header:{Authorization:'Bearer '+pm.collectionVariables.get('pendAdminToken')}}, (error, response) => {",
+              "      let ready = false;",
+              "      try { ready = !error && (response.code===200); } catch (_) {}",
+              "      if (ready) {",
+              "        ",
+              "        pm.test(\"La r\\u00e9plica de Vacaciones est\\u00e1 disponible\", () => pm.expect(ready).to.eql(true));",
+              "        return;",
+              "      }",
+              "      if (++tries < 60) { setTimeout(check, 500); return; }",
+              "      pm.test(\"La r\\u00e9plica de Vacaciones est\\u00e1 disponible\", () => { throw new Error('No se alcanzó la condición esperada dentro del tiempo de espera'); });",
+              "    });",
+              "  }",
+              "  check();",
+              "})();",
+              "}"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "Esperar una notificación propia",
+      "request": {
+        "method": "GET",
+        "url": "{{gatewayBaseUrl}}/notificaciones/empleado/{{pendEmpleadoId}}",
+        "header": []
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('HTTP 200', () => pm.response.to.have.status(200));",
+              "",
+              "(() => {",
+              "  let tries = 0;",
+              "  function check() {",
+              "    pm.sendRequest({url:pm.variables.get('gatewayBaseUrl')+'/notificaciones/empleado/'+pm.collectionVariables.get('pendEmpleadoId'),header:{Authorization:'Bearer '+pm.collectionVariables.get('pendAdminToken')}}, (error, response) => {",
+              "      let ready = false;",
+              "      try { ready = !error && (response.code===200 && Array.isArray(response.json()) && response.json().length>0); } catch (_) {}",
+              "      if (ready) {",
+              "        pm.collectionVariables.set('pendMessageId',response.json()[0].messageId);",
+              "        pm.test(\"El historial del empleado est\\u00e1 disponible\", () => pm.expect(ready).to.eql(true));",
+              "        return;",
+              "      }",
+              "      if (++tries < 60) { setTimeout(check, 500); return; }",
+              "      pm.test(\"El historial del empleado est\\u00e1 disponible\", () => { throw new Error('No se alcanzó la condición esperada dentro del tiempo de espera'); });",
+              "    });",
+              "  }",
+              "  check();",
+              "})();"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "Historial de notificaciones",
+      "request": {
+        "method": "GET",
+        "url": "{{gatewayBaseUrl}}/notificaciones",
+        "header": []
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('HTTP 200', () => pm.response.to.have.status(200));",
+              "pm.test('El historial no expone tokens',()=>{const body=pm.response.json();const rows=Array.isArray(body)?body:(body.data||[body]);for(const row of rows){pm.expect(Object.prototype.hasOwnProperty.call(row.payload?.data||{},'token')).to.eql(false);}});"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "Historial paginado",
+      "request": {
+        "method": "GET",
+        "url": "{{gatewayBaseUrl}}/notificaciones?page=1&limit=10",
+        "header": []
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('HTTP 200', () => pm.response.to.have.status(200));",
+              "pm.test('El historial no expone tokens',()=>{const body=pm.response.json();const rows=Array.isArray(body)?body:(body.data||[body]);for(const row of rows){pm.expect(Object.prototype.hasOwnProperty.call(row.payload?.data||{},'token')).to.eql(false);}});"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "Consultar por messageId real",
+      "request": {
+        "method": "GET",
+        "url": "{{gatewayBaseUrl}}/notificaciones/{{pendMessageId}}",
+        "header": []
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('HTTP 200', () => pm.response.to.have.status(200));",
+              "pm.test('El historial no expone tokens',()=>{const body=pm.response.json();const rows=Array.isArray(body)?body:(body.data||[body]);for(const row of rows){pm.expect(Object.prototype.hasOwnProperty.call(row.payload?.data||{},'token')).to.eql(false);}});"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "Rechazar escritura POST",
+      "request": {
+        "method": "POST",
+        "url": "{{gatewayBaseUrl}}/notificaciones",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('HTTP 405', () => pm.response.to.have.status(405));"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "Rechazar eliminación",
+      "request": {
+        "method": "DELETE",
+        "url": "{{gatewayBaseUrl}}/notificaciones/{{pendMessageId}}",
+        "header": []
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('HTTP 405', () => pm.response.to.have.status(405));"
+            ]
+          }
+        }
+      ]
     }
   ]
 }

@@ -3,6 +3,15 @@ package com.microservicios.employees;
 import com.microservicios.employees.model.Employee;
 import com.microservicios.employees.model.EmployeeStatus;
 import com.microservicios.employees.repository.EmployeeRepository;
+import com.microservicios.employees.messaging.OutboxEvento;
+import com.microservicios.employees.messaging.OutboxRepository;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.support.TransactionTemplate;
+import java.util.UUID;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicReference;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -82,9 +91,50 @@ class EmployeeRepositoryIntegrationTest {
     @Autowired
     private JdbcTemplate jdbcTemplate;
 
+    @Autowired private OutboxRepository outbox;
+    @Autowired private PlatformTransactionManager transactions;
+
     @BeforeEach
     void limpiar() {
+        outbox.deleteAll();
         repository.deleteAll();
+    }
+
+    @Test
+    void dosPublicadoresNoTomanLasMismasFilasPendientes() throws Exception {
+        outbox.save(new OutboxEvento(UUID.randomUUID().toString(), "empleado.creado", "OUTBOX-A", "{}"));
+        outbox.save(new OutboxEvento(UUID.randomUUID().toString(), "empleado.creado", "OUTBOX-B", "{}"));
+        CountDownLatch locked = new CountDownLatch(1);
+        CountDownLatch release = new CountDownLatch(1);
+        AtomicReference<String> firstId = new AtomicReference<>();
+        try (var executor = Executors.newSingleThreadExecutor()) {
+            var first = executor.submit(() -> new TransactionTemplate(transactions).executeWithoutResult(status -> {
+                var events = outbox.bloquearPendientes(1);
+                assertThat(events).hasSize(1);
+                firstId.set(events.getFirst().getId());
+                locked.countDown();
+                try {
+                    if (!release.await(10, TimeUnit.SECONDS)) throw new IllegalStateException("Tiempo agotado");
+                } catch (InterruptedException error) {
+                    Thread.currentThread().interrupt();
+                    throw new IllegalStateException(error);
+                }
+                events.getFirst().marcarPublicado();
+            }));
+            try {
+                assertThat(locked.await(10, TimeUnit.SECONDS)).isTrue();
+                new TransactionTemplate(transactions).executeWithoutResult(status -> {
+                    var events = outbox.bloquearPendientes(10);
+                    assertThat(events).hasSize(1);
+                    assertThat(events.getFirst().getId()).isNotEqualTo(firstId.get());
+                    events.getFirst().marcarPublicado();
+                });
+            } finally {
+                release.countDown();
+            }
+            first.get(10, TimeUnit.SECONDS);
+        }
+        assertThat(outbox.countByPublicadoEnIsNull()).isZero();
     }
 
     private static Employee empleado(String id, String email, String numero) {

@@ -1,6 +1,8 @@
 package com.microservicios.employees.messaging;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import io.micrometer.tracing.Tracer;
+import org.springframework.beans.factory.ObjectProvider;
 import com.microservicios.employees.events.EmployeeCreatedEvent;
 import com.microservicios.employees.events.EmployeeEventData;
 import com.microservicios.employees.events.EmployeeRetiredEvent;
@@ -35,13 +37,15 @@ public class EmployeeEventPublisher {
     private final RabbitTemplate rabbitTemplate;
     private final OutboxRepository outboxRepository;
     private final ObjectMapper objectMapper;
+    private final Tracer tracer;
 
     public EmployeeEventPublisher(RabbitTemplate rabbitTemplate,
                                   OutboxRepository outboxRepository,
-                                  ObjectMapper objectMapper) {
+                                  ObjectMapper objectMapper, ObjectProvider<Tracer> tracer) {
         this.rabbitTemplate = rabbitTemplate;
         this.outboxRepository = outboxRepository;
         this.objectMapper = objectMapper;
+        this.tracer = tracer.getIfAvailable();
     }
 
     /**
@@ -79,11 +83,17 @@ public class EmployeeEventPublisher {
      */
     private void sendEvent(EventEnvelope<EmployeeEventData> envelope, String employeeId) {
         try {
-            outboxRepository.save(new OutboxEvento(
+            OutboxEvento event = new OutboxEvento(
                     envelope.id(),
                     envelope.type(),
                     employeeId,
-                    objectMapper.writeValueAsString(envelope)));
+                    objectMapper.writeValueAsString(envelope));
+            if (tracer != null && tracer.currentSpan() != null) {
+                var context = tracer.currentSpan().context();
+                event.setTraceparent("00-" + context.traceId() + "-" + context.spanId()
+                        + (Boolean.TRUE.equals(context.sampled()) ? "-01" : "-00"));
+            }
+            outboxRepository.save(event);
         } catch (com.fasterxml.jackson.core.JsonProcessingException error) {
             // Un sobre que no se puede serializar es un error de programación,
             // no una incidencia de entorno. Se propaga para que la transacción
