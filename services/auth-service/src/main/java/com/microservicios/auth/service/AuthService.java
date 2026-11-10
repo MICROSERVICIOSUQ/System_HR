@@ -5,6 +5,7 @@ import com.microservicios.auth.events.AuthEvents;
 import com.microservicios.auth.exception.AuthExceptions.CredencialesInvalidasException;
 import com.microservicios.auth.exception.AuthExceptions.CuentaNoEncontradaException;
 import com.microservicios.auth.exception.AuthExceptions.CuentaNoHabilitadaException;
+import com.microservicios.auth.exception.AuthExceptions.CuentaNoPuedeRestablecerPasswordException;
 
 import static net.logstash.logback.argument.StructuredArguments.kv;
 import com.microservicios.auth.messaging.AuthEventPublisher;
@@ -208,9 +209,10 @@ public class AuthService {
         UserAccount cuenta = repository.findById(empleadoId)
                 .orElseThrow(() -> new CuentaNoEncontradaException(empleadoId));
 
-        if (cuenta.getEstado() == AccountStatus.DESACTIVADA_PERMANENTE) {
-            throw new CuentaNoHabilitadaException(
-                    "La cuenta está desactivada de forma permanente");
+        if (cuenta.getEstado() == AccountStatus.SUSPENDIDA_TEMPORAL
+                || cuenta.getEstado() == AccountStatus.DESACTIVADA_PERMANENTE) {
+            throw new CuentaNoPuedeRestablecerPasswordException(
+                    "La cuenta no está activa y no puede restablecer su contraseña");
         }
 
         passwordPolicy.validar(nuevaPassword);

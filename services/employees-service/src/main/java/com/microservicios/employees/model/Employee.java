@@ -11,6 +11,8 @@ import jakarta.persistence.Table;
 import jakarta.validation.constraints.Email;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
+import jakarta.validation.constraints.Pattern;
+import jakarta.validation.groups.Default;
 
 import java.time.LocalDate;
 import java.time.LocalDateTime;
@@ -20,44 +22,54 @@ import java.time.LocalDateTime;
 @Schema(description = "Modelo canónico de datos del Empleado")
 public class Employee {
 
+    public interface OnCreate extends Default {}
+
     @Id
     @Column(nullable = false, updatable = false)
-    @NotBlank(message = "El id es obligatorio")
+    @NotBlank(message = "El id es obligatorio", groups = OnCreate.class)
+    @Pattern(regexp = "(?s).*\\S.*", message = "El id no puede estar vacío")
     @Schema(description = "Identificador único asignado al empleado", example = "E001")
     private String id;
 
-    @NotBlank(message = "El nombre es obligatorio")
+    @NotBlank(message = "El nombre es obligatorio", groups = OnCreate.class)
+    @Pattern(regexp = "(?s).*\\S.*", message = "El nombre no puede estar vacío")
     @Schema(description = "Nombre del empleado", example = "Juan")
     private String nombre;
 
-    @NotBlank(message = "El apellido es obligatorio")
+    @NotBlank(message = "El apellido es obligatorio", groups = OnCreate.class)
+    @Pattern(regexp = "(?s).*\\S.*", message = "El apellido no puede estar vacío")
     @Schema(description = "Apellido del empleado", example = "Pérez")
     private String apellido;
 
     @Column(nullable = false, unique = true)
-    @NotBlank(message = "El email es obligatorio")
+    @NotBlank(message = "El email es obligatorio", groups = OnCreate.class)
+    @Pattern(regexp = "(?s).*\\S.*", message = "El email no puede estar vacío")
     @Email(message = "El email no tiene un formato válido")
     @Schema(description = "Correo electrónico institucional único", example = "juan.perez@empresa.com")
     private String email;
 
     @Column(name = "employee_number", nullable = false, unique = true)
-    @NotBlank(message = "El numeroEmpleado es obligatorio")
+    @NotBlank(message = "El numeroEmpleado es obligatorio", groups = OnCreate.class)
+    @Pattern(regexp = "(?s).*\\S.*", message = "El numeroEmpleado no puede estar vacío")
     @Schema(description = "Número o código único de empleado", example = "EMP-2026-001")
     private String numeroEmpleado;
 
-    @NotBlank(message = "El cargo es obligatorio")
+    @NotBlank(message = "El cargo es obligatorio", groups = OnCreate.class)
+    @Pattern(regexp = "(?s).*\\S.*", message = "El cargo no puede estar vacío")
     @Schema(description = "Cargo o puesto asignado", example = "Desarrollador Senior")
     private String cargo;
 
-    @NotBlank(message = "El area es obligatoria")
+    @NotBlank(message = "El area es obligatoria", groups = OnCreate.class)
+    @Pattern(regexp = "(?s).*\\S.*", message = "El area no puede estar vacía")
     @Schema(description = "Área funcional dentro de la organización", example = "Tecnología")
     private String area;
 
-    @NotBlank(message = "El departamentoId es obligatorio")
+    @NotBlank(message = "El departamentoId es obligatorio", groups = OnCreate.class)
+    @Pattern(regexp = "(?s).*\\S.*", message = "El departamentoId no puede estar vacío")
     @Schema(description = "Identificador del departamento al que pertenece", example = "D001")
     private String departamentoId;
 
-    @NotNull(message = "La fechaIngreso es obligatoria")
+    @NotNull(message = "La fechaIngreso es obligatoria", groups = OnCreate.class)
     @Schema(description = "Fecha de ingreso (formato yyyy-MM-dd)", example = "2026-02-10")
     private LocalDate fechaIngreso;
 

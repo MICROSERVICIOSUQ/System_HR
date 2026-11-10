@@ -15,6 +15,7 @@ import org.springframework.amqp.AmqpException;
 import org.springframework.amqp.rabbit.connection.CorrelationData;
 import org.springframework.amqp.rabbit.core.RabbitTemplate;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.mock.mockito.MockBean;
@@ -48,6 +49,7 @@ class AuthOutboxTest {
     @Autowired PlatformTransactionManager transactions;
     @Autowired MockMvc http;
     @MockBean RabbitTemplate rabbit;
+    @Value("${jwt.secret}") String jwtSecret;
 
     @BeforeEach
     void clean() {
@@ -144,12 +146,32 @@ class AuthOutboxTest {
     @Test
     void cifradoRechazaOtroSecretoYUnPayloadAlterado() throws Exception {
         String encrypted = cipher.encrypt("token-de-prueba");
+        assertThat(encrypted).startsWith("v1:gcm:");
         assertThat(cipher.decrypt(encrypted)).isEqualTo("token-de-prueba");
         assertThatThrownBy(() -> new OutboxCipher("otro-secreto-con-mas-de-treinta-y-dos-bytes").decrypt(encrypted))
                 .isInstanceOf(java.security.GeneralSecurityException.class);
-        byte[] bytes = java.util.Base64.getDecoder().decode(encrypted);
+        byte[] bytes = java.util.Base64.getDecoder().decode(encrypted.substring("v1:gcm:".length()));
         bytes[bytes.length - 1] ^= 1;
-        assertThatThrownBy(() -> cipher.decrypt(java.util.Base64.getEncoder().encodeToString(bytes)))
+        assertThatThrownBy(() -> cipher.decrypt("v1:gcm:" + java.util.Base64.getEncoder().encodeToString(bytes)))
                 .isInstanceOf(java.security.GeneralSecurityException.class);
+    }
+
+    @Test
+    void cifradoPuedeLeerPayloadsHeredadosSinPrefijo() throws Exception {
+        byte[] nonce = new byte[12];
+        new java.security.SecureRandom().nextBytes(nonce);
+        byte[] material = java.security.MessageDigest.getInstance("SHA-256")
+                .digest(("system-hr:auth-outbox:v1:" + jwtSecret)
+                        .getBytes(java.nio.charset.StandardCharsets.UTF_8));
+        var key = new javax.crypto.spec.SecretKeySpec(material, "AES");
+        var aes = javax.crypto.Cipher.getInstance("AES/GCM/NoPadding");
+        aes.init(javax.crypto.Cipher.ENCRYPT_MODE, key,
+                new javax.crypto.spec.GCMParameterSpec(128, nonce));
+        byte[] ciphertext = aes.doFinal("legacy-token".getBytes(java.nio.charset.StandardCharsets.UTF_8));
+        byte[] payload = java.nio.ByteBuffer.allocate(nonce.length + ciphertext.length)
+                .put(nonce).put(ciphertext).array();
+
+        assertThat(cipher.decrypt(java.util.Base64.getEncoder().encodeToString(payload)))
+                .isEqualTo("legacy-token");
     }
 }

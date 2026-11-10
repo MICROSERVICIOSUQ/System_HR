@@ -17,9 +17,22 @@ import (
 )
 
 type memoryRepo struct {
-	items []Notification
-	err   error
-	calls int
+	items     []Notification
+	err       error
+	calls     int
+	findCalls int
+}
+
+type recordingEmailSender struct {
+	to, subject, body string
+	calls             int
+	err               error
+}
+
+func (s *recordingEmailSender) Send(to, subject, body string) error {
+	s.calls++
+	s.to, s.subject, s.body = to, subject, body
+	return s.err
 }
 
 func (r *memoryRepo) Insert(_ context.Context, n Notification) (bool, error) {
@@ -45,6 +58,7 @@ func (r *memoryRepo) List(_ context.Context, q Query) ([]Notification, int, erro
 	return items, len(items), r.err
 }
 func (r *memoryRepo) Find(_ context.Context, id string) (*Notification, error) {
+	r.findCalls++
 	for _, n := range r.items {
 		if n.MessageID == id {
 			return &n, r.err
@@ -202,7 +216,9 @@ func TestHTTP(t *testing.T) {
 		{"GET", "/notificaciones/event-usuario.creado", 200, "event-usuario.creado"},
 		{"GET", "/notificaciones/no-existe", 404, "Notificación no encontrada"},
 		{"POST", "/notificaciones", 405, "solo admite consultas"},
+		{"PUT", "/notificaciones/event-usuario.creado", 405, "solo admite consultas"},
 		{"DELETE", "/notifications/cualquiera", 405, "solo admite consultas"},
+		{"POST", "/notifications/empleado/E001", 405, "solo admite consultas"},
 		{"GET", "/no-existe", 404, "Recurso no encontrado"},
 		{"GET", "/health", 503, "DOWN"},
 		{"GET", "/openapi.json", 200, "3.0.3"},
@@ -251,12 +267,17 @@ func TestQueryValidation(t *testing.T) {
 
 type acknowledger struct {
 	acks, nacks, rejects int
-	requeue              bool
+	requeue, multiple    bool
 }
 
-func (a *acknowledger) Ack(uint64, bool) error { a.acks++; return nil }
-func (a *acknowledger) Nack(_ uint64, _ bool, requeue bool) error {
+func (a *acknowledger) Ack(uint64, bool) error {
+	a.acks++
+	return nil
+}
+
+func (a *acknowledger) Nack(_ uint64, multiple, requeue bool) error {
 	a.nacks++
+	a.multiple = multiple
 	a.requeue = requeue
 	return nil
 }
@@ -296,11 +317,89 @@ func TestAcknowledgements(t *testing.T) {
 					t.Fatal(ack)
 				}
 			case "database-down":
-				if repo.calls != 3 || ack.nacks != 1 || !ack.requeue || ack.acks != 0 {
-					t.Fatal("ACK incorrecto o no reintentó", ack, repo.calls)
+				if repo.findCalls != 3 || ack.nacks != 1 || ack.requeue || ack.multiple || ack.acks != 0 {
+					t.Fatal("ACK incorrecto o no reintentó", ack, repo.findCalls)
 				}
 			}
 		})
+	}
+}
+
+func TestEmailSendersAndTokenIsolation(t *testing.T) {
+	if err := (MockEmailSender{}).Send("persona@example.test", "asunto", "cuerpo"); err != nil {
+		t.Fatal(err)
+	}
+	s, repo, logs := testService(t)
+	sender := &recordingEmailSender{}
+	s.EmailSender = sender
+	result, err := s.Process(context.Background(), eventBody("usuario.recuperacion"))
+	if err != nil || result != "PROCESSED" {
+		t.Fatal(result, err)
+	}
+	if sender.calls != 1 || sender.to != "persona@example.test" || sender.subject != "usuario.recuperacion" || !strings.Contains(sender.body, "TOKEN-QUE-NO-DEBE-FILTRARSE") {
+		t.Fatal("No se despachó correctamente el mensaje renderizado")
+	}
+	persisted, _ := json.Marshal(repo.items)
+	if strings.Contains(string(persisted), "TOKEN-QUE-NO-DEBE-FILTRARSE") || strings.Contains(logs.String(), "TOKEN-QUE-NO-DEBE-FILTRARSE") {
+		t.Fatal("Se filtró el token fuera del cuerpo del correo")
+	}
+}
+
+func TestEmailSenderConfigurationAndSMTPValidation(t *testing.T) {
+	t.Setenv("EMAIL_SENDER", "")
+	sender, err := configuredEmailSender()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := sender.(MockEmailSender); !ok {
+		t.Fatalf("proveedor predeterminado inesperado: %T", sender)
+	}
+
+	t.Setenv("EMAIL_SENDER", "smtp")
+	if _, err := configuredEmailSender(); err == nil {
+		t.Fatal("aceptó configuración SMTP incompleta")
+	}
+	t.Setenv("EMAIL_SMTP_HOST", "smtp.example.test")
+	t.Setenv("EMAIL_SMTP_PORT", "587")
+	t.Setenv("EMAIL_SMTP_FROM", "notificaciones@example.test")
+	t.Setenv("EMAIL_SMTP_TLS", "true")
+	sender, err = configuredEmailSender()
+	if err != nil {
+		t.Fatal(err)
+	}
+	smtpSender, ok := sender.(SMTPEmailSender)
+	if !ok || !smtpSender.TLS || smtpSender.Host != "smtp.example.test" || smtpSender.Port != "587" {
+		t.Fatalf("configuración SMTP inesperada: %#v", sender)
+	}
+	if err := (SMTPEmailSender{}).Send("to@example.test", "subject", "body"); err == nil {
+		t.Fatal("SMTP aceptó configuración incompleta")
+	}
+	if err := (SMTPEmailSender{Host: "smtp.example.test", Port: "25", From: "bad\r\naddress"}).Send("to@example.test", "subject", "body"); err == nil {
+		t.Fatal("SMTP aceptó remitente inválido")
+	}
+	if err := (SMTPEmailSender{Host: "smtp.example.test", Port: "25", From: "from@example.test"}).Send("bad\r\naddress", "subject", "body"); err == nil {
+		t.Fatal("SMTP aceptó destinatario inválido")
+	}
+
+	t.Setenv("EMAIL_SMTP_PORT", "invalid")
+	if _, err := configuredEmailSender(); err == nil {
+		t.Fatal("aceptó puerto SMTP inválido")
+	}
+	t.Setenv("EMAIL_SMTP_PORT", "587")
+	t.Setenv("EMAIL_SMTP_TLS", "not-a-bool")
+	if _, err := configuredEmailSender(); err == nil {
+		t.Fatal("aceptó configuración TLS inválida")
+	}
+}
+
+func TestEmailSenderFailureIsRetried(t *testing.T) {
+	s, repo, _ := testService(t)
+	s.EmailSender = &recordingEmailSender{err: errors.New("smtp caído")}
+	if _, err := s.Process(context.Background(), eventBody("usuario.recuperacion")); err == nil {
+		t.Fatal("no propagó fallo de despacho")
+	}
+	if len(repo.items) != 0 {
+		t.Fatal("persistió un evento cuyo correo no se despachó")
 	}
 }
 

@@ -30,6 +30,13 @@ public final class AuthExceptions {
         }
     }
 
+    /** 403 — una cuenta suspendida o desactivada no puede restablecer su clave. */
+    public static class CuentaNoPuedeRestablecerPasswordException extends RuntimeException {
+        public CuentaNoPuedeRestablecerPasswordException(String detalle) {
+            super(detalle);
+        }
+    }
+
     /** 400 — la nueva contraseña no cumple la política de seguridad. */
     public static class PasswordDebilException extends RuntimeException {
         public PasswordDebilException(String detalle) {

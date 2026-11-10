@@ -32,7 +32,7 @@ func waitRetry(ctx context.Context, delay time.Duration) bool {
 	}
 }
 
-// Tres intentos locales. Si sigue fallando, el consumidor reencola sin ACK.
+// Tres intentos locales; los fallos persistentes se derivan a la DLQ.
 func processWithRetry(ctx context.Context, process func() (string, error), delay time.Duration) (string, error) {
 	var err error
 	for attempt := 0; attempt < 3; attempt++ {
@@ -112,12 +112,8 @@ func (a *App) handleDelivery(ctx context.Context, msg amqp.Delivery, delay time.
 	} else {
 		a.Events.WithLabelValues("ERROR").Inc()
 		span.SetStatus(codes.Error, "Fallo al procesar evento")
-		a.Service.Logger.ErrorContext(messageCtx, "Procesamiento fallido; mensaje pendiente de reentrega")
-		if !waitRetry(ctx, 5*delay) {
-			span.End()
-			return ctx.Err()
-		}
-		err = msg.Nack(false, true)
+		a.Service.Logger.ErrorContext(messageCtx, "Procesamiento fallido tras tres intentos; mensaje enviado a DLQ")
+		err = msg.Nack(false, false)
 	}
 	span.End()
 	if err != nil {

@@ -1,3 +1,5 @@
+# RabbitMQ no publica puertos en el host por defecto. El acceso desde host se
+# habilita solo con `docker compose --profile dev up` mediante el proxy opcional.
 include:
   - ./infrastructure/databases/docker-compose.yml
 
@@ -58,7 +60,7 @@ services:
       # operación de escritura, porque las cuentas de empleado nacen como USER.
       AUTH_SEED_ADMIN_ID: ${AUTH_SEED_ADMIN_ID:-admin}
       AUTH_SEED_ADMIN_EMAIL: ${AUTH_SEED_ADMIN_EMAIL:-admin@empresa.com}
-      AUTH_SEED_ADMIN_PASSWORD: ${AUTH_SEED_ADMIN_PASSWORD:-Admin12345}
+      AUTH_SEED_ADMIN_PASSWORD: ${AUTH_SEED_ADMIN_PASSWORD:?Defina AUTH_SEED_ADMIN_PASSWORD en .env}
       RABBITMQ_HOST: ${RABBITMQ_HOST:-rabbitmq}
       RABBITMQ_PORT: ${RABBITMQ_PORT:-5672}
       RABBITMQ_USER: ${RABBITMQ_USER:-admin}
@@ -144,7 +146,7 @@ services:
       - "${EMPLEADOS_PORT:-8080}"
     restart: unless-stopped
     healthcheck:
-      test: ["CMD-SHELL", "curl -f --silent http://localhost:$${SERVER_PORT:-8080}/empleados/health"]
+      test: ["CMD-SHELL", "curl -f --silent http://localhost:$${SERVER_PORT:-8080}/health"]
       # Arranque en frío medido: 37s este servicio solo, y más cuando los tres
       # JVM del stack arrancan a la vez y se pelean por la CPU. Con el
       # start_period anterior de 20s el margen total era de 110s y Compose lo
@@ -277,7 +279,7 @@ services:
     environment:
       BASE_URL: http://api-gateway:8080
       ADMIN_USER: ${AUTH_SEED_ADMIN_EMAIL:-admin@empresa.com}
-      ADMIN_PASSWORD: ${AUTH_SEED_ADMIN_PASSWORD:-Admin12345}
+      ADMIN_PASSWORD: ${AUTH_SEED_ADMIN_PASSWORD:?Defina AUTH_SEED_ADMIN_PASSWORD en .env}
       REGULAR_USER: ${REGULAR_USER:-e2e}
       REGULAR_PASSWORD: ${REGULAR_PASSWORD:-Secreta123}
     volumes:

@@ -54,10 +54,11 @@ var eventTemplates = map[string]string{
 var errInvalidEvent = errors.New("evento inválido")
 
 type Service struct {
-	Emails    prometheus.Counter
-	Repo      Repository
-	Templates *template.Template
-	Logger    *slog.Logger
+	EmailCount  prometheus.Counter
+	EmailSender EmailSender
+	Repo        Repository
+	Templates   *template.Template
+	Logger      *slog.Logger
 }
 
 func loadTemplates(directory string) (*template.Template, error) {
@@ -139,17 +140,34 @@ func (s *Service) Process(ctx context.Context, body []byte) (string, error) {
 			return "", errors.New("destinatario aún no disponible")
 		}
 	}
-	// El correo se compone en memoria. Ni su contenido ni el token se persisten.
+	var emailBody string
 	if filename != "" {
 		var content bytes.Buffer
 		if err := s.Templates.ExecuteTemplate(&content, filename, event.Data); err != nil {
 			return "", fmt.Errorf("no se pudo preparar la plantilla")
 		}
+		emailBody = content.String()
 	}
 	n := Notification{
 		MessageID: event.ID, EventType: event.Type, Producer: event.Producer,
 		EmployeeID: employeeID, EmployeeName: strings.TrimSpace(textField(event.Data, "nombre") + " " + textField(event.Data, "apellido")),
 		Email: email, Payload: safePayload(event),
+	}
+	existing, err := s.Repo.Find(ctx, event.ID)
+	if err != nil {
+		return "", err
+	}
+	if existing != nil {
+		return "DUPLICATE", nil
+	}
+	if filename != "" {
+		sender := s.EmailSender
+		if sender == nil {
+			sender = MockEmailSender{}
+		}
+		if err := sender.Send(n.Email, event.Type, emailBody); err != nil {
+			return "", fmt.Errorf("no se pudo enviar el correo: %w", err)
+		}
 	}
 	inserted, err := s.Repo.Insert(ctx, n)
 	if err != nil {
@@ -159,10 +177,10 @@ func (s *Service) Process(ctx context.Context, body []byte) (string, error) {
 		return "DUPLICATE", nil
 	}
 	if filename != "" {
-		if s.Emails != nil {
-			s.Emails.Inc()
+		if s.EmailCount != nil {
+			s.EmailCount.Inc()
 		}
-		s.Logger.InfoContext(ctx, "Correo simulado", "context", map[string]any{"eventId": event.ID, "eventType": event.Type, "empleadoId": employeeID, "destinatario": n.Email, "plantilla": filename})
+		s.Logger.InfoContext(ctx, "Correo procesado", "context", map[string]any{"eventId": event.ID, "eventType": event.Type, "empleadoId": employeeID, "destinatario": n.Email, "plantilla": filename})
 	}
 	return "PROCESSED", nil
 }

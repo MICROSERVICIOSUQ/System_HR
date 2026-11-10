@@ -200,6 +200,20 @@ class TestBorrado:
         assert r.status_code == 503
         assert repositorio.eliminados == []
 
+    def test_con_employees_service_caido_devuelve_detalle_estructurado(self, entorno):
+        http, _, cliente = entorno
+        cliente._falla = True
+
+        r = http.delete("/departamentos/IT")
+
+        assert r.status_code == 503
+        assert r.json() == {
+            "detail": (
+                "No se pudo verificar la presencia de empleados vinculados "
+                "en employees-service"
+            )
+        }
+
     def test_inexistente_devuelve_404(self, entorno):
         http, _, _ = entorno
         assert http.delete("/departamentos/NO-EXISTE").status_code == 404
@@ -237,6 +251,13 @@ class TestObservabilidad:
         r = http.get("/docs")
         assert r.status_code == 200
         assert "swagger" in r.text.lower()
+
+    def test_redoc_se_sirve_como_html(self, entorno):
+        http, _, _ = entorno
+        r = http.get("/redoc")
+
+        assert r.status_code == 200
+        assert "text/html" in r.headers["content-type"]
 
     def test_el_contrato_openapi_describe_los_cinco_verbos(self, entorno):
         http, _, _ = entorno

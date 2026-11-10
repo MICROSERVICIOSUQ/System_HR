@@ -83,12 +83,8 @@ const openApiSpec: any = {
           },
         },
         responses: {
-          '200': {
-            description: 'Éxito según el contrato del reto. La implementación actual responde 201.',
-            content: { 'application/json': { schema: { $ref: '#/components/schemas/Periodo' } } },
-          },
           '201': {
-            description: 'Respuesta de éxito actual de la implementación.',
+            description: 'Período de vacaciones programado.',
             content: { 'application/json': { schema: { $ref: '#/components/schemas/Periodo' } } },
           },
           '400': {

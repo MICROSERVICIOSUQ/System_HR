@@ -537,4 +537,32 @@ class EmployeeEndpointsTest {
         mockMvc.perform(get("/empleados?page=1&limit=10&order=SIDEWAYS"))
                 .andExpect(status().isBadRequest());
     }
+
+    @Test
+    @Order(26)
+    void patchWithInvalidEmailReturnsStructuredBadRequest() throws Exception {
+        mockMvc.perform(patch("/empleados/E099")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"email":"no-es-un-correo"}
+                                """))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.status").value(400))
+                .andExpect(jsonPath("$.error").value("Bad Request"))
+                .andExpect(jsonPath("$.path").value("/empleados/E099"))
+                .andExpect(jsonPath("$.errores[?(@.campo == 'email')]").exists());
+    }
+
+    @Test
+    @Order(27)
+    void putWithBlankValueReturnsStructuredBadRequest() throws Exception {
+        mockMvc.perform(put("/empleados/E099")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"cargo":"   "}
+                                """))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.status").value(400))
+                .andExpect(jsonPath("$.errores[?(@.campo == 'cargo')]").exists());
+    }
 }

@@ -1,11 +1,14 @@
 package com.sistema.gateway;
 
 import com.fasterxml.jackson.databind.JsonNode;
+import io.github.resilience4j.circuitbreaker.CallNotPermittedException;
 import io.micrometer.tracing.Span;
 import io.micrometer.tracing.Tracer;
+import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionException;
+import java.util.function.Supplier;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpStatus;
@@ -35,14 +38,26 @@ public class EmpleadoCompletoController {
         LOG.info("Consultando empleado completo id={} traceId={}", id, traceId);
 
         CompletableFuture<JsonNode> empleado = client.getEmployee(id, traceId);
-        CompletableFuture<JsonNode> perfil = client.getProfile(id, traceId);
-        CompletableFuture<JsonNode> vacaciones = client.getVacations(id, traceId);
+        CompletableFuture<OptionalResult> perfil = optionalResult(
+                () -> client.getProfile(id, traceId),
+                "Servicio de perfiles no disponible de forma temporal",
+                id,
+                traceId);
+        CompletableFuture<OptionalResult> vacaciones = optionalResult(
+                () -> client.getVacations(id, traceId),
+                "Servicio de vacaciones no disponible de forma temporal",
+                id,
+                traceId);
 
         CompletableFuture<EmpleadoCompletoDTO> agregado = empleado
                 .thenCombine(perfil, (employee, profile) ->
-                        new PartialResult(employee, profile))
+                        new PartialResult(employee, profile.value(), warnings(profile)))
                 .thenCombine(vacaciones, (partial, vacation) ->
-                        new EmpleadoCompletoDTO(partial.empleado(), partial.perfil(), vacation));
+                        new EmpleadoCompletoDTO(
+                                partial.empleado(),
+                                partial.perfil(),
+                                vacation.value(),
+                                combineWarnings(partial.warnings(), warnings(vacation))));
 
         // El tipo del éxito se fija a ResponseEntity<?> explícitamente: sin eso,
         // thenApply infiere ResponseEntity<EmpleadoCompletoDTO> y el cuerpo de
@@ -77,6 +92,41 @@ public class EmpleadoCompletoController {
         return span == null ? "unknown" : span.context().traceId();
     }
 
+    private CompletableFuture<OptionalResult> optionalResult(
+            Supplier<CompletableFuture<JsonNode>> request,
+            String warning,
+            String id,
+            String traceId) {
+        CompletableFuture<JsonNode> result;
+        try {
+            result = request.get();
+        } catch (CallNotPermittedException error) {
+            LOG.warn("Circuit breaker abierto para dependencia opcional id={} traceId={}", id, traceId);
+            return CompletableFuture.completedFuture(new OptionalResult(null, warning));
+        }
+        return result.handle((value, error) -> {
+            if (error == null) {
+                return new OptionalResult(value, null);
+            }
+            LOG.warn("Dependencia opcional no disponible id={} traceId={}", id, traceId, unwrap(error));
+            return new OptionalResult(null, warning);
+        });
+    }
+
+    private List<String> warnings(OptionalResult result) {
+        return result.warning() == null ? List.of() : List.of(result.warning());
+    }
+
+    private List<String> combineWarnings(List<String> first, List<String> second) {
+        if (first.isEmpty()) {
+            return second;
+        }
+        if (second.isEmpty()) {
+            return first;
+        }
+        return java.util.stream.Stream.concat(first.stream(), second.stream()).toList();
+    }
+
     private Throwable unwrap(Throwable error) {
         Throwable current = error;
         while ((current instanceof CompletionException || current instanceof java.util.concurrent.ExecutionException)
@@ -86,6 +136,9 @@ public class EmpleadoCompletoController {
         return current;
     }
 
-    private record PartialResult(JsonNode empleado, JsonNode perfil) {
+    private record PartialResult(JsonNode empleado, JsonNode perfil, List<String> warnings) {
+    }
+
+    private record OptionalResult(JsonNode value, String warning) {
     }
 }

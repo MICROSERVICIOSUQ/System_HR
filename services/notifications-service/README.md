@@ -1,6 +1,6 @@
 # Servicio de Notificaciones en Go
 
-Consume eventos de RabbitMQ y conserva un historial inmutable en PostgreSQL. Los correos se simulan con plantillas de texto: se componen en memoria y solo se registra destinatario, tipo y resultado. No hay SMTP ni endpoint de creación de notificaciones.
+Consume eventos de RabbitMQ y conserva un historial inmutable en PostgreSQL. Los correos usan plantillas de texto; el proveedor mock es el predeterminado y SMTP puede habilitarse explícitamente. El token solo se usa en el cuerpo renderizado en memoria y no se persiste ni se registra. No hay endpoint de creación de notificaciones.
 
 ## Archivos para entender el servicio
 
@@ -16,7 +16,7 @@ Consume eventos de RabbitMQ y conserva un historial inmutable en PostgreSQL. Los
 
 Desde la raíz: `docker compose up --build -d`. El Dockerfile compila con Go 1.25; no necesita Go instalado en Windows. Conserva el puerto interno 8082, la cola `notifications.queue`, el exchange `hr.events` y la tabla `NotificationHistory`. Al arrancar limpia los tokens de los payloads antiguos sin eliminar el historial.
 
-Variables: `DATABASE_URL` obligatoria, `PORT` (8082), `RABBITMQ_HOST`, `RABBITMQ_PORT`, `RABBITMQ_USER`, `RABBITMQ_PASSWORD`; opcionalmente `RABBITMQ_URL`, `TEMPLATES_DIR` y `OTEL_EXPORTER_ZIPKIN_ENDPOINT`. Las credenciales se inyectan desde Compose, no se escriben en el código. Las plantillas están embebidas en el binario; para modificarlas puede reconstruir la imagen o montar un directorio completo mediante `TEMPLATES_DIR`.
+Variables: `DATABASE_URL` obligatoria, `PORT` (8082), `RABBITMQ_HOST`, `RABBITMQ_PORT`, `RABBITMQ_USER`, `RABBITMQ_PASSWORD`; opcionalmente `RABBITMQ_URL`, `TEMPLATES_DIR` y `OTEL_EXPORTER_ZIPKIN_ENDPOINT`. Para SMTP configure `EMAIL_SENDER=smtp`, `EMAIL_SMTP_HOST`, `EMAIL_SMTP_PORT`, `EMAIL_SMTP_FROM`, `EMAIL_SMTP_TLS` (por defecto `true`), y opcionalmente `EMAIL_SMTP_USERNAME`/`EMAIL_SMTP_PASSWORD`. Sin `EMAIL_SENDER=smtp` se usa el mock. Las credenciales se inyectan desde el entorno, no se escriben en el código. Las plantillas están embebidas en el binario; para modificarlas puede reconstruir la imagen o montar un directorio completo mediante `TEMPLATES_DIR`.
 
 ## API
 
@@ -33,7 +33,7 @@ Sin paginación se devuelve un array; con `page`, `limit`/`size`, `sortBy` u `or
 
 Consume los seis del informe (`usuario.creado`, `usuario.recuperacion`, `vacaciones.programadas`, `cuenta.activada`, `cuenta.desactivada`, `empleado.retirado`), los de inicio/fin de vacaciones indicados por el PDF y los de creación/actualización de empleado conservados del servicio anterior. En vacaciones el empleado es `data.empleadoId`; en las otras familias es `data.id`.
 
-El índice único de `messageId` evita registrar y simular dos veces un evento. Los fallos transitorios se intentan tres veces y luego se reencolan sin ACK exitoso. Los mensajes inválidos se rechazan sin imprimir su contenido. No hay cola de cuarentena en la topología actual.
+El índice único de `messageId` evita registrar y simular dos veces un evento. Los fallos transitorios se intentan tres veces; si persisten, se rechazan sin requeue y RabbitMQ los enruta a `notifications.dlq` mediante la política declarada en `infrastructure/rabbitmq/definitions.json`. Los mensajes inválidos se rechazan sin imprimir su contenido.
 
 ## Verificación
 

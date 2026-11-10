@@ -126,6 +126,53 @@ if ((${#faltantes[@]} > 0)); then
 fi
 
 chmod 600 "${ENV_FILE}"
+case "$(uname -s)" in
+    MINGW*|MSYS*|CYGWIN*)
+        if ! command -v icacls >/dev/null 2>&1 || ! command -v cygpath >/dev/null 2>&1; then
+            printf 'Error: icacls y cygpath son necesarios para restringir .env en Windows.\n' >&2
+            exit 1
+        fi
+        windows_env_file="$(cygpath -w "${ENV_FILE}")"
+        windows_account="$(whoami.exe | tr -d '\r')"
+        if [[ -z "${windows_account}" ]]; then
+            printf 'Error: no se pudo determinar la cuenta de Windows para proteger .env.\n' >&2
+            exit 1
+        fi
+        icacls "${windows_env_file}" /inheritance:r /grant:r "${windows_account}:F" >/dev/null
+        ;;
+esac
 
 printf '\n%d secreto(s) generado(s), %d conservado(s).\n' "${generados}" "${conservados}"
-printf 'Permisos aplicados: chmod 600 %s\n' "${ENV_FILE}"
+printf 'Permisos aplicados: chmod 600 y ACL restringida para la cuenta actual en %s\n' "${ENV_FILE}"
+
+CLAVES_PRODUCCION=(
+    'DEPARTAMENTOS_DB_PASSWORD'
+    'EMPLEADOS_DB_PASSWORD'
+    'PERFILES_DB_PASSWORD'
+    'NOTIFICACIONES_DB_PASSWORD'
+    'VACACIONES_DB_PASSWORD'
+    'AUTH_DB_PASSWORD'
+    'RABBITMQ_PASSWORD'
+)
+valores_inseguros=()
+for clave in "${CLAVES_PRODUCCION[@]}"; do
+    valor="$(valor_de "${clave}")"
+    case "${valor}" in
+        ''|'postgres'|'admin')
+            valores_inseguros+=("${clave}")
+            ;;
+    esac
+done
+
+if ((${#valores_inseguros[@]} > 0)); then
+    if [[ "${DEPLOY_ENV:-}" == "production" ]]; then
+        printf '\nError: defina contraseñas únicas de producción antes de ejecutar docker compose up --build:\n' >&2
+        printf '  - %s\n' "${valores_inseguros[@]}" >&2
+        exit 1
+    fi
+    printf '\nPre-flight de producción: antes de `docker compose up --build`, reemplace estos valores vacíos o de desarrollo:\n'
+    printf '  - %s\n' "${valores_inseguros[@]}"
+    printf 'Para validar en modo estricto, ejecute DEPLOY_ENV=production bash scripts/setup-secrets.sh.\n'
+else
+    printf 'Pre-flight de producción: las contraseñas requeridas están definidas y no usan valores por defecto conocidos.\n'
+fi

@@ -147,7 +147,11 @@ export class VacationController {
       if (error instanceof ValidationError) {
         return res.status(error.statusCode).json({
           status: error.statusCode,
-          error: error.statusCode === 404 ? 'Not Found' : 'Bad Request',
+          error: error.statusCode === 404
+            ? 'Not Found'
+            : error.statusCode === 409
+            ? 'Conflict'
+            : 'Bad Request',
           message: error.message,
         });
       }
@@ -208,7 +212,11 @@ export class VacationController {
       if (error instanceof ValidationError) {
         return res.status(error.statusCode).json({
           status: error.statusCode,
-          error: error.statusCode === 404 ? 'Not Found' : 'Bad Request',
+          error: error.statusCode === 404
+            ? 'Not Found'
+            : error.statusCode === 409
+            ? 'Conflict'
+            : 'Bad Request',
           message: error.message,
         });
       }
@@ -248,7 +256,11 @@ export class VacationController {
       if (error instanceof ValidationError) {
         return res.status(error.statusCode).json({
           status: error.statusCode,
-          error: error.statusCode === 404 ? 'Not Found' : 'Bad Request',
+          error: error.statusCode === 404
+            ? 'Not Found'
+            : error.statusCode === 409
+            ? 'Conflict'
+            : 'Bad Request',
           message: error.message,
         });
       }
@@ -292,7 +304,11 @@ export class VacationController {
     if (error instanceof ValidationError) {
       return res.status(error.statusCode).json({
         status: error.statusCode,
-        error: error.statusCode === 404 ? 'Not Found' : 'Bad Request',
+        error: error.statusCode === 404
+          ? 'Not Found'
+          : error.statusCode === 409
+          ? 'Conflict'
+          : 'Bad Request',
         message: error.message,
       });
     }

@@ -561,7 +561,13 @@ export class VacationService {
         `Solo se puede forzar el inicio de un período en estado PROGRAMADA (estado actual: ${period.estado})`
       );
     }
-    await this.startPeriod(period);
+    const transitioned = await this.startPeriod(period);
+    if (!transitioned) {
+      throw new ValidationError(
+        `No se pudo forzar el inicio del período '${id}': el estado cambió por una operación concurrente`,
+        409
+      );
+    }
     return this.mapPeriod({ ...period, estado: 'EN_CURSO' });
   }
 
@@ -576,7 +582,13 @@ export class VacationService {
         `Solo se puede forzar el fin de un período en estado EN_CURSO (estado actual: ${period.estado})`
       );
     }
-    await this.finishPeriod(period);
+    const transitioned = await this.finishPeriod(period);
+    if (!transitioned) {
+      throw new ValidationError(
+        `No se pudo forzar el fin del período '${id}': el estado cambió por una operación concurrente`,
+        409
+      );
+    }
     return this.mapPeriod({ ...period, estado: 'FINALIZADA' });
   }
 

@@ -68,7 +68,12 @@ func main() {
 		logger.Error("Plantillas inválidas")
 		os.Exit(1)
 	}
-	app := newApp(&Service{Repo: repo, Templates: templates, Logger: logger})
+	emailSender, err := configuredEmailSender()
+	if err != nil {
+		logger.Error("Configuración de correo inválida")
+		os.Exit(1)
+	}
+	app := newApp(&Service{Repo: repo, Templates: templates, Logger: logger, EmailSender: emailSender})
 	go app.consume(ctx)
 	server := &http.Server{Addr: ":" + env("PORT", "8082"), Handler: app.Handler(), ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 10 * time.Second, WriteTimeout: 10 * time.Second, IdleTimeout: 60 * time.Second}
 	go func() {

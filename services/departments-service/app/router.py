@@ -24,6 +24,7 @@ from app.schemas import (
     DepartamentoCrear,
     DepartamentoRespuesta,
     PaginaDeDepartamentos,
+    RespuestaDeDependenciaNoDisponible,
     RespuestaDeError,
 )
 from app.service import ServicioDeDepartamentos
@@ -34,7 +35,10 @@ RESPUESTAS_DE_ERROR: dict[int | str, dict[str, Any]] = {
     400: {"model": RespuestaDeError, "description": "Datos o parámetros inválidos"},
     404: {"model": RespuestaDeError, "description": "El departamento no existe"},
     409: {"model": RespuestaDeError, "description": "Conflicto: id duplicado o departamento con empleados"},
-    503: {"model": RespuestaDeError, "description": "Base de datos o servicio de empleados no disponible"},
+    503: {
+        "model": RespuestaDeError | RespuestaDeDependenciaNoDisponible,
+        "description": "Base de datos o servicio de empleados no disponible",
+    },
 }
 
 
@@ -167,7 +171,7 @@ def actualizar_patch(
     description=(
         "Borrado físico, a diferencia del retiro de empleados, que es lógico. "
         "Se rechaza con 409 si el departamento tiene empleados asociados, y con "
-        "503 si no se puede consultar a employees-service para averiguarlo: ante "
+        "503 con `detail` si no se puede consultar a employees-service para averiguarlo: ante "
         "la duda no se borra, porque dejaría empleados apuntando a un "
         "departamento inexistente."
     ),

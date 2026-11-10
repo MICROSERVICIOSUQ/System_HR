@@ -4,6 +4,20 @@ import { ProfileError } from '../errors/profile.errors.ts';
 import { presentarPerfil, presentarPerfiles } from '../mappers/profile.mapper.ts';
 import { CAMPOS_ORDENABLES, type CampoOrdenable } from '../repositories/profile.repository.ts';
 
+const CAMPOS_EDITABLES: readonly (keyof DatosPerfilEditable)[] = [
+  'telefono',
+  'direccion',
+  'ciudad',
+  'biografia',
+];
+
+type DatosPerfilEditable = {
+  telefono?: string | null;
+  direccion?: string | null;
+  ciudad?: string | null;
+  biografia?: string | null;
+};
+
 export class ProfileController {
   constructor(private readonly service = new ProfileService()) {}
 
@@ -98,8 +112,10 @@ export class ProfileController {
   update = async (req: Request, res: Response, next: NextFunction) => {
     try {
       const empleadoId = this.getEmpleadoId(req);
+      this.validarPropietario(req, empleadoId);
+      const datos = this.filtrarCamposEditables(req.body);
       const profile = await this.service.update(empleadoId, {
-        ...req.body,
+        ...datos,
         lastEventId: this.getIdempotencyKey(req),
       });
       return res.json(presentarPerfil(profile as any));
@@ -110,8 +126,10 @@ export class ProfileController {
 
   retire = async (req: Request, res: Response, next: NextFunction) => {
     try {
+      const empleadoId = this.getEmpleadoId(req);
+      this.validarPropietario(req, empleadoId);
       const profile = await this.service.retire(
-        this.getEmpleadoId(req),
+        empleadoId,
         this.getIdempotencyKey(req),
       );
       return res.json(presentarPerfil(profile as any));
@@ -126,6 +144,36 @@ export class ProfileController {
       : req.params.empleadoId;
     if (!empleadoId?.trim()) throw new ProfileError(400, 'empleadoId es obligatorio');
     return empleadoId.trim();
+  }
+
+  private validarPropietario(req: Request, empleadoId: string): void {
+    const usuarioAutenticado = req.header('X-Auth-User');
+    const rol = req.header('X-Auth-Role');
+    if (
+      usuarioAutenticado !== undefined &&
+      usuarioAutenticado.trim() !== empleadoId &&
+      rol !== 'ADMIN'
+    ) {
+      throw new ProfileError(403, 'No tiene permiso para modificar este perfil');
+    }
+  }
+
+  private filtrarCamposEditables(body: unknown): DatosPerfilEditable {
+    if (!body || typeof body !== 'object' || Array.isArray(body)) {
+      return {};
+    }
+
+    const source = body as Record<string, unknown>;
+    const datos: DatosPerfilEditable = {};
+    for (const campo of CAMPOS_EDITABLES) {
+      if (!Object.hasOwn(source, campo) || source[campo] === undefined) continue;
+      const value = source[campo];
+      if (value !== null && typeof value !== 'string') {
+        throw new ProfileError(400, `${campo} debe ser texto o null`);
+      }
+      datos[campo] = value;
+    }
+    return datos;
   }
 
   /**

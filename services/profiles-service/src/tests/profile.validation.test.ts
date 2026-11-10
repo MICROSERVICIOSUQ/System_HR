@@ -56,4 +56,40 @@ describe('profiles-service HTTP validation', () => {
     assert.equal(invalidSort.status, 400);
     assert.equal(invalidOrder.status, 400);
   });
+
+  test('PUT ignora los campos administrativos y no modifica ningún dato', async () => {
+    const response = await fetch(`${baseUrl}/perfiles/EMP-TEST`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        archivado: true,
+        cargo: 'Gerente',
+        estado: 'RETIRADO',
+        departamentoId: 'D999',
+        empleadoId: 'EMP-OTRO',
+      }),
+    });
+    const body = await response.json();
+
+    // Al no incluir ningún campo editable, el filtro entrega una actualización
+    // vacía y el servicio la rechaza antes de consultar o escribir en Prisma.
+    assert.equal(response.status, 400);
+    assert.match(body.message, /al menos un campo/);
+    assert.equal('archivado' in body, false);
+    assert.equal('cargo' in body, false);
+  });
+
+  test('rechaza modificar otro perfil según X-Auth-User', async () => {
+    const response = await fetch(`${baseUrl}/perfiles/EMP-TEST`, {
+      method: 'PUT',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Auth-User': 'EMP-OTRO',
+        'X-Auth-Role': 'USER',
+      },
+      body: JSON.stringify({ telefono: '+57 300 000 0000' }),
+    });
+
+    assert.equal(response.status, 403);
+  });
 });

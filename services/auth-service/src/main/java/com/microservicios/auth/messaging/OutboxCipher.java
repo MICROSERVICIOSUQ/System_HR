@@ -15,6 +15,8 @@ import java.util.Base64;
 /** Evita guardar en claro los tokens que viajan en los eventos pendientes. */
 @Component
 public class OutboxCipher {
+    private static final String VERSIONED_PREFIX = "v1:gcm:";
+
     private final SecretKeySpec key;
     private final SecureRandom random = new SecureRandom();
 
@@ -31,12 +33,20 @@ public class OutboxCipher {
         Cipher cipher = Cipher.getInstance("AES/GCM/NoPadding");
         cipher.init(Cipher.ENCRYPT_MODE, key, new GCMParameterSpec(128, nonce));
         byte[] encrypted = cipher.doFinal(value.getBytes(StandardCharsets.UTF_8));
-        return Base64.getEncoder().encodeToString(ByteBuffer.allocate(nonce.length + encrypted.length)
-                .put(nonce).put(encrypted).array());
+        return VERSIONED_PREFIX + Base64.getEncoder().encodeToString(
+                ByteBuffer.allocate(nonce.length + encrypted.length)
+                        .put(nonce).put(encrypted).array());
     }
 
     public String decrypt(String value) throws GeneralSecurityException {
-        ByteBuffer data = ByteBuffer.wrap(Base64.getDecoder().decode(value));
+        String payload = value;
+        if (value.startsWith(VERSIONED_PREFIX)) {
+            payload = value.substring(VERSIONED_PREFIX.length());
+        } else if (value.contains(":")) {
+            throw new GeneralSecurityException("Unsupported outbox cipher version");
+        }
+
+        ByteBuffer data = ByteBuffer.wrap(Base64.getDecoder().decode(payload));
         byte[] nonce = new byte[12];
         data.get(nonce);
         byte[] encrypted = new byte[data.remaining()];

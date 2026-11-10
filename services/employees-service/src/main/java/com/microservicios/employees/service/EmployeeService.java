@@ -117,6 +117,7 @@ public class EmployeeService {
     @Transactional
     public Employee update(String id, Employee updatedData) {
         Employee existing = findById(id);
+        EmployeeStatus previousStatus = existing.getStatus();
 
         if (updatedData.getEmail() != null && !updatedData.getEmail().equalsIgnoreCase(existing.getEmail())) {
             if (repository.existsByEmailIgnoreCase(updatedData.getEmail())) {
@@ -154,21 +155,28 @@ public class EmployeeService {
         if (updatedData.getFechaIngreso() != null) {
             existing.setFechaIngreso(updatedData.getFechaIngreso());
         }
-        if (updatedData.getFechaRetiro() != null) {
-            existing.setFechaRetiro(updatedData.getFechaRetiro());
-        }
         if (updatedData.getStatus() != null) {
             existing.setStatus(updatedData.getStatus());
-            if (updatedData.getStatus() == EmployeeStatus.RETIRED && existing.getFechaRetiro() == null) {
-                // Igual que en retire(): el momento del retiro se registra con
-                // hora, no solo con día (migración V3).
-                existing.setFechaRetiro(LocalDateTime.now());
-            }
+        }
+
+        EmployeeStatus nextStatus = existing.getStatus();
+        boolean transitionToRetired =
+                previousStatus != EmployeeStatus.RETIRED && nextStatus == EmployeeStatus.RETIRED;
+        if (nextStatus == EmployeeStatus.ACTIVE) {
+            existing.setFechaRetiro(null);
+        } else if (transitionToRetired || existing.getFechaRetiro() == null) {
+            // fechaRetiro es un dato de auditoría gestionado por el servicio,
+            // no una fecha que el cliente pueda establecer en una actualización.
+            existing.setFechaRetiro(LocalDateTime.now());
         }
 
         Employee saved = repository.save(existing);
 
-        eventPublisher.publishEmployeeUpdated(saved);
+        if (transitionToRetired) {
+            eventPublisher.publishEmployeeRetired(saved);
+        } else {
+            eventPublisher.publishEmployeeUpdated(saved);
+        }
 
         return saved;
     }

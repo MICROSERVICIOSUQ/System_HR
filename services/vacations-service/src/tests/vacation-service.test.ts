@@ -50,6 +50,7 @@ class RepositorioFake {
   balances = new Map<string, { employeeId: string; estadoEmpleado: string }>();
   periodos: PeriodoFake[] = [];
   private secuencia = 0;
+  estadoAlForzarFallida: string | null = null;
 
   conEmpleado(employeeId: string, estadoEmpleado = 'ACTIVO') {
     this.balances.set(employeeId, { employeeId, estadoEmpleado });
@@ -129,6 +130,12 @@ class RepositorioFake {
   }
 
   async transitionPeriodState(id: string, estadoEsperado: string, estadoNuevo: string) {
+    if (this.estadoAlForzarFallida !== null) {
+      const period = this.periodos.find((item) => item.id === id);
+      if (period) period.estado = this.estadoAlForzarFallida;
+      this.estadoAlForzarFallida = null;
+      return false;
+    }
     const p = this.periodos.find((x) => x.id === id && x.estado === estadoEsperado);
     if (!p) return false;
     p.estado = estadoNuevo;
@@ -438,6 +445,28 @@ describe('VacationService — endpoints de disparo manual', () => {
     assert.deepEqual(publisher.tipos(), ['vacaciones.iniciadas']);
   });
 
+  test('forcePeriodStart responde 409 si otra operación gana el compare-and-set', async () => {
+    repo.conEmpleado('E001').conPeriodo({
+      id: 'p1',
+      empleadoId: 'E001',
+      fechaInicio: d('2030-06-01'),
+      fechaFin: d('2030-06-10'),
+      estado: 'PROGRAMADA',
+    });
+    repo.estadoAlForzarFallida = 'EN_CURSO';
+
+    await assert.rejects(
+      () => service.forcePeriodStart('p1'),
+      (error: ValidationError) => {
+        assert.equal(error.statusCode, 409);
+        assert.match(error.message, /estado cambió por una operación concurrente/);
+        return true;
+      },
+    );
+    assert.equal(repo.periodos[0].estado, 'EN_CURSO');
+    assert.deepEqual(publisher.tipos(), []);
+  });
+
   test('forcePeriodStart rechaza un período que no está PROGRAMADA', async () => {
     repo.conEmpleado('E001').conPeriodo({
       id: 'p1',
@@ -469,6 +498,28 @@ describe('VacationService — endpoints de disparo manual', () => {
 
     assert.equal(r.estado, 'FINALIZADA');
     assert.deepEqual(publisher.tipos(), ['vacaciones.finalizadas']);
+  });
+
+  test('forcePeriodFinish responde 409 si otra operación gana el compare-and-set', async () => {
+    repo.conEmpleado('E001').conPeriodo({
+      id: 'p1',
+      empleadoId: 'E001',
+      fechaInicio: d('2026-01-01'),
+      fechaFin: d('2030-01-01'),
+      estado: 'EN_CURSO',
+    });
+    repo.estadoAlForzarFallida = 'FINALIZADA';
+
+    await assert.rejects(
+      () => service.forcePeriodFinish('p1'),
+      (error: ValidationError) => {
+        assert.equal(error.statusCode, 409);
+        assert.match(error.message, /estado cambió por una operación concurrente/);
+        return true;
+      },
+    );
+    assert.equal(repo.periodos[0].estado, 'FINALIZADA');
+    assert.deepEqual(publisher.tipos(), []);
   });
 
   test('forzar un período inexistente devuelve 404', async () => {

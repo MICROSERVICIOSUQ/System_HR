@@ -3,6 +3,7 @@ package com.microservicios.auth.exception;
 import com.microservicios.auth.exception.AuthExceptions.CredencialesInvalidasException;
 import com.microservicios.auth.exception.AuthExceptions.CuentaNoEncontradaException;
 import com.microservicios.auth.exception.AuthExceptions.CuentaNoHabilitadaException;
+import com.microservicios.auth.exception.AuthExceptions.CuentaNoPuedeRestablecerPasswordException;
 import com.microservicios.auth.exception.AuthExceptions.IdentidadAusenteException;
 import com.microservicios.auth.exception.AuthExceptions.PasswordDebilException;
 import com.microservicios.auth.exception.ErrorResponse.InvalidField;
@@ -45,6 +46,13 @@ public class GlobalExceptionHandler {
     public ResponseEntity<ErrorResponse> cuentaNoEncontrada(CuentaNoEncontradaException ex,
                                                             HttpServletRequest request) {
         return construir(HttpStatus.NOT_FOUND, ex.getMessage(), request, null);
+    }
+
+    /** 403 — el estado actual de la cuenta impide restablecer la contraseña. */
+    @ExceptionHandler(CuentaNoPuedeRestablecerPasswordException.class)
+    public ResponseEntity<ErrorResponse> cuentaNoPuedeRestablecerPassword(
+            CuentaNoPuedeRestablecerPasswordException ex, HttpServletRequest request) {
+        return construir(HttpStatus.FORBIDDEN, ex.getMessage(), request, null);
     }
 
     /** 400 — la contraseña propuesta no cumple la política. */

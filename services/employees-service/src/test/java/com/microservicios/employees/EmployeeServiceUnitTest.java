@@ -344,6 +344,50 @@ class EmployeeServiceUnitTest {
     }
 
     @Nested
+    @DisplayName("update — coherencia del estado y fecha de retiro")
+    class ActualizacionEstado {
+
+        @Test
+        @DisplayName("al retirar desde una actualización fija la hora actual y publica empleado.retirado")
+        void actualizacionRetiraYPublicaEventoDeRetiro() {
+            Employee activo = empleado("E001", "juan.perez@empresa.com", "EMP-2026-001", "IT");
+            activo.setStatus(EmployeeStatus.ACTIVE);
+            when(repository.findById("E001")).thenReturn(Optional.of(activo));
+            when(repository.save(any(Employee.class))).thenAnswer(inv -> inv.getArgument(0));
+            Employee cambios = new Employee();
+            cambios.setStatus(EmployeeStatus.RETIRED);
+            cambios.setFechaRetiro(LocalDateTime.of(2020, 1, 1, 0, 0));
+
+            Employee retirado = service.update("E001", cambios);
+
+            assertThat(retirado.getStatus()).isEqualTo(EmployeeStatus.RETIRED);
+            assertThat(retirado.getFechaRetiro())
+                    .isCloseTo(LocalDateTime.now(), within(1, ChronoUnit.MINUTES));
+            verify(eventPublisher).publishEmployeeRetired(retirado);
+            verify(eventPublisher, never()).publishEmployeeUpdated(any());
+        }
+
+        @Test
+        @DisplayName("al reactivar limpia fechaRetiro y publica empleado.actualizado")
+        void actualizacionReactivaYLimpiaFechaRetiro() {
+            Employee retirado = empleado("E001", "juan.perez@empresa.com", "EMP-2026-001", "IT");
+            retirado.setStatus(EmployeeStatus.RETIRED);
+            retirado.setFechaRetiro(LocalDateTime.of(2026, 3, 15, 9, 30));
+            when(repository.findById("E001")).thenReturn(Optional.of(retirado));
+            when(repository.save(any(Employee.class))).thenAnswer(inv -> inv.getArgument(0));
+            Employee cambios = new Employee();
+            cambios.setStatus(EmployeeStatus.ACTIVE);
+
+            Employee reactivado = service.update("E001", cambios);
+
+            assertThat(reactivado.getStatus()).isEqualTo(EmployeeStatus.ACTIVE);
+            assertThat(reactivado.getFechaRetiro()).isNull();
+            verify(eventPublisher).publishEmployeeUpdated(reactivado);
+            verify(eventPublisher, never()).publishEmployeeRetired(any());
+        }
+    }
+
+    @Nested
     @DisplayName("consultas")
     class Consultas {
 

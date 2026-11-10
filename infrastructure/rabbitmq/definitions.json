@@ -33,6 +33,15 @@
       "auto_delete": false,
       "internal": false,
       "arguments": {}
+    },
+    {
+      "name": "notifications.dlx",
+      "vhost": "/",
+      "type": "fanout",
+      "durable": true,
+      "auto_delete": false,
+      "internal": false,
+      "arguments": {}
     }
   ],
   "queues": [
@@ -45,6 +54,13 @@
     },
     {
       "name": "notifications.queue",
+      "vhost": "/",
+      "durable": true,
+      "auto_delete": false,
+      "arguments": {}
+    },
+    {
+      "name": "notifications.dlq",
       "vhost": "/",
       "durable": true,
       "auto_delete": false,
@@ -83,6 +99,14 @@
       "arguments": {}
     },
     {
+      "source": "notifications.dlx",
+      "vhost": "/",
+      "destination": "notifications.dlq",
+      "destination_type": "queue",
+      "routing_key": "",
+      "arguments": {}
+    },
+    {
       "source": "hr.events",
       "vhost": "/",
       "destination": "vacations.queue",
@@ -97,6 +121,18 @@
       "destination_type": "queue",
       "routing_key": "",
       "arguments": {}
+    }
+  ],
+  "policies": [
+    {
+      "vhost": "/",
+      "name": "notifications-dead-letter",
+      "pattern": "^notifications\\.queue$",
+      "apply-to": "queues",
+      "definition": {
+        "dead-letter-exchange": "notifications.dlx"
+      },
+      "priority": 10
     }
   ]
 }

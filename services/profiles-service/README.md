@@ -20,8 +20,10 @@ HTTP de administración sobre la proyección; nunca consulta a `employees-servic
         │
         ├──► [profiles.queue]       ← ★ ESTE SERVICIO
         │            │
-        │            ▼ (amqplib — sin modificar topología)
+        │            ▼ (amqplib — topología de reintento durable)
         │    [profiles-service]
+        │            ├──► [profiles.retry.queue] (TTL 5 s; hasta 3 reintentos)
+        │            └──► [profiles.dlq] (mensajes que agotaron reintentos)
         │            │
         │            ▼ (Prisma ORM)
         │    [PostgreSQL: database-perfiles]
@@ -40,6 +42,12 @@ HTTP de administración sobre la proyección; nunca consulta a `employees-servic
 | **Lectura** | API REST sobre PostgreSQL — sin llamar a otros servicios |
 | **Consistencia** | Eventual — el estado se construye proyectando eventos |
 | **Sin acoplamiento** | Cero llamadas HTTP a `employees-service` |
+
+Si un evento no puede procesarse, se confirma su publicación en una cola durable
+de reintentos antes de reconocer el mensaje original. Tras tres reintentos con
+un intervalo de cinco segundos, el mensaje se conserva en `profiles.dlq`; si no
+se puede publicar el reintento o el desvío, el consumidor solicita reencolado
+del mensaje original.
 
 ---
 

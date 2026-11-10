@@ -114,6 +114,26 @@ class AuthEndpointsTest {
     }
 
     @Test
+    void resetPasswordSeRechazaSiLaCuentaFueSuspendidaDespuesDeEmitirElToken() throws Exception {
+        establecerPassword(PASSWORD);
+        String tokenEmitido = jwtService.generarResetToken(
+                cuentas.findById(EMPLEADO).orElseThrow());
+
+        lifecycle.procesar(new IncomingEvent(UUID.randomUUID().toString(),
+                AuthEvents.VACACIONES_INICIADAS, "1.0", "2026-11-08T10:00:00Z", "test",
+                Map.of("id", "periodo", "empleadoId", EMPLEADO)));
+
+        mockMvc.perform(post("/auth/reset-password")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(mapper.writeValueAsString(Map.of(
+                                "token", tokenEmitido,
+                                "nuevaPassword", "Nueva4567"))))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.message")
+                        .value("La cuenta no está activa y no puede restablecer su contraseña"));
+    }
+
+    @Test
     void loginDevuelveUnJwtConSubYRoleTrasEstablecerLaPassword() throws Exception {
         establecerPassword(PASSWORD);
 

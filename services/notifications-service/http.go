@@ -24,8 +24,11 @@ type App struct {
 func newApp(service *Service) *App {
 	registry := prometheus.NewRegistry()
 	events := prometheus.NewCounterVec(prometheus.CounterOpts{Name: "notifications_events_total", Help: "Resultados del consumo de eventos."}, []string{"result"})
-	service.Emails = prometheus.NewCounter(prometheus.CounterOpts{Name: "notifications_emails_simulated_total", Help: "Correos simulados sin contar duplicados."})
-	registry.MustRegister(service.Emails, events, prometheus.NewGoCollector(), prometheus.NewProcessCollector(prometheus.ProcessCollectorOpts{}))
+	service.EmailCount = prometheus.NewCounter(prometheus.CounterOpts{Name: "notifications_emails_processed_total", Help: "Correos procesados sin contar duplicados."})
+	if service.EmailSender == nil {
+		service.EmailSender = MockEmailSender{}
+	}
+	registry.MustRegister(service.EmailCount, events, prometheus.NewGoCollector(), prometheus.NewProcessCollector(prometheus.ProcessCollectorOpts{}))
 	return &App{Service: service, Events: events, Registry: registry}
 }
 

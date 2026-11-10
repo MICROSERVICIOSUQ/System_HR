@@ -45,10 +45,10 @@ public class EmpleadoCompletoClient {
      * <p>La ruta es {@code /perfiles/{empleadoId}}: profiles-service monta su
      * router en {@code /perfiles} y resuelve el perfil con un único segmento
      * ({@code router.get('/:empleadoId')}). Express no hace coincidir un segmento
-     * extra, así que {@code /perfiles/empleadoId/E601} devolvía 404 y el fallback
-     * lo convertía en {@code perfil: null} en todas las respuestas.
+     * extra, así que {@code /perfiles/empleadoId/E601} devolvía 404 y el
+     * agregador lo interpretaba como {@code perfil: null} en todas las respuestas.
      */
-    @CircuitBreaker(name = "profilesService", fallbackMethod = "profilesFallback")
+    @CircuitBreaker(name = "profilesService")
     public CompletableFuture<JsonNode> getProfile(String id, String traceId) {
         return requestOpcional(profilesUrl, "/perfiles/{id}", id);
     }
@@ -62,7 +62,7 @@ public class EmpleadoCompletoClient {
      * acorde al campo {@code vacaciones} del DTO. Los períodos se listan con
      * {@code /vacaciones?empleadoId=}, que devuelve una colección.
      */
-    @CircuitBreaker(name = "vacationsService", fallbackMethod = "vacationsFallback")
+    @CircuitBreaker(name = "vacationsService")
     public CompletableFuture<JsonNode> getVacations(String id, String traceId) {
         return requestOpcional(vacationsUrl, "/vacaciones/balances/{id}", id);
     }
@@ -103,15 +103,4 @@ public class EmpleadoCompletoClient {
         return CompletableFuture.failedFuture(error);
     }
 
-    private CompletableFuture<JsonNode> profilesFallback(
-            String id, String traceId, Throwable error) {
-        LOG.warn("Fallback perfil=null para empleado id={} traceId={}", id, traceId, error);
-        return CompletableFuture.completedFuture(null);
-    }
-
-    private CompletableFuture<JsonNode> vacationsFallback(
-            String id, String traceId, Throwable error) {
-        LOG.warn("Fallback vacaciones=null para empleado id={} traceId={}", id, traceId, error);
-        return CompletableFuture.completedFuture(null);
-    }
 }

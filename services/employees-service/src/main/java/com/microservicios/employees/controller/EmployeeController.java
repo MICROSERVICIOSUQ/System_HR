@@ -14,6 +14,7 @@ import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
 import org.springframework.format.annotation.DateTimeFormat;
 import org.springframework.http.ResponseEntity;
+import org.springframework.validation.annotation.Validated;
 import org.springframework.web.bind.annotation.*;
 
 import java.time.LocalDate;
@@ -52,7 +53,8 @@ public class EmployeeController {
             @ApiResponse(responseCode = "503", description = "Base de datos o servicio de departamentos no disponible",
                     content = @Content(schema = @Schema(implementation = ErrorResponse.class)))
     })
-    public ResponseEntity<Employee> register(@Valid @RequestBody Employee employee) {
+    public ResponseEntity<Employee> register(
+            @Validated(Employee.OnCreate.class) @RequestBody Employee employee) {
         return ResponseEntity.status(201).body(service.register(employee));
     }
 
@@ -194,7 +196,7 @@ public class EmployeeController {
     public ResponseEntity<Employee> update(
             @Parameter(description = "Identificador único del empleado", required = true)
             @PathVariable String id,
-            @RequestBody Employee employee) {
+            @Valid @RequestBody Employee employee) {
         return ResponseEntity.ok(service.update(id, employee));
     }
 

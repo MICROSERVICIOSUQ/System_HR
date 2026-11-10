@@ -66,7 +66,10 @@ class BaseDeDatosNoDisponible(ErrorDeAplicacion):
 
 class ServicioDeEmpleadosNoDisponible(ErrorDeAplicacion):
     def __init__(self) -> None:
-        super().__init__(503, "El servicio de empleados no esta disponible temporalmente.")
+        super().__init__(
+            503,
+            "No se pudo verificar la presencia de empleados vinculados en employees-service",
+        )
 
 
 def _respuesta(codigo: int, mensaje: str, errores=None) -> JSONResponse:
@@ -78,6 +81,19 @@ def _respuesta(codigo: int, mensaje: str, errores=None) -> JSONResponse:
 
 def registrar_manejadores(app: FastAPI) -> None:
     """Conecta los manejadores de error a la aplicación."""
+
+    @app.exception_handler(ServicioDeEmpleadosNoDisponible)
+    async def _de_empleados_no_disponible(
+        _: Request, exc: ServicioDeEmpleadosNoDisponible
+    ) -> JSONResponse:
+        logger.warning(
+            "No se pudo verificar la presencia de empleados",
+            extra={"codigo": exc.codigo},
+        )
+        return JSONResponse(
+            status_code=exc.codigo,
+            content={"detail": exc.mensaje},
+        )
 
     @app.exception_handler(ErrorDeAplicacion)
     async def _de_aplicacion(_: Request, exc: ErrorDeAplicacion) -> JSONResponse:

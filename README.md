@@ -858,7 +858,7 @@ Todas en `.env.example`; ninguna credencial está quemada en el código.
 | `AUTH_DB_*` | `gestion_auth`, `postgres` | Su base de datos propia |
 | `AUTH_SEED_ADMIN_ID` | `admin` | `empleadoId` del administrador semilla |
 | `AUTH_SEED_ADMIN_EMAIL` | `admin@empresa.com` | Su email de login |
-| `AUTH_SEED_ADMIN_PASSWORD` | `Admin12345` | Su contraseña inicial |
+| `AUTH_SEED_ADMIN_PASSWORD` | Obligatoria en `.env`; sin valor predeterminado | Su contraseña inicial |
 | `VACACIONES_CRON` | `* * * * *` | Frecuencia del scheduler |
 | `VACACIONES_SCHEDULER_ENABLED` | `true` | Interruptor del scheduler |
 

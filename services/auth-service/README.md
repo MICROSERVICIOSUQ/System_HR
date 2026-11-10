@@ -267,7 +267,7 @@ Todo por variables de entorno; nada quemado en el código.
 | `JWT_RESET_TTL_SECONDS` | `3600` | Vigencia del token de activación/recuperación |
 | `AUTH_SEED_ADMIN_ID` | `admin` | `empleadoId` del administrador semilla |
 | `AUTH_SEED_ADMIN_EMAIL` | `admin@empresa.com` | Su email de login |
-| `AUTH_SEED_ADMIN_PASSWORD` | `Admin12345` | Su contraseña inicial |
+| `AUTH_SEED_ADMIN_PASSWORD` | Obligatoria en `.env`; sin valor predeterminado | Su contraseña inicial |
 | `RABBITMQ_*` | `rabbitmq:5672`, `admin`/`admin` | Broker |
 
 El servicio **aborta el arranque** si `JWT_SECRET` tiene menos de 32 bytes, en

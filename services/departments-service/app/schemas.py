@@ -128,6 +128,10 @@ class RespuestaDeError(BaseModel):
     errors: list[CampoInvalido] | None = None
 
 
+class RespuestaDeDependenciaNoDisponible(BaseModel):
+    detail: str
+
+
 class EstadoDeSalud(BaseModel):
     model_config = ConfigDict(
         json_schema_extra={
