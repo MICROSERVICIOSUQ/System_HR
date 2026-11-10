@@ -310,7 +310,7 @@ cuatro rutas responden 200 y devuelven filas reales.
 | 4 | Documentación OpenAPI y Swagger UI en `/docs` | PENDIENTE | ✅ | Perfiles ya expone `/docs` y `/openapi.json`; el gateway publica los **6** contratos |
 | 5 | `/health` con `checks` | PENDIENTE | ✅ | Los 6 servicios reportan `database` y `messageBroker`; el healthcheck de Auth ya apunta a `/health` |
 | 6 | Logs JSON estructurados | PENDIENTE | ✅ | Los siete emiten `timestamp`, `level`, `service`, `context` y `traceId` |
-| 7 | Monitoreo (Prometheus) | PENDIENTE | ⚠️ | Funciona (8 targets), pero los Java siguen solo en `/actuator/prometheus`: el alias `/metrics` no se unificó |
+| 7 | Monitoreo (Prometheus) | PENDIENTE | ✅ | Los 7 servicios exponen `/metrics`; los 8 objetivos UP con esa ruta ([§10](#10-validación-de-las-cuatro-correcciones-del-equipo)) |
 | 8 | Trazabilidad (OpenTelemetry) | CUMPLE | ✅ | W3C Trace Context en HTTP y AMQP, 3 lenguajes en una traza |
 | 9 | Gestión de secretos | PENDIENTE | ✅ | `scripts/setup-secrets.sh` ejecutable; `JWT_SECRET` vacío en `.env.example` |
 | 10 | CI/CD: Jenkins y SonarQube en Compose | PENDIENTE | ✅ | Y además **funcionando**: 7 trabajos, Quality Gate aplicado y dos pipelines verdes. Nueve defectos corregidos ([§8](#8-segunda-ronda-el-ci-del-dev-4-y-los-cuatro-pendientes)) |
@@ -992,3 +992,106 @@ Y dos de ellos —el cliente de Prisma que no está en Git y el `argLine` que pi
 al agente— no son problemas del CI: son problemas del proyecto que **solo el CI
 podía descubrir**, porque en el equipo de quien los escribió el artefacto ya
 estaba generado o la cobertura no se medía.
+
+---
+
+# 10. Validación de las cuatro correcciones del equipo
+
+Revisión del commit `d60a606` (48 archivos, +3882/−3143), que cierra los cuatro
+`PENDIENTE` en rojo del documento de pendientes: alias de métricas, outbox de
+Auth y de Vacaciones, concurrencia del publicador y las cuatro colecciones.
+
+**Veredicto: las cuatro funcionan.** Lo verifiqué en vivo, no solo compilando.
+Aparecieron tres defectos de entorno al ejecutarlas, dos de ellos anteriores a
+este commit, y quedan corregidos.
+
+## 10.1 Lo que se verificó
+
+| Corrección | Cómo se comprobó | Resultado |
+|---|---|---|
+| Alias de métricas | `GET /metrics` sin token en el gateway, dentro de auth y de empleados, y los objetivos reales de Prometheus | 8 objetivos UP, todos con `metrics_path: /metrics`; `/actuator/prometheus` sigue respondiendo |
+| Outbox de Auth | Broker detenido → `POST /auth/recover-password` → fila pendiente → broker arriba → entrega | **202 con el broker caído**, 5 reintentos registrados, publicado solo y consumido por notificaciones |
+| Cifrado del payload de Auth | Consulta directa a `outbox_evento` con la fila pendiente | Payload de 616 caracteres en base64, **sin JWT ni la palabra `token`**; tras publicar queda en longitud 0 |
+| Outbox de Vacaciones | Broker detenido → `POST /vacaciones` → fila pendiente → broker arriba | **201 con el broker caído**, 11 reintentos, publicado solo |
+| `FOR UPDATE SKIP LOCKED` | `EmployeeRepositoryIntegrationTest`, que levanta PostgreSQL con Testcontainers | 8 / 8, incluida la prueba de dos transacciones simultáneas |
+| Las cuatro colecciones | `python scripts/probar-postman-pendientes.py --sin-arranque --caida-departamentos` | **Código de salida 0**: 26, 27, 14 y 32+5+3 aserciones sin fallos, con caída y recuperación de Departamentos |
+| Regresión | Suites unitarias y BDD | auth 35/35 · vacaciones 66/66 · empleados 69 verdes · BDD **39/39** |
+
+Detalles que merecen mención, porque no eran obvios y están bien resueltos:
+
+- **El payload cifrado se vacía al publicar.** No se conserva el token ni
+  cifrado, una vez entregado.
+- **`registrarIntentoFallido` guarda solo el nombre de la clase de la
+  excepción**, no su mensaje, «porque el mensaje de una excepción de
+  serialización podría incluir el token». Es exactamente el tipo de detalle que
+  distingue cerrar un hallazgo de aparentar cerrarlo.
+- **AES-GCM con nonce aleatorio por operación y clave derivada por SHA-256 con
+  separación de dominio** respecto del uso de firma del mismo secreto.
+- Las colecciones esperan **condiciones reales**, no tiempos fijos.
+
+## 10.2 Tres defectos encontrados al ejecutarlo
+
+### Zipkin solo veía 5 de los 7 servicios (anterior a este commit)
+
+La colección de observabilidad falla dos aserciones: «la traza contiene los siete
+servicios» y «Zipkin conoce los siete». Generé tráfico explícito a Vacaciones y
+Notificaciones y seguían sin aparecer, así que no era una pérdida de spans por
+reinicio.
+
+La causa: el Compose pasaba `OTEL_EXPORTER_ZIPKIN_ENDPOINT: ${...:-}`, es decir
+**la cadena vacía** cuando el `.env` no define la variable —y `.env.example` la
+añadió después, así que un `.env` anterior no la tiene—. Vacaciones y
+Notificaciones omiten el exportador a propósito si el endpoint está vacío, y
+**una cadena vacía no es ausencia**, así que el valor por omisión del código
+(`?? 'http://zipkin:9411/...'`) tampoco la cubría. Los otros cinco servicios sí
+tienen su propio valor de reserva, y por eso aparecían.
+
+Corregido en el Compose con un valor por omisión explícito. Tras reiniciar los
+dos servicios, Zipkin reconoce **los siete** y la colección pasa.
+
+> Esto invalida una conclusión mía anterior: en la ronda previa atribuí este
+> mismo fallo a que Zipkin se había reiniciado. Era un defecto real.
+
+### El orquestador de las colecciones moría en Windows
+
+`scripts/probar-postman-pendientes.py` terminaba con
+`'charmap' codec can't encode character '→'` antes de ejecutar ninguna
+comprobación: imprime la salida de Newman, que trae flechas, y la consola de
+Windows usa cp1252. Corregido reconfigurando la salida a UTF-8. Es el mismo error
+que ya tenía `ci/actualizar-fuente-local.py`.
+
+### Dos colecciones mías asumían propagación inmediata (defecto mío)
+
+`auth-service` fallaba 21 de 43 aserciones y `perfiles-service` 9 de 38. No es de
+este commit: es consecuencia del **outbox de Empleados que yo mismo añadí**.
+Antes el evento salía dentro de la petición HTTP; ahora lo publica un ciclo
+posterior, de modo que la cuenta y el perfil tardan en existir. La suite BDD no
+se enteró porque hace *polling*; estas dos colecciones consultaban de inmediato.
+
+Corregido por los dos lados:
+
+- El intervalo del publicador de Empleados baja de 5 s a **1 s**, el mismo que ya
+  usan Auth y Vacaciones.
+- Las dos colecciones esperan una condición real, con el patrón que el equipo
+  introdujo en las suyas: que la cuenta exista, que el perfil exista y que el
+  perfil quede `RETIRADO`.
+
+Resultado: `auth-service` **47/47** y `perfiles-service` **38/38**, dos
+ejecuciones seguidas cada una.
+
+## 10.3 Dos observaciones que no bloquean
+
+- **El publicador de Auth corta el ciclo ante cualquier error**, no solo ante una
+  caída del broker. Una fila que no se pueda descifrar —por ejemplo, tras rotar
+  `JWT_SECRET`— bloquearía la cola indefinidamente, porque cada ciclo reintenta
+  la misma primera fila y sale. El de Empleados sí distingue «no hay broker» de
+  «este evento no se puede enviar». Es un cambio de una línea.
+- **`continuarTraza` parsea el `traceparent` fuera del `try`** en Auth y en
+  Empleados: `parts[1]`, `parts[2]`, `parts[3]` sin comprobar la longitud. Un
+  valor malformado abortaría el ciclo. Hoy la columna solo la escribe su propio
+  código, así que no ocurre; conviene blindarlo antes de que otra cosa la
+  escriba.
+
+Y una nota de operación: **si se rota `JWT_SECRET` con filas pendientes en el
+outbox de Auth, esas filas quedan indescifrables**, porque la clave de cifrado se
+deriva de ese secreto. Conviene vaciar la cola antes de rotarlo.

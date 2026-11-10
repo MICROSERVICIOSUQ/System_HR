@@ -338,6 +338,40 @@
       "name": "5. Recuperacion rechazada antes de activar (401)",
       "event": [
         {
+          "listen": "prerequest",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "// Espera a que exista la cuenta antes de comprobar la recuperacion.",
+              "//",
+              "// El alta es asincrona y, desde que employees-service publica por outbox, el",
+              "// evento empleado.creado sale hasta un segundo despues del 201. Sin esta espera",
+              "// la peticion llegaba antes que el evento y auth respondia 404 en lugar del 401",
+              "// que se quiere demostrar.",
+              "const base  = pm.environment.get('gatewayBaseUrl') || pm.variables.get('gatewayBaseUrl');",
+              "const admin = pm.collectionVariables.get('adminToken');",
+              "const empleadoId = pm.collectionVariables.get('empleadoId');",
+              "",
+              "(() => {",
+              "  let intentos = 0;",
+              "  function comprobar() {",
+              "    pm.sendRequest({",
+              "      url: base + '/auth/internal/tokens/restablecimiento',",
+              "      method: 'POST',",
+              "      header: { Authorization: 'Bearer ' + admin, 'Content-Type': 'application/json' },",
+              "      body: { mode: 'raw', raw: JSON.stringify({ empleadoId: empleadoId }) }",
+              "    }, (error, res) => {",
+              "      if (!error && res.code === 200) return;",
+              "      if (++intentos < 60) { setTimeout(comprobar, 500); return; }",
+              "      console.log('La cuenta de ' + empleadoId + ' no aparecio en 30 s');",
+              "    });",
+              "  }",
+              "  comprobar();",
+              "})();"
+            ]
+          }
+        },
+        {
           "listen": "test",
           "script": {
             "type": "text/javascript",

@@ -169,7 +169,14 @@ services:
       rabbitmq:
         condition: service_healthy
     environment:
-      OTEL_EXPORTER_ZIPKIN_ENDPOINT: ${OTEL_EXPORTER_ZIPKIN_ENDPOINT:-}
+      # Valor por omision explicito. Con ${VAR:-} la variable llegaba VACIA
+      # cuando el .env no la definia —y .env.example la anadio despues, asi que
+      # cualquier .env anterior no la tiene—. notifications-service y
+      # vacations-service omiten el exportador cuando el endpoint esta vacio, de
+      # modo que desaparecian de Zipkin sin ningun error: la traza mostraba 5 de
+      # los 7 servicios. Una cadena vacia no es ausencia, asi que el ?? del
+      # codigo tampoco la cubria.
+      OTEL_EXPORTER_ZIPKIN_ENDPOINT: ${OTEL_EXPORTER_ZIPKIN_ENDPOINT:-http://zipkin:9411/api/v2/spans}
       PORT: ${NOTIFICACIONES_PORT:-8082}
       DATABASE_URL: postgresql://${NOTIFICACIONES_DB_USER:-postgres}:${NOTIFICACIONES_DB_PASSWORD:-postgres}@database-notificaciones:5432/${NOTIFICACIONES_DB_NAME:-gestion_notificaciones}
       RABBITMQ_HOST: ${RABBITMQ_HOST:-rabbitmq}
@@ -229,7 +236,14 @@ services:
       rabbitmq:
         condition: service_healthy
     environment:
-      OTEL_EXPORTER_ZIPKIN_ENDPOINT: ${OTEL_EXPORTER_ZIPKIN_ENDPOINT:-}
+      # Valor por omision explicito. Con ${VAR:-} la variable llegaba VACIA
+      # cuando el .env no la definia —y .env.example la anadio despues, asi que
+      # cualquier .env anterior no la tiene—. notifications-service y
+      # vacations-service omiten el exportador cuando el endpoint esta vacio, de
+      # modo que desaparecian de Zipkin sin ningun error: la traza mostraba 5 de
+      # los 7 servicios. Una cadena vacia no es ausencia, asi que el ?? del
+      # codigo tampoco la cubria.
+      OTEL_EXPORTER_ZIPKIN_ENDPOINT: ${OTEL_EXPORTER_ZIPKIN_ENDPOINT:-http://zipkin:9411/api/v2/spans}
       NODE_ENV: production
       PORT: ${VACACIONES_PORT:-8084}
       DATABASE_URL: postgresql://${VACACIONES_DB_USER:-postgres}:${VACACIONES_DB_PASSWORD:-postgres}@db-vacaciones:5432/${VACACIONES_DB_NAME:-gestion_vacaciones}

@@ -9,6 +9,16 @@ import subprocess
 import sys
 import uuid
 
+# En Windows la consola usa cp1252 y la salida de Newman trae caracteres que no
+# puede codificar (las flechas y los visto bueno de su informe). Sin esto, el
+# script moria con UnicodeEncodeError al imprimir la primera coleccion, antes de
+# llegar a ejecutar ninguna comprobacion.
+for _flujo in (sys.stdout, sys.stderr):
+    try:
+        _flujo.reconfigure(encoding='utf-8', errors='replace')
+    except AttributeError:
+        pass
+
 ROOT = Path(__file__).resolve().parents[1]
 IMAGE = 'postman/newman:6-alpine'
 # El estado con tokens queda dentro de este contenedor temporal, nunca en reportes del host.

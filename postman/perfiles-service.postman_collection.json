@@ -240,6 +240,38 @@
           },
           "event": [
             {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Espera a que el perfil exista antes de consultarlo.",
+                  "//",
+                  "// El perfil lo crea profiles-service al consumir empleado.creado, y desde que",
+                  "// employees-service publica por outbox ese evento sale hasta un segundo despues",
+                  "// del 201 del alta. Sin esta espera la consulta llegaba primero y recibia 404.",
+                  "const base  = pm.environment.get('gatewayBaseUrl') || pm.variables.get('gatewayBaseUrl');",
+                  "const admin = pm.collectionVariables.get('adminToken');",
+                  "const empleadoId = pm.collectionVariables.get('empleadoId');",
+                  "",
+                  "(() => {",
+                  "  let intentos = 0;",
+                  "  function comprobar() {",
+                  "    pm.sendRequest({",
+                  "      url: base + '/perfiles/' + empleadoId,",
+                  "      method: 'GET',",
+                  "      header: { Authorization: 'Bearer ' + admin, Accept: 'application/json' }",
+                  "    }, (error, res) => {",
+                  "      if (!error && res.code === 200) return;",
+                  "      if (++intentos < 60) { setTimeout(comprobar, 500); return; }",
+                  "      console.log('El perfil de ' + empleadoId + ' no aparecio en 30 s');",
+                  "    });",
+                  "  }",
+                  "  comprobar();",
+                  "})();"
+                ]
+              }
+            },
+            {
               "listen": "test",
               "script": {
                 "type": "text/javascript",
@@ -586,36 +618,34 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "// Pide a auth-service el token de activacion de la cuenta del empleado.",
+                  "// Pide a auth-service el token de activacion, esperando a que la cuenta exista.",
                   "//",
-                  "// Antes se leia de GET /notifications, porque notifications-service guardaba el",
-                  "// token en el payload de su historial. Eso era el hallazgo de seguridad que la",
-                  "// auditoria pidio cerrar —un token de un solo uso en texto plano en una base de",
-                  "// datos— y el servicio reconstruido en Go ya solo conserva campos publicos.",
-                  "//",
-                  "// Este es el canal legitimo: lo entrega quien firma el token. Es una operacion",
-                  "// privilegiada, asi que el gateway la reserva al rol ADMIN.",
+                  "// El canal legitimo es este: lo entrega quien firma el token. Antes se leia del",
+                  "// historial de notificaciones, que es justo donde la auditoria pidio que no",
+                  "// estuviera. La espera hace falta porque la cuenta nace de un evento asincrono.",
                   "const base  = pm.environment.get('gatewayBaseUrl') || pm.variables.get('gatewayBaseUrl');",
                   "const admin = pm.collectionVariables.get('adminToken');",
                   "const empleadoId = pm.collectionVariables.get('empleadoId');",
                   "",
-                  "pm.sendRequest({",
-                  "    url: base + '/auth/internal/tokens/restablecimiento',",
-                  "    method: 'POST',",
-                  "    header: {",
-                  "        'Authorization': 'Bearer ' + admin,",
-                  "        'Content-Type': 'application/json',",
-                  "        'Accept': 'application/json'",
-                  "    },",
-                  "    body: { mode: 'raw', raw: JSON.stringify({ empleadoId: empleadoId }) }",
-                  "}, (err, res) => {",
-                  "    if (err) { console.log('No se pudo pedir el token:', err); return; }",
-                  "    if (res.code !== 200) {",
-                  "        console.log('auth-service respondio ' + res.code + ': ' + res.text());",
+                  "(() => {",
+                  "  let intentos = 0;",
+                  "  function pedir() {",
+                  "    pm.sendRequest({",
+                  "      url: base + '/auth/internal/tokens/restablecimiento',",
+                  "      method: 'POST',",
+                  "      header: { Authorization: 'Bearer ' + admin, 'Content-Type': 'application/json' },",
+                  "      body: { mode: 'raw', raw: JSON.stringify({ empleadoId: empleadoId }) }",
+                  "    }, (error, res) => {",
+                  "      if (!error && res.code === 200) {",
+                  "        pm.collectionVariables.set('tokenActivacion', res.json().token);",
                   "        return;",
-                  "    }",
-                  "    pm.collectionVariables.set('tokenActivacion', res.json().token);",
-                  "});"
+                  "      }",
+                  "      if (++intentos < 60) { setTimeout(pedir, 500); return; }",
+                  "      console.log('auth-service no emitio el token de ' + empleadoId + ' en 30 s');",
+                  "    });",
+                  "  }",
+                  "  pedir();",
+                  "})();"
                 ]
               }
             },
@@ -892,6 +922,40 @@
             "description": "El archivado se escribe en la misma operacion que el cambio de estado: si fueran dos escrituras, un fallo entre ellas dejaria un perfil retirado sin archivar y el filtro ?archivado=false seguiria devolviendolo."
           },
           "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Espera a que el retiro se refleje en el perfil.",
+                  "//",
+                  "// El perfil pasa a RETIRADO cuando profiles-service consume empleado.retirado, y",
+                  "// ese evento sale por el outbox de employees-service: hasta un segundo despues",
+                  "// del 200 del DELETE. Sin esta espera la consulta veia el perfil todavia ACTIVO.",
+                  "const base  = pm.environment.get('gatewayBaseUrl') || pm.variables.get('gatewayBaseUrl');",
+                  "const admin = pm.collectionVariables.get('adminToken');",
+                  "const empleadoId = pm.collectionVariables.get('empleadoId');",
+                  "",
+                  "(() => {",
+                  "  let intentos = 0;",
+                  "  function comprobar() {",
+                  "    pm.sendRequest({",
+                  "      url: base + '/perfiles/' + empleadoId,",
+                  "      method: 'GET',",
+                  "      header: { Authorization: 'Bearer ' + admin, Accept: 'application/json' }",
+                  "    }, (error, res) => {",
+                  "      let listo = false;",
+                  "      try { listo = !error && res.code === 200 && res.json().estado === 'RETIRADO'; } catch (_) {}",
+                  "      if (listo) return;",
+                  "      if (++intentos < 60) { setTimeout(comprobar, 500); return; }",
+                  "      console.log('El perfil de ' + empleadoId + ' no quedo RETIRADO en 30 s');",
+                  "    });",
+                  "  }",
+                  "  comprobar();",
+                  "})();"
+                ]
+              }
+            },
             {
               "listen": "test",
               "script": {
