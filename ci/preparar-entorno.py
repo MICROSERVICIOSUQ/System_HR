@@ -4,7 +4,7 @@ import secrets
 
 root = Path(__file__).resolve().parents[1]
 path = root / '.env'
-text = path.read_text() if path.exists() else (root / '.env.example').read_text()
+text = path.read_text(encoding='utf-8') if path.exists() else (root / '.env.example').read_text(encoding='utf-8')
 keys = {line.split('=', 1)[0].strip() for line in text.splitlines() if '=' in line}
 values = {
     'JENKINS_ADMIN_USER': 'admin',
@@ -19,7 +19,7 @@ values = {
 }
 missing = {key: value for key, value in values.items() if key not in keys}
 if missing:
-    with path.open('a' if path.exists() else 'w') as file:
+    with path.open('a' if path.exists() else 'w', encoding='utf-8') as file:
         if not path.exists() or path.stat().st_size == 0:
             file.write(text)
         file.write('\n# Integración continua — configuración local\n')

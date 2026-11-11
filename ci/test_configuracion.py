@@ -62,16 +62,23 @@ class ConfiguracionCI(unittest.TestCase):
             root = Path(directory)
             (root / 'ci').mkdir()
             shutil.copy(ROOT / 'ci/preparar-entorno.py', root / 'ci')
-            (root / '.env').write_text('JWT_SECRET=clave-que-ya-existia\nJENKINS_ADMIN_PASSWORD=conservar\n')
+            (root / '.env').write_text(
+                'JWT_SECRET=clave-que-ya-existia\n'
+                'JENKINS_ADMIN_PASSWORD=conservar\n'
+                '# comentario con caracteres UTF-8: integración — Windows\n',
+                encoding='utf-8',
+            )
             command = [sys.executable, str(root / 'ci/preparar-entorno.py')]
             subprocess.run(command, check=True, capture_output=True)
-            first = (root / '.env').read_text()
+            first = (root / '.env').read_text(encoding='utf-8')
             subprocess.run(command, check=True, capture_output=True)
-            self.assertEqual(first, (root / '.env').read_text())
+            self.assertEqual(first, (root / '.env').read_text(encoding='utf-8'))
             self.assertIn('JWT_SECRET=clave-que-ya-existia\n', first)
             self.assertIn('JENKINS_ADMIN_PASSWORD=conservar\n', first)
+            self.assertIn('# comentario con caracteres UTF-8: integración — Windows\n', first)
             self.assertIn('SONAR_ADMIN_PASSWORD=', first)
-            self.assertEqual((root / '.env').stat().st_mode & 0o777, 0o600)
+            if sys.platform != 'win32':
+                self.assertEqual((root / '.env').stat().st_mode & 0o777, 0o600)
 
     def test_no_se_acepta_una_integracion_omitida_por_falta_de_docker(self):
         with tempfile.TemporaryDirectory() as directory:

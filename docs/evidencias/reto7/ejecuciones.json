@@ -8,7 +8,7 @@
       "build": 9,
       "tipo": "normal",
       "resultado": "SUCCESS",
-      "url": "http://localhost:9090/job/employees-service/9/",
+      "url": "http://localhost:9091/job/employees-service/9/",
       "pruebas": {
         "aprobadas": 116,
         "fallidas": 0,
@@ -55,7 +55,7 @@
       "build": 10,
       "tipo": "normal",
       "resultado": "SUCCESS",
-      "url": "http://localhost:9090/job/employees-service/10/",
+      "url": "http://localhost:9091/job/employees-service/10/",
       "pruebas": {
         "aprobadas": 116,
         "fallidas": 0,
@@ -102,7 +102,7 @@
       "build": 8,
       "tipo": "normal",
       "resultado": "SUCCESS",
-      "url": "http://localhost:9090/job/vacations-service/8/",
+      "url": "http://localhost:9091/job/vacations-service/8/",
       "pruebas": {
         "aprobadas": 103,
         "fallidas": 0,
@@ -149,7 +149,7 @@
       "build": 9,
       "tipo": "normal",
       "resultado": "SUCCESS",
-      "url": "http://localhost:9090/job/vacations-service/9/",
+      "url": "http://localhost:9091/job/vacations-service/9/",
       "pruebas": {
         "aprobadas": 103,
         "fallidas": 0,
@@ -196,7 +196,7 @@
       "build": 11,
       "tipo": "normal",
       "resultado": "SUCCESS",
-      "url": "http://localhost:9090/job/employees-service/11/",
+      "url": "http://localhost:9091/job/employees-service/11/",
       "pruebas": {
         "aprobadas": 116,
         "fallidas": 0,
@@ -243,7 +243,7 @@
       "build": 10,
       "tipo": "normal",
       "resultado": "SUCCESS",
-      "url": "http://localhost:9090/job/vacations-service/10/",
+      "url": "http://localhost:9091/job/vacations-service/10/",
       "pruebas": {
         "aprobadas": 103,
         "fallidas": 0,
@@ -290,7 +290,7 @@
       "build": 11,
       "tipo": "unitaria",
       "resultado": "FAILURE",
-      "url": "http://localhost:9090/job/vacations-service/11/",
+      "url": "http://localhost:9091/job/vacations-service/11/",
       "pruebas": {
         "aprobadas": 64,
         "fallidas": 1,
@@ -342,7 +342,7 @@
       "build": 12,
       "tipo": "docker",
       "resultado": "FAILURE",
-      "url": "http://localhost:9090/job/vacations-service/12/",
+      "url": "http://localhost:9091/job/vacations-service/12/",
       "pruebas": {
         "aprobadas": 64,
         "fallidas": 0,
@@ -389,7 +389,7 @@
       "build": 13,
       "tipo": "bdd",
       "resultado": "FAILURE",
-      "url": "http://localhost:9090/job/vacations-service/13/",
+      "url": "http://localhost:9091/job/vacations-service/13/",
       "pruebas": {
         "aprobadas": 103,
         "fallidas": 1,
@@ -441,7 +441,7 @@
       "build": 14,
       "tipo": "cobertura",
       "resultado": "FAILURE",
-      "url": "http://localhost:9090/job/vacations-service/14/",
+      "url": "http://localhost:9091/job/vacations-service/14/",
       "pruebas": {
         "aprobadas": 64,
         "fallidas": 0,
@@ -488,7 +488,7 @@
       "build": 15,
       "tipo": "docker",
       "resultado": "FAILURE",
-      "url": "http://localhost:9090/job/vacations-service/15/",
+      "url": "http://localhost:9091/job/vacations-service/15/",
       "pruebas": {
         "aprobadas": 64,
         "fallidas": 0,
@@ -535,7 +535,7 @@
       "build": 15,
       "tipo": "verificacion-final",
       "resultado": "SUCCESS",
-      "url": "http://localhost:9090/job/employees-service/15/",
+      "url": "http://localhost:9091/job/employees-service/15/",
       "pruebas": {
         "aprobadas": 116,
         "fallidas": 0,
@@ -582,7 +582,7 @@
       "build": 17,
       "tipo": "verificacion-final",
       "resultado": "SUCCESS",
-      "url": "http://localhost:9090/job/vacations-service/17/",
+      "url": "http://localhost:9091/job/vacations-service/17/",
       "pruebas": {
         "aprobadas": 103,
         "fallidas": 0,
