@@ -16,6 +16,8 @@ values = {
     'CI_NETWORK': 'system_hr_ci',
     'CI_REPOSITORY_URL': 'https://github.com/MICROSERVICIOSUQ/System_HR.git',
     'CI_REPOSITORY_BRANCH': 'valentina',
+    'CI_GIT_USERNAME': '',
+    'CI_GIT_TOKEN': '',
 }
 missing = {key: value for key, value in values.items() if key not in keys}
 if missing:

@@ -292,6 +292,8 @@ services:
       CI_NETWORK: ${CI_NETWORK:-system_hr_ci}
       CI_REPOSITORY_URL: ${CI_REPOSITORY_URL:-https://github.com/MICROSERVICIOSUQ/System_HR.git}
       CI_REPOSITORY_BRANCH: ${CI_REPOSITORY_BRANCH:-valentina}
+      CI_GIT_USERNAME: ${CI_GIT_USERNAME:?Defina el usuario de GitHub en .env}
+      CI_GIT_TOKEN: ${CI_GIT_TOKEN:?Defina un PAT de solo lectura en .env}
     volumes:
       - jenkins_data:/var/jenkins_home
       - sonar_credentials:/run/sonar:ro

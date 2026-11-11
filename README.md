@@ -1256,6 +1256,9 @@ El usuario inicial es `admin`; las contraseñas generadas están en `.env`, en
 de Jenkins: JCasC crea el administrador y los dos jobs. Antes de ejecutar un
 pipeline, sube los archivos del reto a la rama indicada por
 `CI_REPOSITORY_BRANCH` y revisa `CI_REPOSITORY_URL`.
+Como el repositorio es privado, configura también `CI_GIT_USERNAME` y un PAT de
+GitHub con `Contents: Read-only` en `.env`; Jenkins lo carga como credencial SCM
+sin incluirlo en los archivos versionados.
 
 | Etapa | Reporte | Publicador | Consulta |
 |---|---|---|---|

@@ -34,6 +34,12 @@ credentials:
               id: sonar-token
               description: Token del análisis de System_HR
               secret: "${SONAR_TOKEN}"
+          - usernamePassword:
+              scope: GLOBAL
+              id: github-read-token
+              description: Acceso de solo lectura al repositorio de System_HR
+              username: "${CI_GIT_USERNAME}"
+              password: "${CI_GIT_TOKEN}"
 jobs:
   - script: |
       ['employees-service', 'vacations-service'].each { service ->
@@ -43,7 +49,10 @@ jobs:
                   cpsScm {
                       scm {
                           git {
-                              remote { url('${CI_REPOSITORY_URL}') }
+                              remote {
+                                  url('${CI_REPOSITORY_URL}')
+                                  credentials('github-read-token')
+                              }
                               branch('${CI_REPOSITORY_BRANCH}')
                           }
                       }

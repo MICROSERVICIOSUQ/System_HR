@@ -77,6 +77,8 @@ class ConfiguracionCI(unittest.TestCase):
             self.assertIn('JENKINS_ADMIN_PASSWORD=conservar\n', first)
             self.assertIn('# comentario con caracteres UTF-8: integración — Windows\n', first)
             self.assertIn('SONAR_ADMIN_PASSWORD=', first)
+            self.assertIn('CI_GIT_USERNAME=', first)
+            self.assertIn('CI_GIT_TOKEN=', first)
             if sys.platform != 'win32':
                 self.assertEqual((root / '.env').stat().st_mode & 0o777, 0o600)
 

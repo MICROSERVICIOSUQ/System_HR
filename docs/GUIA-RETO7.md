@@ -47,9 +47,13 @@ CI_REPOSITORY_BRANCH=valentina
 ```
 
 Si trabajas en otra rama, escribe su nombre. Jenkins descarga lo que está en Git;
-no puede ver cambios locales que todavía no se hayan subido. Para un repositorio
-privado habría que añadir una credencial Git a JCasC y referenciarla en los jobs.
-La configuración incluida usa la URL HTTPS pública del proyecto.
+no puede ver cambios locales que todavía no se hayan subido. El repositorio es
+privado: crea un fine-grained personal access token limitado a este repositorio
+con permiso **Contents: Read-only**, y guarda el nombre de usuario y el token en
+`CI_GIT_USERNAME` y `CI_GIT_TOKEN` dentro de `.env`. JCasC los carga como la
+credencial `github-read-token`; el token no se incluye en la URL, el Jenkinsfile
+ni el repositorio. No compartas ni registres el valor del token. Si se rota,
+actualiza `.env` y recrea Jenkins.
 
 ## 2. Levantar el entorno
 
